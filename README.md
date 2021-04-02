@@ -38,11 +38,34 @@ func main()  {
     // 也可以跟js一樣
     fmt.Println('a',"字串",2,3.14)
 
+    //another assign
+     i:=1
+
 ```
 
 ### input
 ```go
 fmt.Scanln(&圈圈叉叉變數)  
+
+```
+
+### if
+
+```go
+if true {
+    //判斷條件不用 括號 XD  其他跟java一樣
+    
+}
+
+```
+
+### for
+
+```go 
+for int  {
+    //判斷條件不用 括號 XD  其他跟java一樣
+    
+}
 
 ```
 
