@@ -47,6 +47,9 @@ func main()  {
 ```go
 fmt.Scanln(&圈圈叉叉變數)  
 
+// & 是address
+var x int
+fmt.Println(&x) // print address
 ```
 
 ### if
@@ -66,6 +69,21 @@ for int  {
     //判斷條件不用 括號 XD  其他跟java一樣
     
 }
+
+```
+
+### pointer
+
+```go
+	var x int = 5
+	fmt.Println(x) //5
+
+	fmt.Println(&x) //0xc0000160c8
+
+	var pointer *int = &x
+	fmt.Println(pointer) // 0xc0000160c8
+
+	fmt.Println(*pointer) //5
 
 ```
 
