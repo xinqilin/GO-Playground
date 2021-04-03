@@ -11,7 +11,8 @@ func main()  {
 }
 
 ```
-
+```go version```
+```go env```
 ```go build 檔名```
 ```go run 檔名   也可以 ./檔名```
 
@@ -80,6 +81,58 @@ for int  {
 }
 
 ```
+
+### switch
+
+```go
+
+//case中不需要{}來分隔
+
+//有點突兀的功能 fallthrough 進去後會接著執行下一個case
+
+ans := "a"
+switch ans {
+    case "a": 
+        fmt.Println("ans is a")
+        fallthrough
+    case "b":
+        fmt.Println("ans is b")
+    case "c":
+        fmt.Println("ans is c")
+    default:
+        fmt.Println("no answer")
+}
+
+// ans is a
+// ans is b
+
+
+myfriend := "Paul"
+switch myFriend {
+    case "Amy", "Emily",: 
+        fmt.Println("Hi, beautiful gril")
+    case "Tony", "Paul":
+        fmt.Println("Hi bro")
+}
+
+
+//Hi bro
+
+
+//BTW case內還可以在寫判斷式
+switch {
+    case myMoney > 500:
+        fmt.Println("buy Ferrari")
+    case myMoney > 250:
+        fmt.Println("buy BMW")
+    default
+        fmt.Println("buy Toyota")
+}
+
+
+
+```
+
 
 ### pointer
 
