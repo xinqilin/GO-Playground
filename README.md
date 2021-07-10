@@ -202,6 +202,18 @@ for k, v := range a {
 
 ```
 
+### _ -> ?
+
+``有時 slice 和 range 不需要 index 所以 用 "_" 省略掉``
+
+```go
+
+for _, num := range nums {
+		sum += num
+	}
+
+```
+
 
 ```reference https://ithelp.ithome.com.tw/articles/10187411   未完待續```
 
