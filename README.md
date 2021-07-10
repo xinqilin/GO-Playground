@@ -1,6 +1,16 @@
 # GO-practice
 - ctrl-shift-p -> go -> update -> select all 
 
+# build/run
+
+```go
+
+go build -> 產生執行檔
+
+go run <file.go>
+
+```
+
 ### 基本語法/操作
 ```go
 
