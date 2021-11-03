@@ -1,3 +1,6 @@
+# Resource
+https://github.com/jaywcjlove/golang-tutorial
+
 # GO-practice
 - ctrl-shift-p -> go -> update -> select all 
 
