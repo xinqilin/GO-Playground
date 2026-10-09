@@ -217,3 +217,36 @@ table.vs { width: 100%; border-collapse: collapse; font-size: 16px; line-height:
   .fig figcaption { font-size: 16px; }
   pre { font-size: 14px; padding: 12px 14px; }
 }
+
+/* 目錄頁 */
+.cover { padding-block: 48px 8px; }
+.cover .eyebrow { margin: 0 0 10px; font: 13px/1.4 var(--font-mono); letter-spacing: 0.08em; color: var(--muted); }
+.cover h1 { margin: 0; font-size: 52px; line-height: 1.1; text-wrap: balance; }
+.cover .lede { margin: 18px 0 0; max-width: 36rem; font-size: 20px; line-height: 1.7; color: var(--muted); }
+.cover .start { display: inline-block; margin-top: 20px; font-weight: 700; }
+.route { margin: 28px 0 0; }
+.route svg { display: block; width: 100%; height: auto; color: var(--fg); font-family: var(--font-body); }
+
+.toc { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 15rem), 1fr)); gap: 12px; margin: 0; padding: 0; list-style: none; }
+.toc a {
+  display: grid;
+  grid-template-columns: 2.4em minmax(0, 1fr);
+  column-gap: 10px;
+  height: 100%;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--fg);
+  text-decoration: none;
+}
+.toc a:hover { border-color: var(--accent); }
+.toc .n { grid-row: span 2; font: 700 20px/1.3 var(--font-mono); color: var(--accent); font-variant-numeric: tabular-nums; }
+.toc .t { font-weight: 700; line-height: 1.4; }
+.toc .d { font-size: 14px; line-height: 1.5; color: var(--muted); }
+.part-label { margin: 0 0 4px; font: 13px/1.4 var(--font-mono); letter-spacing: 0.08em; color: var(--muted); }
+
+@media (max-width: 560px) {
+  .cover h1 { font-size: 38px; }
+  .cover .lede { font-size: 18px; }
+}
