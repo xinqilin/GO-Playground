@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>並行網址檢查器｜Go 圖解手冊</title>
+<meta name="description" content="同時檢查多個網址：用 semaphore 限制同時數量、每個請求各自逾時，並用 interface 讓測試不碰網路。">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<header class="site">
+  <a href="index.html">Go 圖解手冊</a>
+  <span class="count">專題 3 / 4</span>
+</header>
+
+<main class="page">
+  <header class="hero">
+    <div class="num" aria-hidden="true">P3</div>
+    <p class="eyebrow">專題 · goroutine、semaphore、context、interface</p>
+    <h1>並行網址檢查器</h1>
+    <p class="analogy">一次派好幾個人去敲門，最慢的那一家不會拖住其他人。</p>
+  </header>
+
+  <section aria-labelledby="look">
+    <h2 id="look">看圖</h2>
+    <div class="figs">
+      <figure class="fig">
+        <svg viewBox="0 0 480 214" role="img" aria-label="三個網址經過最多兩張號碼牌的 semaphore 送出請求；ok.test 回 200，missing.test 回 404，slow.test 逾時；結果照輸入順序寫回">
+          <title>限制同時數量，各自逾時</title>
+          <rect class="soft" x="12" y="30" width="120" height="36" rx="6"/>
+          <rect class="soft" x="12" y="90" width="120" height="36" rx="6"/>
+          <rect class="soft" x="12" y="150" width="120" height="36" rx="6"/>
+          <text class="small mono" x="72" y="53" text-anchor="middle">ok.test</text>
+          <text class="small mono" x="72" y="113" text-anchor="middle">missing.test</text>
+          <text class="small mono" x="72" y="173" text-anchor="middle">slow.test</text>
+          <path class="wire" d="M132 48 H150 V168 H132 M132 108 H160"/>
+          <path class="tip" d="M170 108 L158 102 L158 114 Z"/>
+          <rect class="acc" x="170" y="50" width="90" height="116" rx="10"/>
+          <text class="small mono t-acc" x="215" y="72" text-anchor="middle">sem</text>
+          <rect class="hot" x="185" y="86" width="60" height="28" rx="4"/>
+          <rect class="hot" x="185" y="122" width="60" height="28" rx="4"/>
+          <text class="sm" x="215" y="190" text-anchor="middle">同時最多 2 個</text>
+          <path class="wire" d="M260 108 H280 M280 48 V168 M280 48 H290 M280 108 H290 M280 168 H290"/>
+          <path class="tip" d="M300 48 L290 42 L290 54 Z"/>
+          <path class="tip" d="M300 108 L290 102 L290 114 Z"/>
+          <path class="tip" d="M300 168 L290 162 L290 174 Z"/>
+          <rect class="acc" x="300" y="30" width="168" height="36" rx="6"/>
+          <rect class="hot" x="300" y="90" width="168" height="36" rx="6"/>
+          <rect class="hot" x="300" y="150" width="168" height="36" rx="6"/>
+          <text class="small mono" x="384" y="53" text-anchor="middle">OK 200</text>
+          <text class="small mono t-hot" x="384" y="113" text-anchor="middle">FAIL 404</text>
+          <text class="small t-hot" x="384" y="173" text-anchor="middle">FAIL 逾時</text>
+        </svg>
+        <figcaption>號碼牌限制同時的請求數，每個請求各有自己的逾時；慢的那個逾時失敗，不會拖住別人。結果照輸入的順序寫回。</figcaption>
+      </figure>
+
+      <figure class="fig">
+        <svg viewBox="0 0 480 216" role="img" aria-label="Check 只依賴 Fetcher interface；上線時接 httpFetcher 真的發請求，測試時接 fakeFetcher 回假結果">
+          <title>interface 讓測試不碰網路</title>
+          <rect class="acc" x="170" y="20" width="140" height="44" rx="8"/>
+          <text class="mono bold" x="240" y="48" text-anchor="middle">Check</text>
+          <path class="wire" d="M240 64 V78"/>
+          <path class="tip" d="M240 86 L234 75 L246 75 Z"/>
+          <rect class="wire dash" x="170" y="86" width="140" height="36" rx="8"/>
+          <text class="small mono" x="240" y="109" text-anchor="middle">Fetcher</text>
+          <path class="wire" d="M240 122 V136 H115 V150 M240 136 H365 V150"/>
+          <rect class="soft" x="40" y="150" width="150" height="36" rx="6"/>
+          <rect class="acc" x="290" y="150" width="150" height="36" rx="6"/>
+          <text class="small mono" x="115" y="173" text-anchor="middle">httpFetcher</text>
+          <text class="small mono" x="365" y="173" text-anchor="middle">fakeFetcher</text>
+          <text class="sm" x="115" y="206" text-anchor="middle">上線：真的發 HEAD 請求</text>
+          <text class="sm t-acc" x="365" y="206" text-anchor="middle">測試：照網址回假結果</text>
+        </svg>
+        <figcaption>Check 只認得 <code>Fetcher</code> 這個 interface。上線時接真的 HTTP，測試時接假的；測試不碰網路，又快又穩定。</figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <section aria-labelledby="code">
+    <h2 id="code">核心程式</h2>
+    <pre class="code"><code>func Check(ctx context.Context, urls []string, workers int, timeout time.Duration, f Fetcher) []Result {
+	results := make([]Result, len(urls))
+	sem := make(chan struct{}, max(workers, 1))
+	var wg sync.WaitGroup
+	for i, u := range urls {
+		wg.Go(func() {
+			select {
+			case sem &lt;- struct{}{}: <span class="c">// 拿到號碼牌才開始</span>
+			case &lt;-ctx.Done():
+				results[i] = Result{URL: u, Err: ctx.Err()}
+				return
+			}
+			defer func() { &lt;-sem }()
+
+			reqCtx, cancel := context.WithTimeout(ctx, timeout)
+			defer cancel()
+			start := time.Now()
+			status, err := f.Fetch(reqCtx, u)
+			results[i] = Result{URL: u, Status: status, Err: err, Took: time.Since(start)}
+		})
+	}
+	wg.Wait()
+	return results
+}</code></pre>
+    <p class="label">測試裡用假的 Fetcher 跑出的結果</p>
+    <pre class="out"><code>OK   200 https://ok.test
+FAIL 404 https://missing.test
+FAIL --- https://slow.test（context deadline exceeded）</code></pre>
+  </section>
+
+  <section aria-labelledby="notes">
+    <h2 id="notes">工程師筆記</h2>
+    <ul class="notes">
+      <li>每個 goroutine 把結果寫進 <code>results[i]</code> 自己的格子，順序和輸入一樣，也不需要加鎖。</li>
+      <li>每個請求用 <code>context.WithTimeout</code> 各自計時；外層 ctx 取消時，還沒拿到號碼牌的請求直接放棄。</li>
+      <li>用 HEAD 只拿狀態碼、不下載內容；有些網站不支援 HEAD 會回 405，可以改用 GET。</li>
+      <li><code>http.Client</code> 沒設 <code>Timeout</code>，因為逾時交給 context 控制；兩種方式擇一就好。</li>
+      <li>有任何失敗就用非 0 結束，接在 CI 或排程裡可以直接判斷成功或失敗。</li>
+      <li>測試用的 fakeFetcher 順便記錄同時執行的最大數量，用來驗證 semaphore 真的有限制住。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="run">
+    <h2 id="run">動手跑</h2>
+    <p class="label">在 repo 根目錄（需要網路）</p>
+    <pre class="shell"><code>go run ./projects/urlchecker -workers 4 -timeout 5s https://go.dev https://github.com
+go test -race ./projects/urlchecker   <span class="c"># 測試不需要網路</span></code></pre>
+    <p><a href="https://github.com/xinqilin/GO-Playground/tree/main/projects/urlchecker">在 GitHub 看完整程式碼</a></p>
+  </section>
+</main>
+
+<nav class="pager" aria-label="章節導覽">
+  <a class="prev" href="project-wordcount.html">← 專題：字詞統計</a>
+  <a class="home" href="index.html">目錄</a>
+  <a class="next" href="project-todoapi.html">專題：待辦事項 API →</a>
+</nav>
+</body>
+</html>

@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>待辦事項 API｜Go 圖解手冊</title>
+<meta name="description" content="只用標準庫做一個可以上線的 REST API：路由、JSON 驗證、middleware、panic 防護、Mutex 保護的資料，以及優雅關機。">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<header class="site">
+  <a href="index.html">Go 圖解手冊</a>
+  <span class="count">專題 4 / 4</span>
+</header>
+
+<main class="page">
+  <header class="hero">
+    <div class="num" aria-hidden="true">P4</div>
+    <p class="eyebrow">專題 · net/http、JSON、middleware、Mutex、優雅關機</p>
+    <h1>待辦事項 API</h1>
+    <p class="analogy">把前面學的全部組起來，做一個可以上線的小服務。</p>
+  </header>
+
+  <section aria-labelledby="look">
+    <h2 id="look">看圖</h2>
+    <div class="figs">
+      <figure class="fig">
+        <svg viewBox="0 0 480 226" role="img" aria-label="請求由外往內：recoverPanic 接住 panic，logRequests 記錄 log，ServeMux 依路由交給 handler，資料存在有 Mutex 保護的 Store">
+          <title>請求一層一層往內走</title>
+          <rect class="soft" x="12" y="96" width="80" height="60" rx="8"/>
+          <text class="small mono" x="52" y="131" text-anchor="middle">client</text>
+          <rect class="wire hot-ln dash" x="110" y="16" width="356" height="200" rx="16"/>
+          <text class="small mono t-hot" x="124" y="38">recoverPanic</text>
+          <rect class="wire acc-ln dash" x="130" y="48" width="316" height="156" rx="14"/>
+          <text class="small mono t-acc" x="144" y="70">logRequests</text>
+          <rect class="acc" x="150" y="80" width="160" height="112" rx="10"/>
+          <text class="small mono bold" x="160" y="102">ServeMux</text>
+          <text class="sm mono" x="160" y="126">GET /todos</text>
+          <text class="sm mono" x="160" y="148">POST /todos</text>
+          <text class="sm mono" x="160" y="170">PATCH /todos/{id}</text>
+          <path class="wire" d="M310 136 H320"/>
+          <path class="tip" d="M330 136 L320 130 L320 142 Z"/>
+          <rect class="soft" x="330" y="96" width="100" height="80" rx="10"/>
+          <text class="small mono bold" x="380" y="128" text-anchor="middle">Store</text>
+          <text class="sm" x="380" y="152" text-anchor="middle">Mutex 保護</text>
+          <path class="wire" d="M92 116 H140"/>
+          <path class="tip" d="M150 116 L138 110 L138 122 Z"/>
+          <path class="wire acc-ln dash" d="M150 146 H102"/>
+          <path class="tip acc-tip" d="M92 146 L104 140 L104 152 Z"/>
+        </svg>
+        <figcaption>每個請求由外往內走：最外層接住 panic，再記錄 log，然後由 ServeMux 交給 handler，資料存在有 Mutex 保護的 Store。</figcaption>
+      </figure>
+
+      <figure class="fig">
+        <svg viewBox="0 0 480 196" role="img" aria-label="收到 Ctrl-C 或 SIGTERM 後，server 不再接新連線，等進行中的請求做完，最多等 5 秒，然後才結束">
+          <title>優雅關機</title>
+          <text class="small t-hot" x="120" y="34" text-anchor="middle">Ctrl-C / SIGTERM</text>
+          <path class="wire hot-ln" d="M120 44 V150"/>
+          <rect class="acc" x="40" y="66" width="60" height="16" rx="4"/>
+          <rect class="acc" x="80" y="94" width="140" height="16" rx="4"/>
+          <rect class="wire hot-ln dash" x="150" y="122" width="56" height="16" rx="4"/>
+          <text class="sm t-hot" x="214" y="135">新連線不收</text>
+          <path class="wire acc-ln" d="M220 54 V150"/>
+          <text class="small t-acc" x="228" y="66">請求做完才結束</text>
+          <path class="wire" d="M20 150 H452"/>
+          <path class="tip" d="M462 150 L450 144 L450 156 Z"/>
+          <text class="sm" x="458" y="172" text-anchor="end">時間</text>
+          <path class="wire faint" d="M120 164 V170 H400 V164"/>
+          <text class="sm" x="260" y="188" text-anchor="middle">最多等 5 秒</text>
+        </svg>
+        <figcaption>收到中斷訊號後，<code>Shutdown</code> 先停止接新連線，再等進行中的請求做完（最多 5 秒），然後才結束程式。</figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <section aria-labelledby="code">
+    <h2 id="code">核心程式</h2>
+    <p class="label">main.go（節錄）</p>
+    <pre class="code"><code>ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+defer stop()
+
+errCh := make(chan error, 1)
+go func() {
+	if err := srv.ListenAndServe(); err != nil &amp;&amp; !errors.Is(err, http.ErrServerClosed) {
+		errCh &lt;- err <span class="c">// 例如 port 被占用</span>
+	}
+	close(errCh)
+}()
+
+select {
+case err := &lt;-errCh:
+	return err
+case &lt;-ctx.Done(): <span class="c">// 等到 Ctrl-C 或 SIGTERM</span>
+}
+
+shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+defer cancel()
+return srv.Shutdown(shutdownCtx)</code></pre>
+    <p class="label">測試裡用 httptest 跑一輪 CRUD 的結果</p>
+    <pre class="out"><code>POST /todos → 201 {"id":1,"title":"寫 Go 手冊","done":false}
+GET /todos → 200 [{"id":1,"title":"寫 Go 手冊","done":false}]
+PATCH /todos/1 → 200 {"id":1,"title":"寫 Go 手冊","done":true}
+DELETE /todos/1 → 204
+GET /todos/1 → 404 {"error":"找不到這筆待辦"}</code></pre>
+  </section>
+
+  <section aria-labelledby="notes">
+    <h2 id="notes">工程師筆記</h2>
+    <ul class="notes">
+      <li>handler 用到的東西（Store、logger）放進 <code>api</code> struct，測試時換一個丟掉 log 的 logger 就好，不需要全域變數。</li>
+      <li>狀態碼要講清楚：格式錯是 400，內容不合規則是 422，找不到是 404，方法不對是 405（ServeMux 自動處理）。</li>
+      <li><code>DisallowUnknownFields</code> 讓打錯欄位名稱的請求直接失敗；<code>MaxBytesReader</code> 限制 body 大小。</li>
+      <li>空清單回傳 <code>[]</code> 而不是 <code>null</code>：先 <code>make([]Todo, 0)</code>，前端就不用多一個判斷。</li>
+      <li><code>http.Server</code> 的四個逾時都設了；<code>Shutdown</code> 讓部署或重啟時不會砍斷進行中的請求。</li>
+      <li>資料只在記憶體裡，重啟就沒了。換成資料庫時，讓新的實作提供同樣的方法，handler 就不用改。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="java">
+    <h2 id="java">從 Java 來的你</h2>
+    <div class="table-wrap">
+      <table class="vs">
+        <thead><tr><th scope="col">主題</th><th scope="col">Spring Boot</th><th scope="col">Go</th></tr></thead>
+        <tbody>
+          <tr><th scope="row">框架</th><td class="java">Spring Boot + Spring Web</td><td>標準庫 <code>net/http</code></td></tr>
+          <tr><th scope="row">路由</th><td class="java"><code>@RestController</code>、<code>@GetMapping</code></td><td><code>mux.HandleFunc("GET /todos", a.list)</code></td></tr>
+          <tr><th scope="row">JSON</th><td class="java">Jackson 自動轉換</td><td><code>encoding/json</code>，自己呼叫 Encode / Decode</td></tr>
+          <tr><th scope="row">驗證</th><td class="java">Bean Validation（<code>@NotBlank</code>）</td><td>在 handler 裡自己檢查</td></tr>
+          <tr><th scope="row">例外處理</th><td class="java"><code>@ControllerAdvice</code></td><td>回傳值檢查，加上 recover middleware</td></tr>
+          <tr><th scope="row">優雅關機</th><td class="java"><code>server.shutdown=graceful</code></td><td><code>signal.NotifyContext</code> 加上 <code>srv.Shutdown</code></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section aria-labelledby="run">
+    <h2 id="run">動手跑</h2>
+    <p class="label">在 repo 根目錄啟動，再開另一個終端機</p>
+    <pre class="shell"><code>go run ./projects/todoapi
+
+curl -X POST -d '{"title":"寫 Go 手冊"}' localhost:8080/todos
+curl localhost:8080/todos
+curl -X PATCH -d '{"done":true}' localhost:8080/todos/1
+curl -X DELETE localhost:8080/todos/1
+go test -race ./projects/todoapi   <span class="c"># 用 httptest，不用開 server</span></code></pre>
+    <p><a href="https://github.com/xinqilin/GO-Playground/tree/main/projects/todoapi">在 GitHub 看完整程式碼</a></p>
+  </section>
+</main>
+
+<nav class="pager" aria-label="章節導覽">
+  <a class="prev" href="project-urlchecker.html">← 專題：網址檢查器</a>
+  <a class="home" href="index.html">目錄</a>
+  <span></span>
+</nav>
+</body>
+</html>

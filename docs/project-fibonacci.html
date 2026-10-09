@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>費氏數列｜Go 圖解手冊</title>
+<meta name="description" content="修好這個 repo 最早的 fibonacci 練習：無限遞迴、數列錯位、過時的 rand.Seed，並比較遞迴、迭代、記憶化三種寫法。">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<header class="site">
+  <a href="index.html">Go 圖解手冊</a>
+  <span class="count">專題 1 / 4</span>
+</header>
+
+<main class="page">
+  <header class="hero">
+    <div class="num" aria-hidden="true">P1</div>
+    <p class="eyebrow">專題 · 遞迴、迴圈、closure、benchmark</p>
+    <h1>費氏數列</h1>
+    <p class="analogy">這個 repo 最早的練習：先修好三個 bug，再比較三種寫法差多少。</p>
+  </header>
+
+  <section aria-labelledby="look">
+    <h2 id="look">看圖</h2>
+    <div class="figs">
+      <figure class="fig">
+        <svg viewBox="0 0 480 236" role="img" aria-label="舊版從 fib(0) 開始會一路呼叫 fib(-1)、fib(-2)，永遠停不下來；新版先處理 n 小於等於 0 回傳 0、n 等於 1 回傳 1">
+          <title>舊版為什麼停不下來</title>
+          <path class="wire faint" d="M240 12 V226"/>
+          <text class="small bold" x="117" y="24" text-anchor="middle">舊版</text>
+          <rect class="soft" x="57" y="40" width="120" height="32" rx="6"/>
+          <rect class="hot" x="57" y="96" width="120" height="32" rx="6"/>
+          <rect class="hot" x="57" y="152" width="120" height="32" rx="6"/>
+          <text class="small mono" x="117" y="61" text-anchor="middle">fib(0)</text>
+          <text class="small mono t-hot" x="117" y="117" text-anchor="middle">fib(-1)</text>
+          <text class="small mono t-hot" x="117" y="173" text-anchor="middle">fib(-2)</text>
+          <path class="wire hot-ln" d="M117 72 V86 M117 128 V142"/>
+          <path class="tip hot-tip" d="M117 94 L111 83 L123 83 Z"/>
+          <path class="tip hot-tip" d="M117 150 L111 139 L123 139 Z"/>
+          <text class="bold t-hot" x="117" y="212" text-anchor="middle">……stack overflow</text>
+
+          <text class="small bold" x="363" y="24" text-anchor="middle">新版</text>
+          <rect class="acc" x="283" y="40" width="160" height="32" rx="6"/>
+          <rect class="acc" x="283" y="86" width="160" height="32" rx="6"/>
+          <rect class="soft" x="263" y="132" width="200" height="32" rx="6"/>
+          <text class="small mono" x="363" y="61" text-anchor="middle">n ≤ 0 → 0</text>
+          <text class="small mono" x="363" y="107" text-anchor="middle">n == 1 → 1</text>
+          <text class="small mono" x="363" y="153" text-anchor="middle">F(n-1) + F(n-2)</text>
+          <text class="small t-acc" x="363" y="200" text-anchor="middle">遇到停止條件就往回算</text>
+        </svg>
+        <figcaption>舊版的停止條件只有 n == 1 或 n == 2，從 0 開始就一路往負數走，最後 stack overflow。新版先處理 n ≤ 0 和 n == 1。</figcaption>
+      </figure>
+
+      <figure class="fig">
+        <svg viewBox="0 0 480 216" role="img" aria-label="直接遞迴計算 F(5) 的呼叫樹，F(3) 和 F(2) 被重複計算好幾次">
+          <title>直接遞迴會重複計算</title>
+          <rect class="hot" x="380" y="20" width="16" height="16" rx="3"/>
+          <text class="sm" x="402" y="33">重複算的</text>
+          <path class="wire faint" d="M240 44 L140 70 M240 44 L340 70 M140 98 L80 124 M140 98 L200 124 M340 98 L300 124 M340 98 L380 124 M80 152 L50 178 M80 152 L110 178 M200 152 L175 178 M200 152 L225 178 M300 152 L275 178 M300 152 L325 178"/>
+          <rect class="acc" x="214" y="16" width="52" height="28" rx="6"/>
+          <rect class="soft" x="114" y="70" width="52" height="28" rx="6"/>
+          <rect class="hot" x="314" y="70" width="52" height="28" rx="6"/>
+          <rect class="hot" x="54" y="124" width="52" height="28" rx="6"/>
+          <rect class="hot" x="174" y="124" width="52" height="28" rx="6"/>
+          <rect class="hot" x="274" y="124" width="52" height="28" rx="6"/>
+          <rect class="soft" x="354" y="124" width="52" height="28" rx="6"/>
+          <rect class="hot" x="28" y="178" width="44" height="28" rx="6"/>
+          <rect class="soft" x="88" y="178" width="44" height="28" rx="6"/>
+          <rect class="soft" x="153" y="178" width="44" height="28" rx="6"/>
+          <rect class="soft" x="203" y="178" width="44" height="28" rx="6"/>
+          <rect class="soft" x="253" y="178" width="44" height="28" rx="6"/>
+          <rect class="soft" x="303" y="178" width="44" height="28" rx="6"/>
+          <text class="small mono" x="240" y="35" text-anchor="middle">F(5)</text>
+          <text class="small mono" x="140" y="89" text-anchor="middle">F(4)</text>
+          <text class="small mono" x="340" y="89" text-anchor="middle">F(3)</text>
+          <text class="small mono" x="80" y="143" text-anchor="middle">F(3)</text>
+          <text class="small mono" x="200" y="143" text-anchor="middle">F(2)</text>
+          <text class="small mono" x="300" y="143" text-anchor="middle">F(2)</text>
+          <text class="small mono" x="380" y="143" text-anchor="middle">F(1)</text>
+          <text class="small mono" x="50" y="197" text-anchor="middle">F(2)</text>
+          <text class="small mono" x="110" y="197" text-anchor="middle">F(1)</text>
+          <text class="small mono" x="175" y="197" text-anchor="middle">F(1)</text>
+          <text class="small mono" x="225" y="197" text-anchor="middle">F(0)</text>
+          <text class="small mono" x="275" y="197" text-anchor="middle">F(1)</text>
+          <text class="small mono" x="325" y="197" text-anchor="middle">F(0)</text>
+        </svg>
+        <figcaption>照定義直接遞迴，F(3)、F(2) 會被算好幾次；n 每加 1，工作量大約變成 1.6 倍。迭代或記憶化每一項只算一次。</figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <section aria-labelledby="code">
+    <h2 id="code">核心程式</h2>
+    <pre class="code"><code>func Recursive(n int) int {
+	if n &lt;= 0 {
+		return 0
+	}
+	if n == 1 {
+		return 1
+	}
+	return Recursive(n-1) + Recursive(n-2)
+}
+
+func Iterative(n int) int {
+	a, b := 0, 1
+	for range max(n, 0) {
+		a, b = b, a+b
+	}
+	return a
+}</code></pre>
+    <p class="label">go run ./projects/fibonacci -n 30</p>
+    <pre class="out"><code>F(30)
+迭代： 832040
+記憶化： 832040
+遞迴： 832040</code></pre>
+    <p class="label">go test -run='^$' -bench=. ./projects/fibonacci（本機 Apple Silicon）</p>
+    <pre class="out"><code>BenchmarkRecursive25-10    	    3604	    329268 ns/op
+BenchmarkIterative25-10    	127197861	         9.433 ns/op</code></pre>
+  </section>
+
+  <section aria-labelledby="notes">
+    <h2 id="notes">工程師筆記</h2>
+    <ul class="notes">
+      <li>遞迴先寫停止條件，而且要涵蓋所有可能的輸入，包括 0 和負數；測試表格裡也要放這些邊界值。</li>
+      <li>舊版的 <code>rand.Seed(time.Now().UnixNano())</code> 不用再寫：Go 1.20 起 <code>math/rand</code> 會自動用隨機種子，新程式建議直接用 <code>math/rand/v2</code>。</li>
+      <li>64 位元的 <code>int</code> 最多放得下 F(92)；再大就會溢位，要改用 <code>math/big</code>。</li>
+      <li>把參數解析和輸出放進 <code>run(args, out)</code>，<code>main</code> 只負責接上 <code>os.Args</code> 和 <code>os.Stdout</code>，測試就能直接呼叫 <code>run</code>。</li>
+      <li>同樣算 F(25)，遞迴比迭代慢了三萬倍以上。先找對演算法，再談最佳化。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="run">
+    <h2 id="run">動手跑</h2>
+    <p class="label">在 repo 根目錄</p>
+    <pre class="shell"><code>go run ./projects/fibonacci -n 30
+go test ./projects/fibonacci
+go test -run='^$' -bench=. ./projects/fibonacci</code></pre>
+    <p><a href="https://github.com/xinqilin/GO-Playground/tree/main/projects/fibonacci">在 GitHub 看完整程式碼</a></p>
+  </section>
+</main>
+
+<nav class="pager" aria-label="章節導覽">
+  <a class="prev" href="24-toolchain.html">← 24 工具鏈</a>
+  <a class="home" href="index.html">目錄</a>
+  <a class="next" href="project-wordcount.html">專題：字詞統計 →</a>
+</nav>
+</body>
+</html>
