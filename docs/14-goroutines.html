@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>goroutine｜Go 圖解手冊</title>
+<meta name="description" content="goroutine 入門：main 不會等 goroutine、用 sync.WaitGroup 與 Go 1.25 的 wg.Go 等待完成，以及把工作切段平行處理。">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<header class="site">
+  <a href="index.html">Go 圖解手冊</a>
+  <span class="count">14 / 24</span>
+</header>
+
+<main class="page">
+  <header class="hero">
+    <div class="num" aria-hidden="true">14</div>
+    <p class="eyebrow">Part 3 · 並行 · 第 14 章</p>
+    <h1>goroutine</h1>
+    <p class="analogy">goroutine 是很便宜的分身：在函式呼叫前面加上 go，它就在背景自己跑。</p>
+  </header>
+
+  <section aria-labelledby="look">
+    <h2 id="look">看圖</h2>
+    <div class="figs">
+      <figure class="fig">
+        <svg viewBox="0 0 480 264" role="img" aria-label="沒有等待時，main 一結束程式就結束，goroutine 還沒做完就被砍掉；用 wg.Wait 時，main 會等 goroutine 做完才結束">
+          <title>main 不等人</title>
+          <text class="small bold" x="16" y="24">沒有等待</text>
+          <text class="small mono" x="16" y="51">main</text>
+          <rect class="acc" x="80" y="36" width="180" height="20" rx="4"/>
+          <text class="small mono" x="16" y="85">go f()</text>
+          <rect class="acc" x="160" y="70" width="100" height="20" rx="4"/>
+          <rect class="wire hot-ln dash" x="260" y="70" width="140" height="20" rx="4"/>
+          <path class="wire hot-ln" d="M260 28 V100"/>
+          <text class="small t-hot" x="268" y="118">main 結束，整個程式跟著結束</text>
+
+          <text class="small bold" x="16" y="160">wg.Wait()</text>
+          <text class="small mono" x="16" y="187">main</text>
+          <rect class="acc" x="80" y="172" width="180" height="20" rx="4"/>
+          <rect class="soft" x="260" y="172" width="140" height="20" rx="4"/>
+          <text class="sm" x="330" y="187" text-anchor="middle">Wait</text>
+          <text class="small mono" x="16" y="221">go f()</text>
+          <rect class="acc" x="160" y="206" width="240" height="20" rx="4"/>
+          <path class="wire acc-ln" d="M400 164 V236"/>
+          <text class="small t-acc" x="400" y="254" text-anchor="end">全部做完才結束</text>
+        </svg>
+        <figcaption>main 一結束，整個程式就結束，還在跑的 goroutine 會被直接砍掉。要等它們做完，用 <code>sync.WaitGroup</code>。</figcaption>
+      </figure>
+
+      <figure class="fig">
+        <svg viewBox="0 0 480 250" role="img" aria-label="1 到 1000 切成 4 段，每段由一個 goroutine 加總成小計，4 個小計再加起來得到 500500">
+          <title>一個工作切給多個 goroutine</title>
+          <rect class="soft" x="20" y="30" width="110" height="40"/>
+          <rect class="soft" x="130" y="30" width="110" height="40"/>
+          <rect class="soft" x="240" y="30" width="110" height="40"/>
+          <rect class="soft" x="350" y="30" width="110" height="40"/>
+          <text class="small mono" x="75" y="55" text-anchor="middle">1–250</text>
+          <text class="small mono" x="185" y="55" text-anchor="middle">251–500</text>
+          <text class="small mono" x="295" y="55" text-anchor="middle">501–750</text>
+          <text class="small mono" x="405" y="55" text-anchor="middle">751–1000</text>
+          <path class="wire" d="M75 70 V98 M185 70 V98 M295 70 V98 M405 70 V98"/>
+          <path class="tip" d="M75 108 L68 95 L82 95 Z"/>
+          <path class="tip" d="M185 108 L178 95 L192 95 Z"/>
+          <path class="tip" d="M295 108 L288 95 L302 95 Z"/>
+          <path class="tip" d="M405 108 L398 95 L412 95 Z"/>
+          <rect class="acc" x="30" y="110" width="90" height="40" rx="20"/>
+          <rect class="acc" x="140" y="110" width="90" height="40" rx="20"/>
+          <rect class="acc" x="250" y="110" width="90" height="40" rx="20"/>
+          <rect class="acc" x="360" y="110" width="90" height="40" rx="20"/>
+          <text class="small mono" x="75" y="135" text-anchor="middle">31375</text>
+          <text class="small mono" x="185" y="135" text-anchor="middle">93875</text>
+          <text class="small mono" x="295" y="135" text-anchor="middle">156375</text>
+          <text class="small mono" x="405" y="135" text-anchor="middle">218875</text>
+          <path class="wire" d="M75 150 V170 H405 V150 M185 150 V170 M295 150 V170 M240 170 V188"/>
+          <path class="tip" d="M240 198 L233 185 L247 185 Z"/>
+          <rect class="hot" x="170" y="200" width="140" height="40" rx="6"/>
+          <text class="bold t-hot" x="240" y="226" text-anchor="middle">500500</text>
+        </svg>
+        <figcaption>把 1 到 1000 切成 4 段，每段交給一個 goroutine 加總，最後把 4 個小計加起來。每個 goroutine 只寫自己的格子，不會互相干擾。</figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <section aria-labelledby="code">
+    <h2 id="code">最小範例</h2>
+    <pre class="code"><code>func main() {
+	nums := []int{1, 2, 3, 4}
+	out := make([]int, len(nums))
+	var wg sync.WaitGroup
+	for i, n := range nums {
+		wg.Go(func() { out[i] = n * n }) <span class="c">// Go 1.25 起的寫法</span>
+	}
+	wg.Wait() <span class="c">// 等全部做完</span>
+	fmt.Println(out)
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out"><code>[1 4 9 16]</code></pre>
+  </section>
+
+  <section aria-labelledby="notes">
+    <h2 id="notes">工程師筆記</h2>
+    <ul class="notes">
+      <li>main 結束程式就結束，不會等 goroutine；要等就用 <code>sync.WaitGroup</code>。Go 1.25 起可以直接 <code>wg.Go(f)</code>。</li>
+      <li>用傳統的 <code>wg.Add(1)</code> 時，要在 <code>go</code> 之前呼叫，不能放進 goroutine 裡。</li>
+      <li>每個 goroutine 都要有結束的方式。卡在 channel 上永遠等不到的 goroutine 會一直佔著記憶體，叫 goroutine leak。</li>
+      <li>多個 goroutine 寫同一個 slice 的不同格子沒問題；寫同一個變數就要加鎖（第 17 章）。</li>
+      <li>Go 1.22 起，迴圈變數每一圈都是新的一份，直接在 goroutine 裡用不會全部拿到最後一個值。</li>
+      <li>同時跑在幾個 CPU 上由 <code>GOMAXPROCS</code> 決定，預設是 CPU 數；在 Linux 上還會參考容器（cgroup）的 CPU 限制。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="java">
+    <h2 id="java">從 Java 來的你</h2>
+    <div class="table-wrap">
+      <table class="vs">
+        <thead><tr><th scope="col">主題</th><th scope="col">Java</th><th scope="col">Go</th></tr></thead>
+        <tbody>
+          <tr><th scope="row">執行單位</th><td class="java"><code>Thread</code>，一條平台執行緒的 stack 約 1MB</td><td>goroutine，起始 stack 只有幾 KB，可以開上萬個</td></tr>
+          <tr><th scope="row">啟動</th><td class="java"><code>executor.submit(task)</code></td><td><code>go f()</code></td></tr>
+          <tr><th scope="row">等待完成</th><td class="java"><code>CountDownLatch</code>、<code>Future.get()</code></td><td><code>sync.WaitGroup</code></td></tr>
+          <tr><th scope="row">輕量執行緒</th><td class="java">Java 21 的 virtual thread</td><td>goroutine 從一開始就是這種模型</td></tr>
+          <tr><th scope="row">回傳值</th><td class="java"><code>Future&lt;T&gt;</code></td><td>沒有回傳值，用 channel 或各自寫進自己的格子</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section aria-labelledby="run">
+    <h2 id="run">動手跑</h2>
+    <p class="label">在 repo 根目錄</p>
+    <pre class="shell"><code>go run ./chapters/14-goroutines
+go test -race ./chapters/14-goroutines</code></pre>
+    <p><a href="https://github.com/xinqilin/GO-Playground/tree/main/chapters/14-goroutines">在 GitHub 看完整程式碼</a></p>
+  </section>
+</main>
+
+<nav class="pager" aria-label="章節導覽">
+  <a class="prev" href="13-iterators.html">← 13 疊代器</a>
+  <a class="home" href="index.html">目錄</a>
+  <a class="next" href="15-channels.html">15 channel →</a>
+</nav>
+</body>
+</html>

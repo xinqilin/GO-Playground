@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>並行模式｜Go 圖解手冊</title>
+<meta name="description" content="常用的 Go 並行模式：worker pool、fan-in，以及用有緩衝 channel 當 semaphore 限制同時數量。">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<header class="site">
+  <a href="index.html">Go 圖解手冊</a>
+  <span class="count">19 / 24</span>
+</header>
+
+<main class="page">
+  <header class="hero">
+    <div class="num" aria-hidden="true">19</div>
+    <p class="eyebrow">Part 3 · 並行 · 第 19 章</p>
+    <h1>並行模式</h1>
+    <p class="analogy">把前幾章的零件組起來：固定人數的工班、匯流的輸送帶、有限的號碼牌。</p>
+  </header>
+
+  <section aria-labelledby="look">
+    <h2 id="look">看圖</h2>
+    <div class="figs">
+      <figure class="fig">
+        <svg viewBox="0 0 480 236" role="img" aria-label="worker pool：五個工作從 jobCh 發給三個 worker，結果從 resCh 收回來，依編號排序後得到 1 4 9 16 25">
+          <title>worker pool</title>
+          <rect class="soft" x="16" y="30" width="60" height="34"/>
+          <rect class="soft" x="16" y="66" width="60" height="34"/>
+          <rect class="soft" x="16" y="102" width="60" height="34"/>
+          <rect class="soft" x="16" y="138" width="60" height="34"/>
+          <rect class="soft" x="16" y="174" width="60" height="34"/>
+          <text class="mono" x="46" y="53" text-anchor="middle">1</text>
+          <text class="mono" x="46" y="89" text-anchor="middle">2</text>
+          <text class="mono" x="46" y="125" text-anchor="middle">3</text>
+          <text class="mono" x="46" y="161" text-anchor="middle">4</text>
+          <text class="mono" x="46" y="197" text-anchor="middle">5</text>
+          <text class="sm mono" x="104" y="110" text-anchor="middle">jobCh</text>
+          <path class="wire" d="M76 120 H134 M134 60 V180 M134 60 H144 M134 180 H144 M134 120 H144"/>
+          <path class="tip" d="M154 60 L143 54 L143 66 Z"/>
+          <path class="tip" d="M154 120 L143 114 L143 126 Z"/>
+          <path class="tip" d="M154 180 L143 174 L143 186 Z"/>
+          <circle class="acc" cx="180" cy="60" r="26"/>
+          <circle class="acc" cx="180" cy="120" r="26"/>
+          <circle class="acc" cx="180" cy="180" r="26"/>
+          <text class="small bold t-acc" x="180" y="65" text-anchor="middle">W1</text>
+          <text class="small bold t-acc" x="180" y="125" text-anchor="middle">W2</text>
+          <text class="small bold t-acc" x="180" y="185" text-anchor="middle">W3</text>
+          <text class="sm" x="180" y="226" text-anchor="middle">固定 3 個 worker</text>
+          <path class="wire" d="M206 60 H240 M206 120 H240 M206 180 H240 M240 60 V180 M240 120 H262"/>
+          <path class="tip" d="M274 120 L262 114 L262 126 Z"/>
+          <text class="sm mono" x="256" y="110" text-anchor="middle">resCh</text>
+          <rect class="acc" x="276" y="90" width="110" height="60" rx="10"/>
+          <text class="small" x="331" y="116" text-anchor="middle">收集</text>
+          <text class="small" x="331" y="136" text-anchor="middle">依編號排序</text>
+          <path class="wire" d="M331 150 V176"/>
+          <path class="tip" d="M331 186 L324 173 L338 173 Z"/>
+          <text class="small mono bold t-acc" x="331" y="208" text-anchor="middle">1 4 9 16 25</text>
+        </svg>
+        <figcaption>worker pool 用固定數量的 worker 消化工作：工作從 jobCh 發下去，結果從 resCh 收回來，最後依編號排好。</figcaption>
+      </figure>
+
+      <figure class="fig">
+        <svg viewBox="0 0 480 190" role="img" aria-label="容量 3 的 channel 當號碼牌；三張都被拿走時，T1 到 T3 在跑，T4 到 T6 在外面等">
+          <title>semaphore 號碼牌</title>
+          <text class="sm mono t-acc" x="240" y="20" text-anchor="middle">sem := make(chan struct{}, 3)</text>
+          <rect class="acc" x="170" y="30" width="140" height="60" rx="10"/>
+          <rect class="hot" x="184" y="44" width="30" height="32" rx="4"/>
+          <rect class="hot" x="225" y="44" width="30" height="32" rx="4"/>
+          <rect class="hot" x="266" y="44" width="30" height="32" rx="4"/>
+          <circle class="acc" cx="200" cy="130" r="18"/>
+          <circle class="acc" cx="240" cy="130" r="18"/>
+          <circle class="acc" cx="280" cy="130" r="18"/>
+          <text class="sm bold t-acc" x="200" y="135" text-anchor="middle">T1</text>
+          <text class="sm bold t-acc" x="240" y="135" text-anchor="middle">T2</text>
+          <text class="sm bold t-acc" x="280" y="135" text-anchor="middle">T3</text>
+          <text class="sm t-acc" x="240" y="174" text-anchor="middle">拿到號碼牌，正在跑</text>
+          <circle class="soft" cx="120" cy="130" r="18"/>
+          <circle class="soft" cx="76" cy="130" r="18"/>
+          <circle class="soft" cx="32" cy="130" r="18"/>
+          <text class="sm bold" x="120" y="135" text-anchor="middle">T4</text>
+          <text class="sm bold" x="76" y="135" text-anchor="middle">T5</text>
+          <text class="sm bold" x="32" y="135" text-anchor="middle">T6</text>
+          <text class="sm t-hot" x="76" y="174" text-anchor="middle">沒有號碼牌，等</text>
+          <path class="wire acc-ln" d="M300 130 H350 V60 H318"/>
+          <path class="tip acc-tip" d="M310 60 L322 54 L322 66 Z"/>
+          <text class="sm t-acc" x="358" y="100">做完歸還</text>
+        </svg>
+        <figcaption>有緩衝的 channel 當號碼牌：放得進去才能開始，做完拿出來還回去。容量 3，同時就最多 3 個在跑。</figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <section aria-labelledby="code">
+    <h2 id="code">最小範例</h2>
+    <pre class="code"><code>func main() {
+	jobs := make(chan int)
+	results := make(chan int)
+	var wg sync.WaitGroup
+	for range 3 { <span class="c">// 固定 3 個 worker</span>
+		wg.Go(func() {
+			for n := range jobs {
+				results &lt;- n * n
+			}
+		})
+	}
+	go func() { <span class="c">// 派工，派完就關</span>
+		for n := range 5 {
+			jobs &lt;- n + 1
+		}
+		close(jobs)
+	}()
+	go func() { wg.Wait(); close(results) }() <span class="c">// worker 都結束才關結果</span>
+	sum := 0
+	for r := range results {
+		sum += r
+	}
+	fmt.Println(sum)
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out"><code>55</code></pre>
+  </section>
+
+  <section aria-labelledby="notes">
+    <h2 id="notes">工程師筆記</h2>
+    <ul class="notes">
+      <li>worker 數量固定，工作再多 goroutine 也不會暴增；CPU 密集的工作用 CPU 數，I/O 密集可以多一些。</li>
+      <li>誰關哪個 channel 要講清楚：派工的 goroutine 關 jobs，所有 worker 結束後再關 results。</li>
+      <li>每個可能卡住的送出都要搭配 <code>ctx.Done()</code>，取消時 goroutine 才能收工，不會洩漏。</li>
+      <li>並行結果的順序不固定；需要順序就帶著編號，最後再排序。</li>
+      <li>需要「任何一個出錯就全部取消」時，用 <code>golang.org/x/sync/errgroup</code>，它的 <code>SetLimit</code> 也能限制同時數量。</li>
+      <li>先寫循序版本，量過真的太慢再改成並行；並行版本一定要用 <code>-race</code> 測過。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="java">
+    <h2 id="java">從 Java 來的你</h2>
+    <div class="table-wrap">
+      <table class="vs">
+        <thead><tr><th scope="col">主題</th><th scope="col">Java</th><th scope="col">Go</th></tr></thead>
+        <tbody>
+          <tr><th scope="row">執行緒池</th><td class="java"><code>Executors.newFixedThreadPool(n)</code></td><td>n 個 goroutine 讀同一個 channel</td></tr>
+          <tr><th scope="row">限制同時數量</th><td class="java"><code>Semaphore</code></td><td>有緩衝的 channel</td></tr>
+          <tr><th scope="row">等全部完成</th><td class="java"><code>invokeAll</code>、<code>CompletableFuture.allOf</code></td><td><code>sync.WaitGroup</code>；要收集錯誤用 <code>errgroup</code></td></tr>
+          <tr><th scope="row">串流處理</th><td class="java"><code>stream().parallel()</code></td><td>自己用 channel 接成管線</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section aria-labelledby="run">
+    <h2 id="run">動手跑</h2>
+    <p class="label">在 repo 根目錄</p>
+    <pre class="shell"><code>go run ./chapters/19-concurrency-patterns
+go test -race ./chapters/19-concurrency-patterns</code></pre>
+    <p><a href="https://github.com/xinqilin/GO-Playground/tree/main/chapters/19-concurrency-patterns">在 GitHub 看完整程式碼</a></p>
+  </section>
+</main>
+
+<nav class="pager" aria-label="章節導覽">
+  <a class="prev" href="18-context.html">← 18 context</a>
+  <a class="home" href="index.html">目錄</a>
+  <a class="next" href="20-packages-modules.html">20 package 與 module →</a>
+</nav>
+</body>
+</html>

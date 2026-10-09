@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>字詞統計｜Go 圖解手冊</title>
+<meta name="description" content="用 bufio.Scanner、map 和排序做一個字詞統計工具，並用 cmp.Or 讓排序結果固定。">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<header class="site">
+  <a href="index.html">Go 圖解手冊</a>
+  <span class="count">專題 2 / 4</span>
+</header>
+
+<main class="page">
+  <header class="hero">
+    <div class="num" aria-hidden="true">P2</div>
+    <p class="eyebrow">專題 · Scanner、map、排序</p>
+    <h1>字詞統計</h1>
+    <p class="analogy">把一段文字倒進去，數出哪些字最常出現。</p>
+  </header>
+
+  <section aria-labelledby="look">
+    <h2 id="look">看圖</h2>
+    <div class="figs">
+      <figure class="fig">
+        <svg viewBox="0 0 480 170" role="img" aria-label="資料流：Scanner 切成行，Fields 切成字，正規化轉小寫去標點，map 計數，最後排序取前幾名">
+          <title>字詞統計的資料流</title>
+          <rect class="soft" x="10" y="40" width="84" height="60" rx="8"/>
+          <rect class="soft" x="104" y="40" width="84" height="60" rx="8"/>
+          <rect class="soft" x="198" y="40" width="84" height="60" rx="8"/>
+          <rect class="soft" x="292" y="40" width="84" height="60" rx="8"/>
+          <rect class="acc" x="386" y="40" width="84" height="60" rx="8"/>
+          <text class="small mono bold" x="52" y="66" text-anchor="middle">Scanner</text>
+          <text class="sm" x="52" y="88" text-anchor="middle">切成行</text>
+          <text class="small mono bold" x="146" y="66" text-anchor="middle">Fields</text>
+          <text class="sm" x="146" y="88" text-anchor="middle">切成字</text>
+          <text class="small bold" x="240" y="66" text-anchor="middle">正規化</text>
+          <text class="sm" x="240" y="88" text-anchor="middle">小寫、去標點</text>
+          <text class="small mono bold" x="334" y="66" text-anchor="middle">map</text>
+          <text class="sm" x="334" y="88" text-anchor="middle">計數</text>
+          <text class="small bold" x="428" y="66" text-anchor="middle">排序</text>
+          <text class="sm" x="428" y="88" text-anchor="middle">取前 N 名</text>
+          <path class="wire" d="M94 70 H98 M188 70 H192 M282 70 H286 M376 70 H380"/>
+          <path class="tip" d="M104 70 L96 65 L96 75 Z"/>
+          <path class="tip" d="M198 70 L190 65 L190 75 Z"/>
+          <path class="tip" d="M292 70 L284 65 L284 75 Z"/>
+          <path class="tip" d="M386 70 L378 65 L378 75 Z"/>
+          <text class="sm mono" x="52" y="130" text-anchor="middle">一行一行</text>
+          <text class="sm mono" x="146" y="130" text-anchor="middle">"GO."</text>
+          <text class="sm mono" x="240" y="130" text-anchor="middle">"go"</text>
+          <text class="sm mono" x="334" y="130" text-anchor="middle">go: 5</text>
+          <text class="sm mono t-acc" x="428" y="130" text-anchor="middle">go 5</text>
+        </svg>
+        <figcaption>資料一路往右流：切行、切字、正規化、計數，最後排序取前幾名。每一站都是前面章節學過的工具。</figcaption>
+      </figure>
+
+      <figure class="fig">
+        <svg viewBox="0 0 480 200" role="img" aria-label="排序前是 fun 1、go 5、fast 1、is 2；排序後先比次數再比字母，得到 go 5、is 2、fast 1、fun 1">
+          <title>兩個排序條件</title>
+          <rect class="soft" x="30" y="24" width="120" height="34" rx="6"/>
+          <rect class="soft" x="30" y="64" width="120" height="34" rx="6"/>
+          <rect class="soft" x="30" y="104" width="120" height="34" rx="6"/>
+          <rect class="soft" x="30" y="144" width="120" height="34" rx="6"/>
+          <text class="small mono" x="90" y="46" text-anchor="middle">fun 1</text>
+          <text class="small mono" x="90" y="86" text-anchor="middle">go 5</text>
+          <text class="small mono" x="90" y="126" text-anchor="middle">fast 1</text>
+          <text class="small mono" x="90" y="166" text-anchor="middle">is 2</text>
+          <path class="wire" d="M160 101 H300"/>
+          <path class="tip" d="M312 101 L300 95 L300 107 Z"/>
+          <text class="sm mono" x="236" y="90" text-anchor="middle">cmp.Or(次數, 字母)</text>
+          <rect class="acc" x="320" y="24" width="120" height="34" rx="6"/>
+          <rect class="acc" x="320" y="64" width="120" height="34" rx="6"/>
+          <rect class="hot" x="320" y="104" width="120" height="34" rx="6"/>
+          <rect class="hot" x="320" y="144" width="120" height="34" rx="6"/>
+          <text class="small mono" x="380" y="46" text-anchor="middle">go 5</text>
+          <text class="small mono" x="380" y="86" text-anchor="middle">is 2</text>
+          <text class="small mono" x="380" y="126" text-anchor="middle">fast 1</text>
+          <text class="small mono" x="380" y="166" text-anchor="middle">fun 1</text>
+          <text class="sm t-hot" x="236" y="150" text-anchor="middle">次數一樣，照字母排</text>
+        </svg>
+        <figcaption>排序有兩個條件：先比次數（多的在前），一樣多再比字母。用 <code>cmp.Or</code> 把條件串起來，結果每次都一樣。</figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <section aria-labelledby="code">
+    <h2 id="code">核心程式</h2>
+    <pre class="code"><code>func Top(counts map[string]int, n int) []WordCount {
+	all := make([]WordCount, 0, len(counts))
+	for w, c := range counts {
+		all = append(all, WordCount{w, c})
+	}
+	slices.SortFunc(all, func(a, b WordCount) int {
+		return cmp.Or(
+			cmp.Compare(b.Count, a.Count), <span class="c">// 次數多的在前</span>
+			cmp.Compare(a.Word, b.Word),   <span class="c">// 次數一樣就照字母</span>
+		)
+	})
+	return all[:min(n, len(all))]
+}</code></pre>
+    <p class="label">輸入（測試用的範例文字）</p>
+    <pre class="out"><code>Go is fun. Go is fast!
+The gopher says: go, go, GO.</code></pre>
+    <p class="label">-top 3 的輸出</p>
+    <pre class="out"><code>行數 2，字數 12，字元數 50
+go       5
+is       2
+fast     1</code></pre>
+  </section>
+
+  <section aria-labelledby="notes">
+    <h2 id="notes">工程師筆記</h2>
+    <ul class="notes">
+      <li>map 的走訪順序不固定，輸出前一定要排序；排序條件要能分出先後，結果才會穩定。</li>
+      <li><code>cmp.Or</code>（Go 1.22）回傳第一個不是零值的參數，拿來串多個排序條件剛好。</li>
+      <li><code>strings.Fields</code> 依空白切字；中文句子之間沒有空白，要做中文斷詞得用專門的套件。</li>
+      <li><code>bufio.Scanner</code> 預設一行最多 64KB；要處理更長的行，用 <code>sc.Buffer</code> 調大。</li>
+      <li><code>%-8s</code> 的寬度是用 rune 數算的，中文字在終端機佔兩格，對齊會跑掉。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="run">
+    <h2 id="run">動手跑</h2>
+    <p class="label">在 repo 根目錄</p>
+    <pre class="shell"><code>go run ./projects/wordcount -top 5 &lt; README.md
+go test ./projects/wordcount</code></pre>
+    <p><a href="https://github.com/xinqilin/GO-Playground/tree/main/projects/wordcount">在 GitHub 看完整程式碼</a></p>
+  </section>
+</main>
+
+<nav class="pager" aria-label="章節導覽">
+  <a class="prev" href="project-fibonacci.html">← 專題：費氏數列</a>
+  <a class="home" href="index.html">目錄</a>
+  <a class="next" href="project-urlchecker.html">專題：網址檢查器 →</a>
+</nav>
+</body>
+</html>

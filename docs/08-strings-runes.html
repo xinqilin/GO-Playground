@@ -1,0 +1,197 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>字串與 rune｜Go 圖解手冊</title>
+<meta name="description" content="Go 字串是 UTF-8 的 byte 序列：len 與字數的差別、索引與 range 的差別，以及用 strings.Builder 組字串。">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<header class="site">
+  <a href="index.html">Go 圖解手冊</a>
+  <span class="count">08 / 24</span>
+</header>
+
+<main class="page">
+  <header class="hero">
+    <div class="num" aria-hidden="true">08</div>
+    <p class="eyebrow">Part 1 · 基礎 · 第 08 章</p>
+    <h1>字串與 rune</h1>
+    <p class="analogy">字串是一排唯讀的 byte；一個中文字要 3 個 byte 才裝得下。</p>
+  </header>
+
+  <section aria-labelledby="look">
+    <h2 id="look">看圖</h2>
+    <div class="figs">
+      <figure class="fig">
+        <svg viewBox="0 0 480 214" role="img" aria-label="Go語言 在記憶體裡是 8 個 byte：G 和 o 各 1 個，語和言各 3 個，所以 len 是 8，但只有 4 個字">
+          <title>Go語言 有幾個 byte</title>
+          <text class="mono" x="26" y="34">len(s) == 8</text>
+          <text class="mono t-acc" x="26" y="62">utf8.RuneCountInString(s) == 4</text>
+          <rect class="soft" x="26" y="96" width="50" height="46" rx="4"/>
+          <rect class="soft" x="80" y="96" width="50" height="46" rx="4"/>
+          <rect class="acc" x="134" y="96" width="50" height="46" rx="4"/>
+          <rect class="acc" x="188" y="96" width="50" height="46" rx="4"/>
+          <rect class="acc" x="242" y="96" width="50" height="46" rx="4"/>
+          <rect class="acc" x="296" y="96" width="50" height="46" rx="4"/>
+          <rect class="acc" x="350" y="96" width="50" height="46" rx="4"/>
+          <rect class="acc" x="404" y="96" width="50" height="46" rx="4"/>
+          <text class="small mono" x="51" y="124" text-anchor="middle">47</text>
+          <text class="small mono" x="105" y="124" text-anchor="middle">6F</text>
+          <text class="small mono" x="159" y="124" text-anchor="middle">E8</text>
+          <text class="small mono" x="213" y="124" text-anchor="middle">AA</text>
+          <text class="small mono" x="267" y="124" text-anchor="middle">9E</text>
+          <text class="small mono" x="321" y="124" text-anchor="middle">E8</text>
+          <text class="small mono" x="375" y="124" text-anchor="middle">A8</text>
+          <text class="small mono" x="429" y="124" text-anchor="middle">80</text>
+          <text class="sm mono" x="51" y="88" text-anchor="middle">0</text>
+          <text class="sm mono" x="105" y="88" text-anchor="middle">1</text>
+          <text class="sm mono" x="159" y="88" text-anchor="middle">2</text>
+          <text class="sm mono" x="213" y="88" text-anchor="middle">3</text>
+          <text class="sm mono" x="267" y="88" text-anchor="middle">4</text>
+          <text class="sm mono" x="321" y="88" text-anchor="middle">5</text>
+          <text class="sm mono" x="375" y="88" text-anchor="middle">6</text>
+          <text class="sm mono" x="429" y="88" text-anchor="middle">7</text>
+          <path class="wire" d="M28 150 V158 H74 V150 M82 150 V158 H128 V150"/>
+          <path class="wire acc-ln" d="M136 150 V158 H290 V150 M298 150 V158 H452 V150"/>
+          <text class="lg" x="51" y="198" text-anchor="middle">G</text>
+          <text class="lg" x="105" y="198" text-anchor="middle">o</text>
+          <text class="lg t-acc" x="213" y="198" text-anchor="middle">語</text>
+          <text class="lg t-acc" x="375" y="198" text-anchor="middle">言</text>
+        </svg>
+        <figcaption>字串存的是 UTF-8 的 byte：英文字 1 個 byte，中文字 3 個。所以 <code>len</code> 是 8，但只有 4 個字。</figcaption>
+      </figure>
+
+      <figure class="fig">
+        <svg viewBox="0 0 480 212" role="img" aria-label="s[2] 只拿到語的第一個 byte 232；range 一次拿一整個字，i 是 2 時 r 是語，i 是 5 時 r 是言">
+          <title>索引拿 byte，range 拿整個字</title>
+          <text class="mono bold t-hot" x="159" y="30" text-anchor="middle">s[2]</text>
+          <text class="small t-hot" x="190" y="30">= 232，只是半個字</text>
+          <path class="wire hot-ln" d="M159 38 V70"/>
+          <path class="tip hot-tip" d="M159 80 L152 67 L166 67 Z"/>
+          <rect class="soft" x="26" y="86" width="50" height="42" rx="4"/>
+          <rect class="soft" x="80" y="86" width="50" height="42" rx="4"/>
+          <rect class="hot" x="134" y="86" width="50" height="42" rx="4"/>
+          <rect class="soft" x="188" y="86" width="50" height="42" rx="4"/>
+          <rect class="soft" x="242" y="86" width="50" height="42" rx="4"/>
+          <rect class="soft" x="296" y="86" width="50" height="42" rx="4"/>
+          <rect class="soft" x="350" y="86" width="50" height="42" rx="4"/>
+          <rect class="soft" x="404" y="86" width="50" height="42" rx="4"/>
+          <text class="small mono" x="51" y="112" text-anchor="middle">47</text>
+          <text class="small mono" x="105" y="112" text-anchor="middle">6F</text>
+          <text class="small mono" x="159" y="112" text-anchor="middle">E8</text>
+          <text class="small mono" x="213" y="112" text-anchor="middle">AA</text>
+          <text class="small mono" x="267" y="112" text-anchor="middle">9E</text>
+          <text class="small mono" x="321" y="112" text-anchor="middle">E8</text>
+          <text class="small mono" x="375" y="112" text-anchor="middle">A8</text>
+          <text class="small mono" x="429" y="112" text-anchor="middle">80</text>
+          <path class="wire acc-ln" d="M136 136 V144 H290 V136 M298 136 V144 H452 V136"/>
+          <text class="small mono t-acc" x="213" y="166" text-anchor="middle">i=2  r='語'</text>
+          <text class="small mono t-acc" x="375" y="166" text-anchor="middle">i=5  r='言'</text>
+          <text class="small" x="240" y="200" text-anchor="middle">range 一次拿一個完整的字（rune）</text>
+        </svg>
+        <figcaption><code>s[i]</code> 拿到的是一個 byte，可能只是半個字；<code>range</code> 一次拿一整個字，<code>i</code> 是它的 byte 位置。</figcaption>
+      </figure>
+
+      <figure class="fig">
+        <svg viewBox="0 0 480 252" role="img" aria-label="用加號串接，每一步都產生新的字串並複製；strings.Builder 在同一塊空間往後寫，最後才變成字串">
+          <title>組字串：加號與 Builder</title>
+          <path class="wire faint" d="M240 12 V240"/>
+          <text class="small mono" x="120" y="30" text-anchor="middle">s += "Go"</text>
+          <rect class="soft dash" x="40" y="50" width="48" height="40" rx="4"/>
+          <rect class="soft dash" x="40" y="104" width="84" height="40" rx="4"/>
+          <rect class="soft" x="40" y="158" width="120" height="40" rx="4"/>
+          <text class="mono" x="64" y="76" text-anchor="middle">Go</text>
+          <text class="mono" x="82" y="130" text-anchor="middle">GoGo</text>
+          <text class="mono" x="100" y="184" text-anchor="middle">GoGoGo</text>
+          <text class="sm t-hot" x="120" y="236" text-anchor="middle">每一步都配置新字串並複製</text>
+
+          <text class="small mono" x="360" y="30" text-anchor="middle">strings.Builder</text>
+          <text class="sm mono" x="360" y="64" text-anchor="middle">b.WriteString("Go")</text>
+          <rect class="acc" x="262" y="80" width="196" height="56" rx="6"/>
+          <path class="wire faint" d="M327 84 V132 M392 84 V132"/>
+          <text class="mono" x="294" y="114" text-anchor="middle">Go</text>
+          <text class="mono" x="360" y="114" text-anchor="middle">Go</text>
+          <text class="mono" x="425" y="114" text-anchor="middle">Go</text>
+          <path class="wire" d="M360 140 V172"/>
+          <path class="tip" d="M360 184 L353 171 L367 171 Z"/>
+          <text class="sm mono" x="370" y="164">b.String()</text>
+          <text class="mono bold" x="360" y="208" text-anchor="middle">GoGoGo</text>
+          <text class="sm t-acc" x="360" y="236" text-anchor="middle">同一塊空間往後寫</text>
+        </svg>
+        <figcaption>字串不能修改，用 <code>+</code> 串接每次都要複製一份新的；在迴圈裡組字串，用 <code>strings.Builder</code>。</figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <section aria-labelledby="code">
+    <h2 id="code">最小範例</h2>
+    <pre class="code"><code>func main() {
+	s := "Go語言"
+	fmt.Println(len(s), utf8.RuneCountInString(s))
+	fmt.Println(s[2]) <span class="c">// 一個 byte，不是「語」</span>
+	for i, r := range s {
+		fmt.Println(i, string(r))
+	}
+	var b strings.Builder
+	for range 3 {
+		b.WriteString("Go")
+	}
+	fmt.Println(b.String())
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out"><code>8 4
+232
+0 G
+1 o
+2 語
+5 言
+GoGoGo</code></pre>
+  </section>
+
+  <section aria-labelledby="notes">
+    <h2 id="notes">工程師筆記</h2>
+    <ul class="notes">
+      <li><code>len(s)</code> 是 byte 數，不是字數；算字數用 <code>utf8.RuneCountInString</code>。</li>
+      <li>字串不能修改，<code>s[0] = 'g'</code> 編譯不過；要改就轉成 <code>[]byte</code> 或 <code>[]rune</code>，改完再轉回來。這兩種轉換都會複製資料。</li>
+      <li><code>s[i:j]</code> 用的是 byte 位置，切在中文字中間會得到亂碼。</li>
+      <li><code>string(rune(65))</code> 是 <code>"A"</code> 而不是 <code>"65"</code>；數字轉文字用 <code>strconv.Itoa</code>。直接寫 <code>string(65)</code> 時 <code>go vet</code> 會警告。</li>
+      <li>字串可以直接用 <code>==</code>、<code>&lt;</code> 比較，比的是 byte。</li>
+      <li>反引號字串不處理跳脫字元，還可以跨行，寫正規表示式、JSON、SQL 都很方便。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="java">
+    <h2 id="java">從 Java 來的你</h2>
+    <div class="table-wrap">
+      <table class="vs">
+        <thead><tr><th scope="col">主題</th><th scope="col">Java</th><th scope="col">Go</th></tr></thead>
+        <tbody>
+          <tr><th scope="row">內部編碼</th><td class="java">UTF-16，<code>char</code> 是 16 bit</td><td>UTF-8；<code>byte</code> 8 bit、<code>rune</code> 32 bit</td></tr>
+          <tr><th scope="row">長度</th><td class="java"><code>"語言".length()</code> 是 2</td><td><code>len("語言")</code> 是 6</td></tr>
+          <tr><th scope="row">不可變</th><td class="java">是</td><td>是</td></tr>
+          <tr><th scope="row">組字串</th><td class="java"><code>StringBuilder</code></td><td><code>strings.Builder</code></td></tr>
+          <tr><th scope="row">數字與字串</th><td class="java"><code>String.valueOf</code> / <code>Integer.parseInt</code></td><td><code>strconv.Itoa</code> / <code>strconv.Atoi</code></td></tr>
+          <tr><th scope="row">多行字串</th><td class="java">text block <code>"""</code></td><td>反引號 <code>`…`</code></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section aria-labelledby="run">
+    <h2 id="run">動手跑</h2>
+    <p class="label">在 repo 根目錄</p>
+    <pre class="shell"><code>go run ./chapters/08-strings-runes
+go test ./chapters/08-strings-runes</code></pre>
+    <p><a href="https://github.com/xinqilin/GO-Playground/tree/main/chapters/08-strings-runes">在 GitHub 看完整程式碼</a></p>
+  </section>
+</main>
+
+<nav class="pager" aria-label="章節導覽">
+  <a class="prev" href="07-maps.html">← 07 map</a>
+  <a class="home" href="index.html">目錄</a>
+  <a class="next" href="09-structs-methods.html">09 struct 與方法 →</a>
+</nav>
+</body>
+</html>

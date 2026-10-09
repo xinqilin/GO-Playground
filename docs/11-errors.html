@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>錯誤處理｜Go 圖解手冊</title>
+<meta name="description" content="Go 的錯誤處理：error 是值、用 %w 包裝、errors.Is 與 errors.As 的差別，以及 panic 與 recover。">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<header class="site">
+  <a href="index.html">Go 圖解手冊</a>
+  <span class="count">11 / 24</span>
+</header>
+
+<main class="page">
+  <header class="hero">
+    <div class="num" aria-hidden="true">11</div>
+    <p class="eyebrow">Part 2 · 型別系統 · 第 11 章</p>
+    <h1>錯誤處理</h1>
+    <p class="analogy">錯誤是一個普通的值：函式把它交給你，你決定要處理還是往上交。</p>
+  </header>
+
+  <section aria-labelledby="look">
+    <h2 id="look">看圖</h2>
+    <div class="figs">
+      <figure class="fig">
+        <svg viewBox="0 0 480 246" role="img" aria-label="錯誤像俄羅斯娃娃一層包一層：下單失敗包著查庫存，查庫存包著最裡面的 ErrNotFound；errors.Is 一層一層打開去找">
+          <title>錯誤一層一層包起來</title>
+          <rect class="soft" x="16" y="20" width="448" height="210" rx="14"/>
+          <text class="small mono" x="32" y="46">下單失敗：%w</text>
+          <rect class="soft" x="40" y="62" width="400" height="144" rx="12"/>
+          <text class="small mono" x="56" y="88">查庫存 "香蕉"：%w</text>
+          <rect class="hot" x="64" y="106" width="220" height="76" rx="10"/>
+          <text class="mono bold t-hot" x="174" y="140" text-anchor="middle">ErrNotFound</text>
+          <text class="small" x="174" y="166" text-anchor="middle">找不到</text>
+          <path class="wire acc-ln" d="M420 144 H302"/>
+          <path class="tip acc-tip" d="M290 144 L302 138 L302 150 Z"/>
+          <text class="small mono t-acc" x="360" y="132" text-anchor="middle">errors.Is</text>
+          <text class="sm" x="360" y="172" text-anchor="middle">一層層往內找</text>
+        </svg>
+        <figcaption>每一層用 <code>%w</code> 把下面的錯誤包起來，再補上自己的說明。<code>errors.Is</code> 會一層一層打開，找到最裡面的 <code>ErrNotFound</code>。</figcaption>
+      </figure>
+
+      <figure class="fig">
+        <svg viewBox="0 0 480 252" role="img" aria-label="errors.Is 比對是不是同一個錯誤值；errors.As 檢查是不是某種錯誤型別，是的話取出來讀它的欄位">
+          <title>Is 比對值，As 取出型別</title>
+          <path class="wire faint" d="M240 12 V242"/>
+          <text class="mono bold" x="117" y="28" text-anchor="middle">errors.Is</text>
+          <text class="sm" x="117" y="50" text-anchor="middle">是不是同一個錯誤值</text>
+          <rect class="hot" x="24" y="72" width="186" height="40" rx="6"/>
+          <text class="small mono" x="117" y="97" text-anchor="middle">ErrNotFound</text>
+          <text class="bold" x="117" y="142" text-anchor="middle">==</text>
+          <rect class="acc" x="24" y="156" width="186" height="40" rx="6"/>
+          <text class="small mono" x="117" y="181" text-anchor="middle">ErrNotFound</text>
+          <text class="bold t-acc" x="117" y="230" text-anchor="middle">true</text>
+
+          <text class="mono bold" x="363" y="28" text-anchor="middle">errors.As</text>
+          <text class="sm" x="363" y="50" text-anchor="middle">是不是這種型別，是就取出來</text>
+          <rect class="hot" x="270" y="72" width="186" height="64" rx="6"/>
+          <text class="small mono" x="363" y="97" text-anchor="middle">*ValidationError</text>
+          <text class="small mono" x="363" y="122" text-anchor="middle">Field: qty  Value: -1</text>
+          <path class="wire" d="M363 140 V164"/>
+          <path class="tip" d="M363 174 L356 161 L370 161 Z"/>
+          <rect class="acc" x="270" y="178" width="186" height="40" rx="6"/>
+          <text class="small mono" x="363" y="203" text-anchor="middle">ve.Field == "qty"</text>
+          <text class="sm" x="363" y="244" text-anchor="middle">Go 1.26 起也可以用 errors.AsType</text>
+        </svg>
+        <figcaption><code>errors.Is</code> 問「是不是這個錯誤」；<code>errors.As</code> 問「是不是這種錯誤」，是的話把它取出來，讀裡面的欄位。</figcaption>
+      </figure>
+
+      <figure class="fig">
+        <svg viewBox="0 0 480 256" role="img" aria-label="a 除以 0 發生 panic，沿著呼叫鏈往上，被 safeDivide 裡 defer 的 recover 接住，轉成 error 回傳給 main">
+          <title>panic 與 recover</title>
+          <rect class="soft" x="120" y="16" width="240" height="46" rx="8"/>
+          <text class="mono" x="240" y="45" text-anchor="middle">main</text>
+          <path class="wire acc-ln" d="M240 92 V74"/>
+          <path class="tip acc-tip" d="M240 64 L233 77 L247 77 Z"/>
+          <text class="small t-acc" x="250" y="84">回傳 error</text>
+          <rect class="acc" x="120" y="92" width="240" height="56" rx="8"/>
+          <text class="mono" x="240" y="117" text-anchor="middle">safeDivide</text>
+          <text class="small mono t-acc" x="240" y="139" text-anchor="middle">defer + recover()</text>
+          <path class="wire acc-ln dash" d="M130 172 H350"/>
+          <text class="small t-acc" x="140" y="166">recover 接住</text>
+          <path class="wire hot-ln" d="M300 196 V188"/>
+          <path class="tip hot-tip" d="M300 176 L293 189 L307 189 Z"/>
+          <text class="small bold t-hot" x="312" y="192">panic</text>
+          <rect class="hot" x="120" y="196" width="240" height="50" rx="8"/>
+          <text class="mono t-hot" x="240" y="227" text-anchor="middle">a / b，b 是 0</text>
+        </svg>
+        <figcaption>panic 會沿著呼叫鏈往上衝，直到被 defer 裡的 <code>recover</code> 接住。接住之後轉成 error 回傳，程式就不會整個掛掉。</figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <section aria-labelledby="code">
+    <h2 id="code">最小範例</h2>
+    <pre class="code"><code>var ErrNotFound = errors.New("找不到")
+
+func find(name string) error {
+	return fmt.Errorf("查詢 %q：%w", name, ErrNotFound)
+}
+
+func main() {
+	err := fmt.Errorf("下單失敗：%w", find("香蕉"))
+	fmt.Println(err)
+	fmt.Println(errors.Is(err, ErrNotFound))
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out"><code>下單失敗：查詢 "香蕉"：找不到
+true</code></pre>
+  </section>
+
+  <section aria-labelledby="notes">
+    <h2 id="notes">工程師筆記</h2>
+    <ul class="notes">
+      <li><code>if err != nil { return … }</code> 是日常。每一層補上自己的說明再往上傳，最後的錯誤訊息就是完整的路徑。</li>
+      <li>包裝用 <code>%w</code>，呼叫端才能用 <code>errors.Is</code> / <code>errors.As</code> 找到原本的錯誤；用 <code>%v</code> 只會變成一段文字。</li>
+      <li>呼叫端需要分辨的狀況用 sentinel error（<code>var ErrNotFound = errors.New(…)</code>）；需要帶資料就用自訂錯誤型別。</li>
+      <li>Go 1.26 起有 <code>errors.AsType[*T](err)</code>，不用先宣告一個變數；多個錯誤可以用 <code>errors.Join</code> 合在一起。</li>
+      <li>一個錯誤只處理一次：要嘛處理掉（記 log、降級），要嘛往上傳，不要兩件事都做。</li>
+      <li><code>panic</code> 留給程式寫錯的狀況；<code>recover</code> 只在 defer 裡有效，通常只放在 goroutine 或 HTTP handler 的最外層。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="java">
+    <h2 id="java">從 Java 來的你</h2>
+    <div class="table-wrap">
+      <table class="vs">
+        <thead><tr><th scope="col">主題</th><th scope="col">Java</th><th scope="col">Go</th></tr></thead>
+        <tbody>
+          <tr><th scope="row">錯誤傳遞</th><td class="java">丟例外，沿呼叫鏈往上找 catch</td><td>回傳 <code>error</code> 值，每一層自己檢查</td></tr>
+          <tr><th scope="row">checked exception</th><td class="java">要宣告 <code>throws</code></td><td>沒有；簽名上的 <code>error</code> 就是宣告</td></tr>
+          <tr><th scope="row">保留原因</th><td class="java"><code>new RuntimeException("…", cause)</code></td><td><code>fmt.Errorf("…：%w", err)</code></td></tr>
+          <tr><th scope="row">判斷種類</th><td class="java"><code>catch (NotFoundException e)</code></td><td><code>errors.Is</code> / <code>errors.As</code></td></tr>
+          <tr><th scope="row">不可恢復</th><td class="java"><code>Error</code>、沒人接的 <code>RuntimeException</code></td><td><code>panic</code>，可在 defer 裡用 <code>recover</code> 接住</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section aria-labelledby="run">
+    <h2 id="run">動手跑</h2>
+    <p class="label">在 repo 根目錄</p>
+    <pre class="shell"><code>go run ./chapters/11-errors
+go test ./chapters/11-errors</code></pre>
+    <p><a href="https://github.com/xinqilin/GO-Playground/tree/main/chapters/11-errors">在 GitHub 看完整程式碼</a></p>
+  </section>
+</main>
+
+<nav class="pager" aria-label="章節導覽">
+  <a class="prev" href="10-interfaces.html">← 10 interface</a>
+  <a class="home" href="index.html">目錄</a>
+  <a class="next" href="12-generics.html">12 泛型 →</a>
+</nav>
+</body>
+</html>

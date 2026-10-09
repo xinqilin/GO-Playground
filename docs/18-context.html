@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>context｜Go 圖解手冊</title>
+<meta name="description" content="Go 的 context：取消與逾時如何沿著樹往下傳、ctx.Err 與 context.Cause，以及 WithValue 的使用時機。">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<header class="site">
+  <a href="index.html">Go 圖解手冊</a>
+  <span class="count">18 / 24</span>
+</header>
+
+<main class="page">
+  <header class="hero">
+    <div class="num" aria-hidden="true">18</div>
+    <p class="eyebrow">Part 3 · 並行 · 第 18 章</p>
+    <h1>context</h1>
+    <p class="analogy">context 是一條往下傳的取消繩：上層一拉，拿著這條繩子的工作都知道該停了。</p>
+  </header>
+
+  <section aria-labelledby="look">
+    <h2 id="look">看圖</h2>
+    <div class="figs">
+      <figure class="fig">
+        <svg viewBox="0 0 480 240" role="img" aria-label="context 是一棵樹：取消 WithCancel 節點，它底下的 WithTimeout 和 WithValue 都會收到 Done，上面的 Background 不受影響">
+          <title>取消會往下傳</title>
+          <rect class="soft" x="170" y="16" width="140" height="36" rx="6"/>
+          <text class="small mono" x="240" y="39" text-anchor="middle">Background()</text>
+          <path class="wire" d="M240 52 V84"/>
+          <rect class="hot" x="170" y="84" width="140" height="36" rx="6"/>
+          <text class="small mono" x="240" y="107" text-anchor="middle">WithCancel</text>
+          <text class="small bold t-hot" x="322" y="107">cancel()</text>
+          <path class="wire hot-ln" d="M240 120 V138 H135 V156 M240 138 H345 V156"/>
+          <rect class="hot" x="60" y="156" width="150" height="36" rx="6"/>
+          <rect class="hot" x="270" y="156" width="150" height="36" rx="6"/>
+          <text class="small mono" x="135" y="179" text-anchor="middle">WithTimeout</text>
+          <text class="small mono" x="345" y="179" text-anchor="middle">WithValue</text>
+          <text class="sm t-hot" x="135" y="220" text-anchor="middle">工作 A 收到 Done</text>
+          <text class="sm t-hot" x="345" y="220" text-anchor="middle">工作 B 收到 Done</text>
+        </svg>
+        <figcaption>context 是一棵樹。取消某一個節點，它底下的所有節點都會一起收到 Done；上面的節點不受影響。</figcaption>
+      </figure>
+
+      <figure class="fig">
+        <svg viewBox="0 0 480 176" role="img" aria-label="WithTimeout 設 50 毫秒；工作原本要做一小時，時間一到 Done 關閉，工作放棄並回傳 context deadline exceeded">
+          <title>逾時：時間一到就拉繩子</title>
+          <rect class="acc" x="40" y="60" width="120" height="24" rx="4"/>
+          <rect class="soft dash" x="160" y="60" width="280" height="24" rx="4"/>
+          <text class="sm" x="300" y="77" text-anchor="middle">原本要做 1 小時</text>
+          <path class="wire" d="M40 120 H440"/>
+          <path class="tip" d="M452 120 L440 114 L440 126 Z"/>
+          <text class="sm mono" x="40" y="140" text-anchor="middle">0</text>
+          <text class="sm" x="446" y="144" text-anchor="end">時間</text>
+          <path class="wire hot-ln" d="M160 44 V128"/>
+          <text class="small t-hot" x="168" y="46">Done() 關閉</text>
+          <text class="sm mono t-hot" x="160" y="140" text-anchor="middle">50ms</text>
+          <text class="small mono t-hot" x="160" y="166" text-anchor="middle">context deadline exceeded</text>
+        </svg>
+        <figcaption><code>WithTimeout</code> 時間一到，<code>ctx.Done()</code> 就會關閉，正在等的工作馬上放棄，回傳 <code>context.DeadlineExceeded</code>。</figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <section aria-labelledby="code">
+    <h2 id="code">最小範例</h2>
+    <pre class="code"><code>func slowWork(ctx context.Context) error {
+	select {
+	case &lt;-time.After(time.Hour):
+		return nil
+	case &lt;-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func main() {
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	fmt.Println(slowWork(ctx))
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out"><code>context deadline exceeded</code></pre>
+  </section>
+
+  <section aria-labelledby="notes">
+    <h2 id="notes">工程師筆記</h2>
+    <ul class="notes">
+      <li>context 一律當第一個參數傳：<code>func Do(ctx context.Context, …)</code>，不要存在 struct 裡。</li>
+      <li>拿到 <code>cancel</code> 就 <code>defer cancel()</code>，逾時版本也一樣，否則計時器要等到時間到才會釋放。</li>
+      <li>取消是請求不是強制：被呼叫的函式要自己檢查 <code>ctx.Done()</code>，或把 ctx 交給會檢查的函式（<code>http.NewRequestWithContext</code>、資料庫查詢等）。</li>
+      <li><code>ctx.Err()</code> 只告訴你是取消還是逾時；想留下原因，用 <code>WithCancelCause</code> 搭配 <code>context.Cause</code>。</li>
+      <li><code>WithValue</code> 只放 request 範圍的資料（request ID、登入資訊），不要拿來傳一般參數；key 用不匯出的型別。</li>
+      <li>沒有上層 context 時用 <code>context.Background()</code>；還沒想好要傳什麼時用 <code>context.TODO()</code> 做記號。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="java">
+    <h2 id="java">從 Java 來的你</h2>
+    <div class="table-wrap">
+      <table class="vs">
+        <thead><tr><th scope="col">主題</th><th scope="col">Java</th><th scope="col">Go</th></tr></thead>
+        <tbody>
+          <tr><th scope="row">取消工作</th><td class="java"><code>Future.cancel(true)</code>、interrupt</td><td><code>context.WithCancel</code>，呼叫 <code>cancel()</code></td></tr>
+          <tr><th scope="row">逾時</th><td class="java"><code>future.get(timeout)</code>、各個 client 自己設定</td><td><code>context.WithTimeout</code>，一路往下傳</td></tr>
+          <tr><th scope="row">請求範圍的值</th><td class="java"><code>ThreadLocal</code></td><td><code>context.WithValue</code></td></tr>
+          <tr><th scope="row">怎麼傳</th><td class="java">隱含在執行緒上</td><td>明確當成第一個參數</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section aria-labelledby="run">
+    <h2 id="run">動手跑</h2>
+    <p class="label">在 repo 根目錄</p>
+    <pre class="shell"><code>go run ./chapters/18-context
+go test -race ./chapters/18-context</code></pre>
+    <p><a href="https://github.com/xinqilin/GO-Playground/tree/main/chapters/18-context">在 GitHub 看完整程式碼</a></p>
+  </section>
+</main>
+
+<nav class="pager" aria-label="章節導覽">
+  <a class="prev" href="17-sync.html">← 17 sync 與 data race</a>
+  <a class="home" href="index.html">目錄</a>
+  <a class="next" href="19-concurrency-patterns.html">19 並行模式 →</a>
+</nav>
+</body>
+</html>

@@ -1,0 +1,193 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>陣列與切片｜Go 圖解手冊</title>
+<meta name="description" content="Go 的陣列與 slice：slice header 的 ptr、len、cap，append 何時搬家，以及共用底層陣列的陷阱。">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<header class="site">
+  <a href="index.html">Go 圖解手冊</a>
+  <span class="count">06 / 24</span>
+</header>
+
+<main class="page">
+  <header class="hero">
+    <div class="num" aria-hidden="true">06</div>
+    <p class="eyebrow">Part 1 · 基礎 · 第 06 章</p>
+    <h1>陣列與切片</h1>
+    <p class="analogy">陣列是一排固定的格子；slice 是看向這排格子的一扇窗。</p>
+  </header>
+
+  <section aria-labelledby="look">
+    <h2 id="look">看圖</h2>
+    <div class="figs">
+      <figure class="fig">
+        <svg viewBox="0 0 480 282" role="img" aria-label="s := arr[1:4] 的 slice header 有三格：ptr 指向陣列第 1 格，len 是 3，cap 是 4；窗戶框住 20、30、40">
+          <title>slice 是一扇窗</title>
+          <text class="small mono" x="240" y="26" text-anchor="middle">s := arr[1:4]</text>
+          <rect class="acc" x="120" y="40" width="80" height="50"/>
+          <rect class="acc" x="200" y="40" width="80" height="50"/>
+          <rect class="acc" x="280" y="40" width="80" height="50"/>
+          <text class="mono" x="160" y="71" text-anchor="middle">ptr</text>
+          <text class="mono" x="240" y="71" text-anchor="middle">len 3</text>
+          <text class="mono" x="320" y="71" text-anchor="middle">cap 4</text>
+          <path class="wire acc-ln" d="M156 90 V134"/>
+          <path class="tip acc-tip" d="M156 144 L149 131 L163 131 Z"/>
+          <rect class="soft" x="32" y="146" width="80" height="50"/>
+          <rect class="soft" x="116" y="146" width="80" height="50"/>
+          <rect class="soft" x="200" y="146" width="80" height="50"/>
+          <rect class="soft" x="284" y="146" width="80" height="50"/>
+          <rect class="soft" x="368" y="146" width="80" height="50"/>
+          <text class="lg" x="72" y="182" text-anchor="middle">10</text>
+          <text class="lg" x="156" y="182" text-anchor="middle">20</text>
+          <text class="lg" x="240" y="182" text-anchor="middle">30</text>
+          <text class="lg" x="324" y="182" text-anchor="middle">40</text>
+          <text class="lg" x="408" y="182" text-anchor="middle">50</text>
+          <rect class="wire hot-ln" x="110" y="140" width="260" height="62" rx="8"/>
+          <path class="wire acc-ln" d="M116 210 V218 H364 V210"/>
+          <text class="sm t-acc" x="240" y="236" text-anchor="middle">len 3：看得到的格子</text>
+          <path class="wire" d="M116 246 V254 H448 V246"/>
+          <text class="sm" x="282" y="272" text-anchor="middle">cap 4：從起點到陣列結尾</text>
+        </svg>
+        <figcaption>slice 自己不裝資料，只記著從哪裡開始看（ptr）、看幾格（len）、最多能看到哪裡（cap）。</figcaption>
+      </figure>
+
+      <figure class="fig">
+        <svg viewBox="0 0 480 244" role="img" aria-label="cap 4 的陣列已經滿了，append 4 時放不下，搬到 cap 8 的新陣列，再把 4 放進去">
+          <title>append 放不下就搬家</title>
+          <rect class="soft" x="26" y="40" width="50" height="46" rx="4"/>
+          <rect class="soft" x="80" y="40" width="50" height="46" rx="4"/>
+          <rect class="soft" x="134" y="40" width="50" height="46" rx="4"/>
+          <rect class="soft" x="188" y="40" width="50" height="46" rx="4"/>
+          <text class="bold" x="51" y="70" text-anchor="middle">0</text>
+          <text class="bold" x="105" y="70" text-anchor="middle">1</text>
+          <text class="bold" x="159" y="70" text-anchor="middle">2</text>
+          <text class="bold" x="213" y="70" text-anchor="middle">3</text>
+          <text class="small" x="252" y="68">cap 4，已經滿了</text>
+          <path class="wire" d="M120 92 V140"/>
+          <path class="tip" d="M120 152 L113 139 L127 139 Z"/>
+          <text class="small mono" x="132" y="118">append(s, 4)</text>
+          <text class="small t-hot" x="132" y="140">放不下，搬家</text>
+          <rect class="acc" x="26" y="160" width="50" height="46" rx="4"/>
+          <rect class="acc" x="80" y="160" width="50" height="46" rx="4"/>
+          <rect class="acc" x="134" y="160" width="50" height="46" rx="4"/>
+          <rect class="acc" x="188" y="160" width="50" height="46" rx="4"/>
+          <rect class="hot" x="242" y="160" width="50" height="46" rx="4"/>
+          <rect class="soft dash" x="296" y="160" width="50" height="46" rx="4"/>
+          <rect class="soft dash" x="350" y="160" width="50" height="46" rx="4"/>
+          <rect class="soft dash" x="404" y="160" width="50" height="46" rx="4"/>
+          <text class="bold" x="51" y="190" text-anchor="middle">0</text>
+          <text class="bold" x="105" y="190" text-anchor="middle">1</text>
+          <text class="bold" x="159" y="190" text-anchor="middle">2</text>
+          <text class="bold" x="213" y="190" text-anchor="middle">3</text>
+          <text class="bold t-hot" x="267" y="190" text-anchor="middle">4</text>
+          <text class="sm" x="26" y="230">新的底層陣列，cap 變大（例如 8）</text>
+        </svg>
+        <figcaption>容量夠就原地放；不夠就搬到更大的新陣列。舊變數還指著舊陣列，所以一定要寫 <code>s = append(s, …)</code>。</figcaption>
+      </figure>
+
+      <figure class="fig">
+        <svg viewBox="0 0 480 262" role="img" aria-label="part 是 s 的前兩格，但容量還有四格；append(part, 99) 直接寫進第三格，把 s 的 3 蓋成 99">
+          <title>共用底層陣列的陷阱</title>
+          <text class="bold" x="16" y="70">之前</text>
+          <rect class="soft" x="96" y="40" width="70" height="46" rx="4"/>
+          <rect class="soft" x="170" y="40" width="70" height="46" rx="4"/>
+          <rect class="soft" x="244" y="40" width="70" height="46" rx="4"/>
+          <rect class="soft" x="318" y="40" width="70" height="46" rx="4"/>
+          <text class="lg" x="131" y="74" text-anchor="middle">1</text>
+          <text class="lg" x="205" y="74" text-anchor="middle">2</text>
+          <text class="lg" x="279" y="74" text-anchor="middle">3</text>
+          <text class="lg" x="353" y="74" text-anchor="middle">4</text>
+          <rect class="wire dash" x="240" y="34" width="152" height="58" rx="6"/>
+          <path class="wire hot-ln" d="M96 96 V102 H240 V96"/>
+          <text class="sm t-hot" x="168" y="120" text-anchor="middle">part（len 2）</text>
+          <text class="sm" x="316" y="120" text-anchor="middle">part 還能用的空間</text>
+          <path class="wire" d="M240 130 V160"/>
+          <path class="tip" d="M240 172 L233 159 L247 159 Z"/>
+          <text class="small mono" x="252" y="152">part = append(part, 99)</text>
+          <text class="bold" x="16" y="208">之後</text>
+          <rect class="soft" x="96" y="178" width="70" height="46" rx="4"/>
+          <rect class="soft" x="170" y="178" width="70" height="46" rx="4"/>
+          <rect class="hot" x="244" y="178" width="70" height="46" rx="4"/>
+          <rect class="soft" x="318" y="178" width="70" height="46" rx="4"/>
+          <text class="lg" x="131" y="212" text-anchor="middle">1</text>
+          <text class="lg" x="205" y="212" text-anchor="middle">2</text>
+          <text class="lg t-hot" x="279" y="212" text-anchor="middle">99</text>
+          <text class="lg" x="353" y="212" text-anchor="middle">4</text>
+          <text class="sm t-hot" x="242" y="250" text-anchor="middle">s 也跟著變成 [1 2 99 4]</text>
+        </svg>
+        <figcaption>part 和 s 共用同一個陣列。part 的容量還沒用完，append 就直接寫進去，蓋掉 s 的資料。用 <code>s[:2:2]</code> 把容量限制住就安全。</figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <section aria-labelledby="code">
+    <h2 id="code">最小範例</h2>
+    <pre class="code"><code>func main() {
+	arr := [5]int{10, 20, 30, 40, 50}
+	s := arr[1:4] <span class="c">// 看見 20 30 40</span>
+	s[0] = 99     <span class="c">// 改到的是 arr</span>
+	fmt.Println(arr, len(s), cap(s))
+
+	head := []int{1, 2, 3, 4}
+	part := head[:2]
+	part = append(part, 99) <span class="c">// 容量夠：蓋掉 head[2]</span>
+	fmt.Println(head, part)
+
+	safe := head[:2:2]
+	safe = append(safe, 7) <span class="c">// 容量不夠：換新陣列</span>
+	fmt.Println(head, safe)
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out"><code>[10 99 30 40 50] 3 4
+[1 2 99 4] [1 2 99]
+[1 2 99 4] [1 2 7]</code></pre>
+  </section>
+
+  <section aria-labelledby="notes">
+    <h2 id="notes">工程師筆記</h2>
+    <ul class="notes">
+      <li>陣列長度是型別的一部分，<code>[3]int</code> 和 <code>[4]int</code> 是不同型別；指定或傳參數都會複製整個陣列。實務上幾乎都用 slice。</li>
+      <li>slice 是一個小小的描述子（ptr、len、cap）。傳進函式只複製描述子：函式裡改元素，呼叫端看得到；但函式裡 append 的結果要回傳出去。</li>
+      <li><code>append</code> 一定要接回傳值：<code>s = append(s, x)</code>。</li>
+      <li>用 <code>s[low:high:max]</code> 限制容量，避免 append 蓋到別人的資料。從大 slice 切出一小段要長期保存，用 <code>slices.Clone</code> 複製，否則整個大陣列都會留在記憶體裡。</li>
+      <li>nil slice 和空 slice 的 len 都是 0，也都能 append；差別在 JSON：nil 編成 <code>null</code>，空 slice 編成 <code>[]</code>。</li>
+      <li>知道大概大小時先 <code>make([]T, 0, n)</code> 預留容量，減少搬家。新容量是多少是 runtime 的實作細節：在 Go 1.27 上，nil 的 <code>[]int</code> 第一次 append 就拿到 cap 4。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="java">
+    <h2 id="java">從 Java 來的你</h2>
+    <div class="table-wrap">
+      <table class="vs">
+        <thead><tr><th scope="col">主題</th><th scope="col">Java</th><th scope="col">Go</th></tr></thead>
+        <tbody>
+          <tr><th scope="row">固定長度</th><td class="java"><code>int[]</code> 是物件，傳的是參考</td><td><code>[3]int</code> 是值，傳參數會複製</td></tr>
+          <tr><th scope="row">可變長度</th><td class="java"><code>ArrayList&lt;Integer&gt;</code></td><td><code>[]int</code></td></tr>
+          <tr><th scope="row">取一段</th><td class="java"><code>list.subList(1, 4)</code>，也共用底層</td><td><code>s[1:4]</code>，共用底層陣列</td></tr>
+          <tr><th scope="row">新增</th><td class="java"><code>list.add(x)</code> 原地修改</td><td><code>s = append(s, x)</code>，要接回傳值</td></tr>
+          <tr><th scope="row">基本型別</th><td class="java">要裝箱成 <code>Integer</code></td><td><code>[]int</code> 直接存 int，不用裝箱</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section aria-labelledby="run">
+    <h2 id="run">動手跑</h2>
+    <p class="label">在 repo 根目錄</p>
+    <pre class="shell"><code>go run ./chapters/06-arrays-slices
+go test ./chapters/06-arrays-slices</code></pre>
+    <p><a href="https://github.com/xinqilin/GO-Playground/tree/main/chapters/06-arrays-slices">在 GitHub 看完整程式碼</a></p>
+  </section>
+</main>
+
+<nav class="pager" aria-label="章節導覽">
+  <a class="prev" href="05-pointers.html">← 05 指標</a>
+  <a class="home" href="index.html">目錄</a>
+  <a class="next" href="07-maps.html">07 map →</a>
+</nav>
+</body>
+</html>

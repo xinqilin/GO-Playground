@@ -1,0 +1,9 @@
+# 編譯產物
+*.exe
+*.test
+*.out
+coverage.*
+/bin/
+
+# 系統檔
+.DS_Store

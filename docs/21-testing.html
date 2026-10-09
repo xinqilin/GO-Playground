@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>測試｜Go 圖解手冊</title>
+<meta name="description" content="Go 內建的測試：table-driven test 與 t.Run、Example、Go 1.24 的 b.Loop benchmark，以及 fuzz test。">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<header class="site">
+  <a href="index.html">Go 圖解手冊</a>
+  <span class="count">21 / 24</span>
+</header>
+
+<main class="page">
+  <header class="hero">
+    <div class="num" aria-hidden="true">21</div>
+    <p class="eyebrow">Part 4 · 工程實務 · 第 21 章</p>
+    <h1>測試</h1>
+    <p class="analogy">測試是自動檢查員：每次改完程式跑一次 go test，該檢查的地方它全部再看一遍。</p>
+  </header>
+
+  <section aria-labelledby="look">
+    <h2 id="look">看圖</h2>
+    <div class="figs">
+      <figure class="fig">
+        <svg viewBox="0 0 480 222" role="img" aria-label="table-driven test：案例排成一張表，有名稱、輸入、期望三欄；t.Run 讓每一列各跑一次，也可以只跑其中一列">
+          <title>table-driven test</title>
+          <rect class="soft" x="16" y="20" width="284" height="32"/>
+          <rect class="box" x="16" y="52" width="284" height="40"/>
+          <rect class="box" x="16" y="92" width="284" height="40"/>
+          <rect class="box" x="16" y="132" width="284" height="40"/>
+          <path class="wire faint" d="M96 20 V172 M196 20 V172"/>
+          <text class="small" x="56" y="41" text-anchor="middle">名稱</text>
+          <text class="small" x="146" y="41" text-anchor="middle">輸入</text>
+          <text class="small" x="248" y="41" text-anchor="middle">期望</text>
+          <text class="small" x="56" y="77" text-anchor="middle">英文</text>
+          <text class="small mono" x="146" y="77" text-anchor="middle">Go</text>
+          <text class="small mono" x="248" y="77" text-anchor="middle">oG</text>
+          <text class="small" x="56" y="117" text-anchor="middle">中文</text>
+          <text class="small" x="146" y="117" text-anchor="middle">你好世界</text>
+          <text class="small" x="248" y="117" text-anchor="middle">界世好你</text>
+          <text class="small" x="56" y="157" text-anchor="middle">混合</text>
+          <text class="small mono" x="146" y="157" text-anchor="middle">Go語言</text>
+          <text class="small mono" x="248" y="157" text-anchor="middle">言語oG</text>
+          <path class="wire" d="M300 96 H318"/>
+          <path class="tip" d="M328 96 L316 90 L316 102 Z"/>
+          <rect class="acc" x="330" y="60" width="134" height="72" rx="10"/>
+          <text class="small mono" x="397" y="90" text-anchor="middle">t.Run(…)</text>
+          <text class="small" x="397" y="114" text-anchor="middle">每一列跑一次</text>
+          <text class="small t-acc" x="397" y="158" text-anchor="middle">3 個 PASS</text>
+          <text class="sm mono" x="16" y="206">go test -run 'TestReverse/中文'   只跑一列</text>
+        </svg>
+        <figcaption>把案例排成一張表，用一個迴圈跑完。<code>t.Run</code> 讓每一列有自己的名字，失敗時一眼看出是哪一列，也能只跑某一列。</figcaption>
+      </figure>
+
+      <figure class="fig">
+        <svg viewBox="0 0 480 248" role="img" aria-label="_test.go 裡的四種函式：Test 檢查對錯，Example 比對輸出，Benchmark 量速度要加 -bench，Fuzz 自動產生隨機輸入要加 -fuzz">
+          <title>四種測試函式</title>
+          <rect class="acc" x="12" y="12" width="224" height="110" rx="10"/>
+          <rect class="soft" x="244" y="12" width="224" height="110" rx="10"/>
+          <rect class="soft" x="12" y="126" width="224" height="110" rx="10"/>
+          <rect class="soft" x="244" y="126" width="224" height="110" rx="10"/>
+          <text class="mono bold" x="26" y="42">TestXxx</text>
+          <text class="small" x="26" y="68">檢查結果對不對</text>
+          <text class="sm mono" x="26" y="104">go test</text>
+          <text class="mono bold" x="258" y="42">ExampleXxx</text>
+          <text class="small" x="258" y="68">比對印出來的輸出</text>
+          <text class="sm mono" x="258" y="104">go test，也會出現在 go doc</text>
+          <text class="mono bold" x="26" y="156">BenchmarkXxx</text>
+          <text class="small" x="26" y="182">量速度和記憶體</text>
+          <text class="sm mono" x="26" y="218">go test -bench=.</text>
+          <text class="mono bold" x="258" y="156">FuzzXxx</text>
+          <text class="small" x="258" y="182">自動產生隨機輸入</text>
+          <text class="sm mono" x="258" y="218">go test -fuzz=FuzzXxx</text>
+        </svg>
+        <figcaption>同一個 <code>_test.go</code> 檔案裡可以放四種函式，都用 <code>go test</code> 執行；Benchmark 和 Fuzz 要加上旗標才會跑。</figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <section aria-labelledby="code">
+    <h2 id="code">最小範例</h2>
+    <p class="label">textutil/textutil_test.go（節錄）</p>
+    <pre class="code"><code>func TestReverse(t *testing.T) {
+	tests := []struct {
+		name, in, want string
+	}{
+		{"英文", "Go", "oG"},
+		{"中文", "你好世界", "界世好你"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := Reverse(tt.in); got != tt.want {
+				t.Errorf("Reverse(%q) = %q, want %q", tt.in, got, tt.want)
+			}
+		})
+	}
+}
+
+func BenchmarkReverse(b *testing.B) {
+	s := strings.Repeat("Go語言", 100)
+	for b.Loop() { <span class="c">// Go 1.24 起</span>
+		Reverse(s)
+	}
+}</code></pre>
+    <p class="label">go test -v -run TestReverse（節錄）</p>
+    <pre class="out"><code>=== RUN   TestReverse
+=== RUN   TestReverse/空字串
+=== RUN   TestReverse/英文
+=== RUN   TestReverse/中文
+=== RUN   TestReverse/混合
+--- PASS: TestReverse (0.00s)
+    --- PASS: TestReverse/空字串 (0.00s)
+    --- PASS: TestReverse/英文 (0.00s)
+    --- PASS: TestReverse/中文 (0.00s)
+    --- PASS: TestReverse/混合 (0.00s)
+PASS</code></pre>
+  </section>
+
+  <section aria-labelledby="notes">
+    <h2 id="notes">工程師筆記</h2>
+    <ul class="notes">
+      <li>測試檔名以 <code>_test.go</code> 結尾，函式寫成 <code>func TestXxx(t *testing.T)</code>；<code>go test ./...</code> 一次跑全部。</li>
+      <li><code>t.Errorf</code> 記錄失敗後繼續跑；<code>t.Fatalf</code> 記錄後馬上結束這個測試。輔助函式開頭呼叫 <code>t.Helper()</code>，失敗訊息才會指向呼叫的那一行。</li>
+      <li>Example 的 <code>// Output:</code> 會被比對，等於一份不會過期的文件。</li>
+      <li>Benchmark 用 <code>b.Loop()</code>（Go 1.24）；加 <code>-benchmem</code> 可以看每次操作配置了幾次記憶體。</li>
+      <li>Fuzz 平常只跑 <code>f.Add</code> 的種子；加 <code>-fuzz</code> 才會隨機產生輸入，找到的失敗案例存在 <code>testdata/fuzz</code>，之後每次 go test 都會重跑。</li>
+      <li><code>-race</code> 和 <code>-cover</code> 是隨手就該加的旗標；牽涉時間的並行程式，可以用 <code>testing/synctest</code>（Go 1.25）讓測試不用真的等。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="java">
+    <h2 id="java">從 Java 來的你</h2>
+    <div class="table-wrap">
+      <table class="vs">
+        <thead><tr><th scope="col">主題</th><th scope="col">Java</th><th scope="col">Go</th></tr></thead>
+        <tbody>
+          <tr><th scope="row">測試框架</th><td class="java">JUnit、AssertJ、Mockito</td><td>內建 <code>testing</code>，不用斷言函式庫也能寫</td></tr>
+          <tr><th scope="row">參數化測試</th><td class="java"><code>@ParameterizedTest</code></td><td>table-driven test 加上 <code>t.Run</code></td></tr>
+          <tr><th scope="row">效能量測</th><td class="java">JMH</td><td><code>BenchmarkXxx</code></td></tr>
+          <tr><th scope="row">模糊測試</th><td class="java">另外裝工具</td><td>內建 <code>FuzzXxx</code></td></tr>
+          <tr><th scope="row">覆蓋率</th><td class="java">JaCoCo</td><td><code>go test -cover</code></td></tr>
+          <tr><th scope="row">模擬依賴</th><td class="java">Mockito</td><td>定義一個小 interface，自己寫假的實作</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section aria-labelledby="run">
+    <h2 id="run">動手跑</h2>
+    <p class="label">在 repo 根目錄</p>
+    <pre class="shell"><code>go test -v ./chapters/21-testing/...
+go test -cover ./chapters/21-testing/...
+go test -run='^$' -bench=. -benchmem ./chapters/21-testing/textutil
+go test -run='^$' -fuzz=FuzzReverse -fuzztime=10s ./chapters/21-testing/textutil</code></pre>
+    <p><a href="https://github.com/xinqilin/GO-Playground/tree/main/chapters/21-testing">在 GitHub 看完整程式碼</a></p>
+  </section>
+</main>
+
+<nav class="pager" aria-label="章節導覽">
+  <a class="prev" href="20-packages-modules.html">← 20 package 與 module</a>
+  <a class="home" href="index.html">目錄</a>
+  <a class="next" href="22-stdlib.html">22 標準庫精選 →</a>
+</nav>
+</body>
+</html>

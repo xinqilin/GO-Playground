@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Go 圖解手冊</title>
+<meta name="description" content="給工程師的 Go 入門手冊（繁體中文）：每一章先用大圖講懂觀念，再附上可以執行、有測試的程式碼，並對照 Java。">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<header class="site">
+  <a href="index.html">Go 圖解手冊</a>
+  <a class="count" href="https://github.com/xinqilin/GO-Playground">GitHub</a>
+</header>
+
+<main class="page">
+  <header class="cover">
+    <p class="eyebrow">繁體中文 · Go 1.27 · 25 章 + 4 個專題</p>
+    <h1>Go 圖解手冊</h1>
+    <p class="lede">每一章先用大圖把觀念講懂，再附上可以執行、有測試的程式碼，並對照 Java 的寫法。</p>
+    <a class="start" href="00-hello.html">從第 00 章開始 →</a>
+    <figure class="fig route">
+      <svg viewBox="0 0 480 110" role="img" aria-label="學習路線：開始 00，基礎 01 到 08，型別 09 到 13，並行 14 到 19，實務 20 到 24，最後是專題">
+        <title>學習路線</title>
+        <path class="wire faint" d="M30 40 H450"/>
+        <circle class="acc" cx="30" cy="40" r="10"/>
+        <circle class="acc" cx="114" cy="40" r="10"/>
+        <circle class="acc" cx="198" cy="40" r="10"/>
+        <circle class="acc" cx="282" cy="40" r="10"/>
+        <circle class="acc" cx="366" cy="40" r="10"/>
+        <circle class="hot" cx="450" cy="40" r="12"/>
+        <text class="small bold" x="30" y="76" text-anchor="middle">開始</text>
+        <text class="small bold" x="114" y="76" text-anchor="middle">基礎</text>
+        <text class="small bold" x="198" y="76" text-anchor="middle">型別</text>
+        <text class="small bold" x="282" y="76" text-anchor="middle">並行</text>
+        <text class="small bold" x="366" y="76" text-anchor="middle">實務</text>
+        <text class="small bold t-hot" x="450" y="76" text-anchor="middle">專題</text>
+        <text class="sm mono" x="30" y="98" text-anchor="middle">00</text>
+        <text class="sm mono" x="114" y="98" text-anchor="middle">01–08</text>
+        <text class="sm mono" x="198" y="98" text-anchor="middle">09–13</text>
+        <text class="sm mono" x="282" y="98" text-anchor="middle">14–19</text>
+        <text class="sm mono" x="366" y="98" text-anchor="middle">20–24</text>
+        <text class="sm mono" x="450" y="98" text-anchor="middle">P1–P4</text>
+      </svg>
+      <figcaption>照順序讀最順；每一章也都能單獨讀。</figcaption>
+    </figure>
+  </header>
+
+  <section aria-labelledby="how">
+    <h2 id="how">每一章怎麼讀</h2>
+    <ul class="notes">
+      <li><strong>看圖</strong>：大圖少字，先把觀念看懂。</li>
+      <li><strong>最小範例</strong>：可以直接執行的短程式，輸出是實際跑出來的結果。</li>
+      <li><strong>工程師筆記</strong>：實務上會踩的坑和慣例。</li>
+      <li><strong>從 Java 來的你</strong>：同一件事在 Java 和 Go 的寫法對照。</li>
+      <li><strong>動手跑</strong>：在 repo 裡執行的指令，以及完整程式碼的連結。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="p0">
+    <p class="part-label">Part 0</p>
+    <h2 id="p0">開始</h2>
+    <ul class="toc">
+      <li><a href="00-hello.html"><span class="n">00</span><span class="t">第一支程式</span><span class="d">安裝、go run 與 go build、go.mod</span></a></li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="p1">
+    <p class="part-label">Part 1</p>
+    <h2 id="p1">基礎</h2>
+    <ul class="toc">
+      <li><a href="01-variables.html"><span class="n">01</span><span class="t">變數與型別</span><span class="d">零值、常數與 iota、型別轉換</span></a></li>
+      <li><a href="02-input-output.html"><span class="n">02</span><span class="t">輸入與輸出</span><span class="d">io.Reader / io.Writer、Scanner、Printf</span></a></li>
+      <li><a href="03-control-flow.html"><span class="n">03</span><span class="t">流程控制</span><span class="d">if、for 的四種寫法、switch</span></a></li>
+      <li><a href="04-functions.html"><span class="n">04</span><span class="t">函式</span><span class="d">多個回傳值、closure、defer</span></a></li>
+      <li><a href="05-pointers.html"><span class="n">05</span><span class="t">指標</span><span class="d">&amp;、*、傳值與傳指標、nil</span></a></li>
+      <li><a href="06-arrays-slices.html"><span class="n">06</span><span class="t">陣列與切片</span><span class="d">slice header、append、共用陷阱</span></a></li>
+      <li><a href="07-maps.html"><span class="n">07</span><span class="t">map</span><span class="d">comma-ok、走訪順序、nil map</span></a></li>
+      <li><a href="08-strings-runes.html"><span class="n">08</span><span class="t">字串與 rune</span><span class="d">UTF-8、byte 與 rune、Builder</span></a></li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="p2">
+    <p class="part-label">Part 2</p>
+    <h2 id="p2">型別系統</h2>
+    <ul class="toc">
+      <li><a href="09-structs-methods.html"><span class="n">09</span><span class="t">struct 與方法</span><span class="d">receiver、嵌入、組合</span></a></li>
+      <li><a href="10-interfaces.html"><span class="n">10</span><span class="t">interface</span><span class="d">隱式實作、type switch、nil 陷阱</span></a></li>
+      <li><a href="11-errors.html"><span class="n">11</span><span class="t">錯誤處理</span><span class="d">%w、errors.Is / As、panic</span></a></li>
+      <li><a href="12-generics.html"><span class="n">12</span><span class="t">泛型</span><span class="d">型別參數、限制、generic method</span></a></li>
+      <li><a href="13-iterators.html"><span class="n">13</span><span class="t">疊代器</span><span class="d">iter.Seq、yield、接成管線</span></a></li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="p3">
+    <p class="part-label">Part 3</p>
+    <h2 id="p3">並行</h2>
+    <ul class="toc">
+      <li><a href="14-goroutines.html"><span class="n">14</span><span class="t">goroutine</span><span class="d">WaitGroup、wg.Go</span></a></li>
+      <li><a href="15-channels.html"><span class="n">15</span><span class="t">channel</span><span class="d">緩衝、close、管線</span></a></li>
+      <li><a href="16-select.html"><span class="n">16</span><span class="t">select</span><span class="d">逾時、default、nil channel</span></a></li>
+      <li><a href="17-sync.html"><span class="n">17</span><span class="t">sync 與 data race</span><span class="d">Mutex、atomic、-race</span></a></li>
+      <li><a href="18-context.html"><span class="n">18</span><span class="t">context</span><span class="d">取消、逾時、取消原因</span></a></li>
+      <li><a href="19-concurrency-patterns.html"><span class="n">19</span><span class="t">並行模式</span><span class="d">worker pool、fan-in、semaphore</span></a></li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="p4">
+    <p class="part-label">Part 4</p>
+    <h2 id="p4">工程實務</h2>
+    <ul class="toc">
+      <li><a href="20-packages-modules.html"><span class="n">20</span><span class="t">package 與 module</span><span class="d">匯出、internal、go.mod</span></a></li>
+      <li><a href="21-testing.html"><span class="n">21</span><span class="t">測試</span><span class="d">table-driven、benchmark、fuzz</span></a></li>
+      <li><a href="22-stdlib.html"><span class="n">22</span><span class="t">標準庫精選</span><span class="d">time、json、slog、uuid</span></a></li>
+      <li><a href="23-http.html"><span class="n">23</span><span class="t">HTTP 服務</span><span class="d">路由、middleware、httptest</span></a></li>
+      <li><a href="24-toolchain.html"><span class="n">24</span><span class="t">工具鏈</span><span class="d">vet、fix、build tag、交叉編譯</span></a></li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="projects">
+    <p class="part-label">專題</p>
+    <h2 id="projects">把學到的組起來</h2>
+    <ul class="toc">
+      <li><a href="project-fibonacci.html"><span class="n">P1</span><span class="t">費氏數列</span><span class="d">修好舊 bug，比較三種寫法</span></a></li>
+      <li><a href="project-wordcount.html"><span class="n">P2</span><span class="t">字詞統計</span><span class="d">Scanner、map、排序</span></a></li>
+      <li><a href="project-urlchecker.html"><span class="n">P3</span><span class="t">並行網址檢查器</span><span class="d">semaphore、逾時、假的 Fetcher</span></a></li>
+      <li><a href="project-todoapi.html"><span class="n">P4</span><span class="t">待辦事項 API</span><span class="d">REST、middleware、優雅關機</span></a></li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="local">
+    <h2 id="local">在自己的電腦上跑</h2>
+    <p>需要 Go 1.21 以上；<code>go.mod</code> 宣告的是 <code>go 1.27</code>，比較舊的 Go 會自動下載需要的版本。</p>
+    <pre class="shell"><code>git clone https://github.com/xinqilin/GO-Playground.git
+cd GO-Playground
+go run ./chapters/00-hello   <span class="c"># 執行某一章</span>
+go test -race ./...          <span class="c"># 跑全部測試</span></code></pre>
+  </section>
+</main>
+
+<nav class="pager" aria-label="頁尾">
+  <span></span>
+  <a class="home" href="https://github.com/xinqilin/GO-Playground">github.com/xinqilin/GO-Playground</a>
+  <span></span>
+</nav>
+</body>
+</html>

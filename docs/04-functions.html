@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>函式｜Go 圖解手冊</title>
+<meta name="description" content="Go 函式的多個回傳值、可變參數、函式當成值傳遞、closure，以及 defer 的執行順序。">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<header class="site">
+  <a href="index.html">Go 圖解手冊</a>
+  <span class="count">04 / 24</span>
+</header>
+
+<main class="page">
+  <header class="hero">
+    <div class="num" aria-hidden="true">04</div>
+    <p class="eyebrow">Part 1 · 基礎 · 第 04 章</p>
+    <h1>函式</h1>
+    <p class="analogy">函式是一台機器：放進參數，拿出結果；機器本身也能拿來傳來傳去。</p>
+  </header>
+
+  <section aria-labelledby="look">
+    <h2 id="look">看圖</h2>
+    <div class="figs">
+      <figure class="fig">
+        <svg viewBox="0 0 480 190" role="img" aria-label="把 17 和 5 放進 divmod，同時拿到商 3 和餘數 2 兩個結果">
+          <title>一次回傳好幾個值</title>
+          <text class="sm mono" x="55" y="30" text-anchor="middle">a</text>
+          <text class="sm mono" x="55" y="116" text-anchor="middle">b</text>
+          <rect class="soft" x="20" y="40" width="70" height="48" rx="6"/>
+          <rect class="soft" x="20" y="124" width="70" height="48" rx="6"/>
+          <text class="lg" x="55" y="75" text-anchor="middle">17</text>
+          <text class="lg" x="55" y="159" text-anchor="middle">5</text>
+          <path class="wire" d="M90 64 H150 M90 148 H150"/>
+          <path class="tip" d="M162 64 L149 57 L149 71 Z"/>
+          <path class="tip" d="M162 148 L149 141 L149 155 Z"/>
+          <rect class="acc" x="166" y="40" width="148" height="132" rx="12"/>
+          <text class="mono bold" x="240" y="112" text-anchor="middle">divmod</text>
+          <path class="wire" d="M314 64 H374 M314 148 H374"/>
+          <path class="tip" d="M386 64 L373 57 L373 71 Z"/>
+          <path class="tip" d="M386 148 L373 141 L373 155 Z"/>
+          <text class="sm" x="425" y="30" text-anchor="middle">商</text>
+          <text class="sm" x="425" y="116" text-anchor="middle">餘數</text>
+          <rect class="hot" x="390" y="40" width="70" height="48" rx="6"/>
+          <rect class="hot" x="390" y="124" width="70" height="48" rx="6"/>
+          <text class="lg t-hot" x="425" y="75" text-anchor="middle">3</text>
+          <text class="lg t-hot" x="425" y="159" text-anchor="middle">2</text>
+        </svg>
+        <figcaption>Go 的函式可以一次回傳好幾個值，最常見的組合是「結果 + error」。</figcaption>
+      </figure>
+
+      <figure class="fig">
+        <svg viewBox="0 0 480 220" role="img" aria-label="counter 產生兩個 closure：next 的背包裡 n 累加到 3，other 有自己的背包，n 是 1">
+          <title>closure 帶著背包</title>
+          <rect class="soft" x="20" y="80" width="110" height="70" rx="10"/>
+          <text class="mono" x="75" y="121" text-anchor="middle">counter()</text>
+          <path class="wire" d="M130 100 H160 V64 H190 M130 130 H160 V176 H190"/>
+          <path class="tip" d="M202 64 L189 57 L189 71 Z"/>
+          <path class="tip" d="M202 176 L189 169 L189 183 Z"/>
+          <text class="sm" x="428" y="24" text-anchor="middle">呼叫結果</text>
+          <rect class="acc" x="206" y="36" width="120" height="56" rx="10"/>
+          <text class="mono bold" x="266" y="70" text-anchor="middle">next</text>
+          <rect class="hot" x="334" y="40" width="56" height="48" rx="12"/>
+          <text class="sm t-hot" x="362" y="58" text-anchor="middle">n</text>
+          <text class="bold" x="362" y="80" text-anchor="middle">3</text>
+          <text class="mono" x="428" y="70" text-anchor="middle">1 2 3</text>
+          <rect class="acc" x="206" y="148" width="120" height="56" rx="10"/>
+          <text class="mono bold" x="266" y="182" text-anchor="middle">other</text>
+          <rect class="hot" x="334" y="152" width="56" height="48" rx="12"/>
+          <text class="sm t-hot" x="362" y="170" text-anchor="middle">n</text>
+          <text class="bold" x="362" y="192" text-anchor="middle">1</text>
+          <text class="mono" x="428" y="182" text-anchor="middle">1</text>
+        </svg>
+        <figcaption>closure 會把用到的變數（n）一起帶走；每個 closure 背自己的背包，互不影響。</figcaption>
+      </figure>
+
+      <figure class="fig">
+        <svg viewBox="0 0 480 256" role="img" aria-label="defer 依序把 defer 0、1、2 疊上去；函式結束時從最上面開始拿，所以 defer 2 最先執行">
+          <title>defer 是一疊盤子</title>
+          <text class="sm" x="150" y="56">依序放上去</text>
+          <path class="wire" d="M140 36 V80"/>
+          <path class="tip" d="M140 90 L133 77 L147 77 Z"/>
+          <rect class="hot" x="60" y="96" width="160" height="36" rx="18"/>
+          <rect class="soft" x="60" y="138" width="160" height="36" rx="18"/>
+          <rect class="soft" x="60" y="180" width="160" height="36" rx="18"/>
+          <text class="mono t-hot" x="140" y="120" text-anchor="middle">defer 2</text>
+          <text class="mono" x="140" y="162" text-anchor="middle">defer 1</text>
+          <text class="mono" x="140" y="204" text-anchor="middle">defer 0</text>
+          <path class="wire" d="M228 114 H298 M228 156 H298 M228 198 H298"/>
+          <path class="tip" d="M310 114 L297 107 L297 121 Z"/>
+          <path class="tip" d="M310 156 L297 149 L297 163 Z"/>
+          <path class="tip" d="M310 198 L297 191 L297 205 Z"/>
+          <text class="bold t-hot" x="318" y="120">第 1 個執行</text>
+          <text x="318" y="162">第 2 個執行</text>
+          <text x="318" y="204">第 3 個執行</text>
+          <text class="sm" x="140" y="244" text-anchor="middle">函式要結束時才開始拿</text>
+        </svg>
+        <figcaption><code>defer</code> 像疊盤子：最後放上去的最先拿下來，而且等函式要結束時才開始拿。</figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <section aria-labelledby="code">
+    <h2 id="code">最小範例</h2>
+    <pre class="code"><code>func divmod(a, b int) (int, int) { return a / b, a % b }
+
+func counter() func() int {
+	n := 0
+	return func() int { n++; return n }
+}
+
+func main() {
+	defer fmt.Println("最後才執行")
+	q, r := divmod(17, 5)
+	next := counter()
+	fmt.Println(q, r, next(), next(), next())
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out"><code>3 2 1 2 3
+最後才執行</code></pre>
+  </section>
+
+  <section aria-labelledby="notes">
+    <h2 id="notes">工程師筆記</h2>
+    <ul class="notes">
+      <li>錯誤用回傳值傳遞：慣例是最後一個回傳值放 <code>error</code>，呼叫端馬上檢查（第 11 章）。</li>
+      <li><code>defer</code> 最常用在釋放資源：<code>os.Open</code> 成功後馬上 <code>defer f.Close()</code>，之後不管從哪裡 return 都會關檔。</li>
+      <li><code>defer</code> 的參數在註冊當下就決定；在迴圈裡 defer 要小心，要等整個函式結束才會執行。</li>
+      <li>回傳值可以取名（<code>func f() (n int, err error)</code>）。短函式可以搭配不帶值的 <code>return</code>，長函式這樣寫會很難讀。</li>
+      <li>整數除法往 0 截斷：<code>-7 / 2</code> 是 <code>-3</code>，<code>-7 % 2</code> 是 <code>-1</code>。</li>
+      <li>沒有預設參數，也沒有函式多載；選項多時改用 struct 當參數。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="java">
+    <h2 id="java">從 Java 來的你</h2>
+    <div class="table-wrap">
+      <table class="vs">
+        <thead><tr><th scope="col">主題</th><th scope="col">Java</th><th scope="col">Go</th></tr></thead>
+        <tbody>
+          <tr><th scope="row">多個回傳值</th><td class="java">包成物件或 record</td><td>直接 <code>return a, b</code></td></tr>
+          <tr><th scope="row">錯誤</th><td class="java">丟例外</td><td>回傳 <code>error</code> 值</td></tr>
+          <tr><th scope="row">lambda</th><td class="java"><code>x -&gt; x * 2</code>，只能用 effectively final 的變數</td><td><code>func(x int) int { return x * 2 }</code>，可以修改抓到的變數</td></tr>
+          <tr><th scope="row">清理資源</th><td class="java">try-with-resources / <code>finally</code></td><td><code>defer</code></td></tr>
+          <tr><th scope="row">多載、預設參數</th><td class="java">有多載，沒有預設參數</td><td>兩個都沒有</td></tr>
+          <tr><th scope="row">可變參數</th><td class="java"><code>int... nums</code></td><td><code>nums ...int</code></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section aria-labelledby="run">
+    <h2 id="run">動手跑</h2>
+    <p class="label">在 repo 根目錄</p>
+    <pre class="shell"><code>go run ./chapters/04-functions
+go test ./chapters/04-functions</code></pre>
+    <p><a href="https://github.com/xinqilin/GO-Playground/tree/main/chapters/04-functions">在 GitHub 看完整程式碼</a></p>
+  </section>
+</main>
+
+<nav class="pager" aria-label="章節導覽">
+  <a class="prev" href="03-control-flow.html">← 03 流程控制</a>
+  <a class="home" href="index.html">目錄</a>
+  <a class="next" href="05-pointers.html">05 指標 →</a>
+</nav>
+</body>
+</html>

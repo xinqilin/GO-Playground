@@ -1,0 +1,197 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>指標｜Go 圖解手冊</title>
+<meta name="description" content="Go 指標圖解：&amp; 取地址、* 取值、傳值與傳指標的差別，以及 nil 與 new。">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<header class="site">
+  <a href="index.html">Go 圖解手冊</a>
+  <span class="count">05 / 24</span>
+</header>
+
+<main class="page">
+  <header class="hero">
+    <div class="num" aria-hidden="true">05</div>
+    <p class="eyebrow">Part 1 · 基礎 · 第 05 章</p>
+    <h1>指標</h1>
+    <p class="analogy">一張寫著門牌的紙條：拿著它，就能找到並改動原本的變數。</p>
+  </header>
+
+  <section aria-labelledby="look">
+    <h2 id="look">看圖</h2>
+    <div class="figs">
+      <figure class="fig">
+        <svg viewBox="0 0 480 266" role="img" aria-label="記憶體像一排有門牌的房子；x 住在門牌 0xc020，紙條 p 上寫著 0xc020，指向 x">
+          <title>變數是房子，指標是寫著門牌的紙條</title>
+          <path class="soft" d="M22 74 L72 44 L122 74 V154 H22 Z"/>
+          <path class="soft" d="M134 74 L184 44 L234 74 V154 H134 Z"/>
+          <path class="acc" d="M246 74 L296 44 L346 74 V154 H246 Z"/>
+          <path class="soft" d="M358 74 L408 44 L458 74 V154 H358 Z"/>
+          <text class="bold t-acc" x="296" y="34" text-anchor="middle">x</text>
+          <text class="lg" x="296" y="122" text-anchor="middle">5</text>
+          <text class="sm mono" x="72" y="144" text-anchor="middle">0xc010</text>
+          <text class="sm mono" x="184" y="144" text-anchor="middle">0xc018</text>
+          <text class="sm mono" x="296" y="144" text-anchor="middle">0xc020</text>
+          <text class="sm mono" x="408" y="144" text-anchor="middle">0xc028</text>
+          <text class="bold t-hot" x="22" y="188">p</text>
+          <rect class="hot" x="22" y="196" width="170" height="58" rx="4"/>
+          <text class="mono" x="107" y="232" text-anchor="middle">0xc020</text>
+          <path class="wire hot-ln" d="M192 225 H296 V172"/>
+          <path class="tip hot-tip" d="M296 160 L289 173 L303 173 Z"/>
+          <text class="sm" x="244" y="214" text-anchor="middle">指向 x</text>
+        </svg>
+        <figcaption>x 是一間房子，裡面住著 5。p 是一張紙條，上面寫著 x 的門牌。</figcaption>
+      </figure>
+
+      <figure class="fig">
+        <svg viewBox="0 0 480 296" role="img" aria-label="&amp;x 取得 x 的門牌 0xc020；*p 照著紙條上的門牌找到 x，拿到裡面的 5">
+          <title>&amp; 問門牌，* 照門牌去找</title>
+          <text class="lg mono" x="12" y="110">&amp;x</text>
+          <path class="acc" d="M84 66 L129 36 L174 66 V136 H84 Z"/>
+          <text class="bold t-acc" x="129" y="28" text-anchor="middle">x</text>
+          <text class="lg" x="129" y="114" text-anchor="middle">5</text>
+          <path class="wire" d="M182 101 H282"/>
+          <path class="tip" d="M294 101 L281 94 L281 108 Z"/>
+          <text class="sm" x="232" y="89" text-anchor="middle">問門牌</text>
+          <rect class="hot" x="298" y="74" width="164" height="54" rx="4"/>
+          <text class="mono" x="380" y="108" text-anchor="middle">0xc020</text>
+
+          <text class="lg mono" x="12" y="260">*p</text>
+          <text class="bold t-hot" x="84" y="214">p</text>
+          <rect class="hot" x="84" y="222" width="164" height="54" rx="4"/>
+          <text class="mono" x="166" y="256" text-anchor="middle">0xc020</text>
+          <path class="wire hot-ln" d="M256 249 H340"/>
+          <path class="tip hot-tip" d="M352 249 L339 242 L339 256 Z"/>
+          <text class="sm" x="298" y="237" text-anchor="middle">照門牌找</text>
+          <path class="acc" d="M362 216 L407 186 L452 216 V286 H362 Z"/>
+          <text class="bold t-acc" x="407" y="178" text-anchor="middle">x</text>
+          <text class="lg" x="407" y="264" text-anchor="middle">5</text>
+        </svg>
+        <figcaption><code>&amp;x</code> 問 x 的門牌。<code>*p</code> 照紙條上的門牌，找到房子裡的值。</figcaption>
+      </figure>
+
+      <figure class="fig">
+        <svg viewBox="0 0 480 334" role="img" aria-label="傳值時函式拿到 a 的影印本，改了不影響 a；傳指標時函式拿到 b 的門牌，照門牌改到原本的 b">
+          <title>傳值與傳指標</title>
+          <path class="wire faint" d="M240 12 V326"/>
+
+          <text class="bold" x="117" y="26" text-anchor="middle">傳值</text>
+          <text class="sm mono" x="117" y="48" text-anchor="middle">addOneValue(a)</text>
+          <path class="acc" d="M72 100 L117 70 L162 100 V160 H72 Z"/>
+          <text class="bold t-acc" x="60" y="136" text-anchor="end">a</text>
+          <text class="lg" x="117" y="144" text-anchor="middle">1</text>
+          <path class="wire" d="M117 166 V208"/>
+          <path class="tip" d="M117 220 L110 207 L124 207 Z"/>
+          <text class="sm" x="126" y="196">複製一份</text>
+          <rect class="wire dash" x="52" y="226" width="130" height="100" rx="10"/>
+          <path class="soft" d="M82 264 L117 240 L152 264 V316 H82 Z"/>
+          <text class="bold" x="74" y="296" text-anchor="end">n</text>
+          <text class="lg" x="117" y="304" text-anchor="middle">2</text>
+
+          <text class="bold" x="363" y="26" text-anchor="middle">傳指標</text>
+          <text class="sm mono" x="363" y="48" text-anchor="middle">addOnePointer(&amp;b)</text>
+          <path class="acc" d="M318 100 L363 70 L408 100 V160 H318 Z"/>
+          <text class="bold t-acc" x="306" y="136" text-anchor="end">b</text>
+          <text class="lg t-hot" x="363" y="144" text-anchor="middle">2</text>
+          <path class="wire" d="M343 166 V212"/>
+          <path class="tip" d="M343 224 L336 211 L350 211 Z"/>
+          <text class="sm" x="334" y="198" text-anchor="end">給門牌</text>
+          <rect class="wire dash" x="298" y="226" width="130" height="100" rx="10"/>
+          <rect class="hot" x="318" y="250" width="90" height="44" rx="4"/>
+          <text class="mono" x="363" y="279" text-anchor="middle">0xc018</text>
+          <text class="bold t-hot" x="310" y="279" text-anchor="end">n</text>
+          <path class="wire hot-ln" d="M383 250 V178"/>
+          <path class="tip hot-tip" d="M383 166 L376 179 L390 179 Z"/>
+          <text class="sm t-hot" x="392" y="214">照門牌改</text>
+        </svg>
+        <figcaption>傳值：函式拿到影印本，改的是影印本，a 還是 1。傳指標：函式拿到門牌，照門牌改到原本的 b。</figcaption>
+      </figure>
+
+      <figure class="fig">
+        <svg viewBox="0 0 480 196" role="img" aria-label="nil 指標是一張空白紙條，照著它去找會 panic；使用前先檢查 p 不是 nil">
+          <title>nil 是一張空白紙條</title>
+          <text class="bold t-hot" x="40" y="64">p</text>
+          <rect class="hot" x="40" y="72" width="150" height="58" rx="4"/>
+          <text class="mono mute" x="115" y="108" text-anchor="middle">nil</text>
+          <path class="wire hot-ln dash" d="M198 101 H306"/>
+          <path class="tip hot-tip" d="M318 101 L305 94 L305 108 Z"/>
+          <text class="mono" x="252" y="89" text-anchor="middle">*p</text>
+          <path class="hot" d="M426 81 L398 53 L358 53 L330 81 L330 121 L358 149 L398 149 L426 121 Z"/>
+          <text class="bold t-hot" x="378" y="108" text-anchor="middle">panic</text>
+          <text x="240" y="182" text-anchor="middle">用之前先檢查 <tspan class="mono t-acc">p != nil</tspan></text>
+        </svg>
+        <figcaption>空白紙條（nil）照著去找，找不到房子，程式就 panic。</figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <section aria-labelledby="code">
+    <h2 id="code">最小範例</h2>
+    <pre class="code"><code>func addOneValue(n int)    { n++ }  <span class="c">// 拿到影印本</span>
+func addOnePointer(n *int) { *n++ } <span class="c">// 拿到門牌</span>
+
+func main() {
+	x := 5
+	p := &amp;x <span class="c">// p 的型別是 *int</span>
+	*p = 10 <span class="c">// 照門牌改：x 變成 10</span>
+	fmt.Println(x, *p, p == &amp;x)
+
+	a, b := 1, 1
+	addOneValue(a)
+	addOnePointer(&amp;b)
+	fmt.Println(a, b)
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out"><code>10 10 true
+1 2</code></pre>
+  </section>
+
+  <section aria-labelledby="notes">
+    <h2 id="notes">工程師筆記</h2>
+    <ul class="notes">
+      <li>Go 一律傳值。slice、map、channel 本身是一個小小的描述子，裡面記著底層資料的位置；複製描述子不會複製底層資料，所以函式裡改元素，呼叫端看得到（細節在第 06、07 章）。</li>
+      <li>回傳區域變數的地址是安全的。編譯器會做 escape analysis，變數離開函式後還會被用到，就放到 heap；<code>go run -gcflags=-m</code> 會印出 <code>moved to heap: c</code>。</li>
+      <li>沒有指標運算，<code>p++</code> 編譯不過。</li>
+      <li>對 nil 解參考會 panic：<code>invalid memory address or nil pointer dereference</code>。</li>
+      <li>什麼時候用指標：函式要改到呼叫端的值、struct 很大不想複製、要用 nil 表示「沒有值」。小的值直接傳，通常比較簡單。</li>
+      <li>Go 1.26 起 <code>new</code> 可以直接給初始值：<code>new(7)</code> 得到一個指向 7 的 <code>*int</code>，填 JSON 的選填欄位很方便。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="java">
+    <h2 id="java">從 Java 來的你</h2>
+    <div class="table-wrap">
+      <table class="vs">
+        <thead><tr><th scope="col">主題</th><th scope="col">Java</th><th scope="col">Go</th></tr></thead>
+        <tbody>
+          <tr><th scope="row">參考</th><td class="java">物件變數就是 reference，但拿不到地址</td><td>指標是明確的型別 <code>*T</code>，<code>&amp;</code> 取地址、<code>*</code> 取值</td></tr>
+          <tr><th scope="row">傳參數</th><td class="java">一律傳值；物件傳的是 reference 的複本</td><td>一律傳值；想改到呼叫端就傳 <code>*T</code></td></tr>
+          <tr><th scope="row">指向基本型別</th><td class="java">做不到；要共享 int 只能包進物件</td><td>可以：<code>*int</code>、<code>*bool</code></td></tr>
+          <tr><th scope="row">空值</th><td class="java"><code>NullPointerException</code></td><td><code>nil pointer dereference</code> panic</td></tr>
+          <tr><th scope="row">配置位置</th><td class="java"><code>new</code> 出來的物件在 heap</td><td>stack 或 heap 由編譯器決定，<code>new</code> 出來的也可能在 stack</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section aria-labelledby="run">
+    <h2 id="run">動手跑</h2>
+    <p class="label">在 repo 根目錄</p>
+    <pre class="shell"><code>go run ./chapters/05-pointers
+go test ./chapters/05-pointers
+go run -gcflags=-m ./chapters/05-pointers   <span class="c"># 看哪些變數被放到 heap</span></code></pre>
+    <p><a href="https://github.com/xinqilin/GO-Playground/tree/main/chapters/05-pointers">在 GitHub 看完整程式碼</a></p>
+  </section>
+</main>
+
+<nav class="pager" aria-label="章節導覽">
+  <a class="prev" href="04-functions.html">← 04 函式</a>
+  <a class="home" href="index.html">目錄</a>
+  <a class="next" href="06-arrays-slices.html">06 陣列與切片 →</a>
+</nav>
+</body>
+</html>

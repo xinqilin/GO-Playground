@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>泛型｜Go 圖解手冊</title>
+<meta name="description" content="Go 的泛型：型別參數、型別限制與 ~ 的意思、泛型型別，以及 Go 1.27 的 generic method。">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<header class="site">
+  <a href="index.html">Go 圖解手冊</a>
+  <span class="count">12 / 24</span>
+</header>
+
+<main class="page">
+  <header class="hero">
+    <div class="num" aria-hidden="true">12</div>
+    <p class="eyebrow">Part 2 · 型別系統 · 第 12 章</p>
+    <h1>泛型</h1>
+    <p class="analogy">泛型是一個模具：形狀先刻好，要用時才決定倒進去的是 int 還是 string。</p>
+  </header>
+
+  <section aria-labelledby="look">
+    <h2 id="look">看圖</h2>
+    <div class="figs">
+      <figure class="fig">
+        <svg viewBox="0 0 480 230" role="img" aria-label="Stack[T] 這個模具，可以做出 Stack[int]、Stack[string]、Stack[Celsius]">
+          <title>泛型是模具</title>
+          <rect class="acc" x="150" y="20" width="180" height="70" rx="10"/>
+          <text class="mono bold" x="240" y="52" text-anchor="middle">Stack[T]</text>
+          <text class="small" x="240" y="76" text-anchor="middle">一份程式碼</text>
+          <path class="wire" d="M240 90 V116 M85 116 H395 M85 116 V138 M240 116 V138 M395 116 V138"/>
+          <path class="tip" d="M85 148 L78 135 L92 135 Z"/>
+          <path class="tip" d="M240 148 L233 135 L247 135 Z"/>
+          <path class="tip" d="M395 148 L388 135 L402 135 Z"/>
+          <rect class="soft" x="20" y="150" width="130" height="48" rx="8"/>
+          <rect class="soft" x="175" y="150" width="130" height="48" rx="8"/>
+          <rect class="soft" x="330" y="150" width="130" height="48" rx="8"/>
+          <text class="small mono" x="85" y="179" text-anchor="middle">Stack[int]</text>
+          <text class="small mono" x="240" y="179" text-anchor="middle">Stack[string]</text>
+          <text class="small mono" x="395" y="179" text-anchor="middle">Stack[Celsius]</text>
+          <text class="sm mono" x="85" y="220" text-anchor="middle">T = int</text>
+          <text class="sm mono" x="240" y="220" text-anchor="middle">T = string</text>
+          <text class="sm mono" x="395" y="220" text-anchor="middle">T = Celsius</text>
+        </svg>
+        <figcaption>泛型是一個模具：程式碼只寫一次，用的時候才決定 <code>T</code> 是什麼型別。</figcaption>
+      </figure>
+
+      <figure class="fig">
+        <svg viewBox="0 0 480 236" role="img" aria-label="型別限制 Number 只讓底層是 int、int64、float64 的型別進來：int 和底層是 float64 的 Celsius 可以，string 不行">
+          <title>型別限制是入場條件</title>
+          <rect class="acc" x="110" y="20" width="260" height="80" rx="10"/>
+          <text class="mono bold" x="240" y="48" text-anchor="middle">Number</text>
+          <text class="small mono" x="240" y="78" text-anchor="middle">~int | ~int64 | ~float64</text>
+          <path class="wire acc-ln" d="M155 160 V114 M275 160 V114"/>
+          <path class="tip acc-tip" d="M155 104 L148 117 L162 117 Z"/>
+          <path class="tip acc-tip" d="M275 104 L268 117 L282 117 Z"/>
+          <path class="wire hot-ln dash" d="M410 160 V128"/>
+          <path class="wire hot-ln" d="M402 108 L418 124 M418 108 L402 124"/>
+          <rect class="acc" x="110" y="160" width="90" height="40" rx="6"/>
+          <rect class="acc" x="220" y="160" width="110" height="40" rx="6"/>
+          <rect class="hot" x="360" y="160" width="100" height="40" rx="6"/>
+          <text class="mono" x="155" y="186" text-anchor="middle">int</text>
+          <text class="mono" x="275" y="186" text-anchor="middle">Celsius</text>
+          <text class="mono t-hot" x="410" y="186" text-anchor="middle">string</text>
+          <text class="sm" x="275" y="222" text-anchor="middle">底層是 float64</text>
+          <text class="sm t-hot" x="410" y="222" text-anchor="middle">編譯時擋下</text>
+        </svg>
+        <figcaption>型別限制是入場條件：<code>Number</code> 只讓底層是 int、int64、float64 的型別進來，<code>string</code> 在編譯時就被擋下。</figcaption>
+      </figure>
+
+      <figure class="fig">
+        <svg viewBox="0 0 480 176" role="img" aria-label="Go 1.27 的 generic method：Stack[int] 的 Convert 方法把 1 和 3 轉成 #1 和 #3，得到 Stack[string]">
+          <title>generic method</title>
+          <rect class="acc" x="16" y="50" width="170" height="100" rx="10"/>
+          <text class="small mono" x="101" y="74" text-anchor="middle">Stack[int]</text>
+          <rect class="box" x="40" y="90" width="56" height="40" rx="4"/>
+          <rect class="box" x="106" y="90" width="56" height="40" rx="4"/>
+          <text class="mono" x="68" y="116" text-anchor="middle">1</text>
+          <text class="mono" x="134" y="116" text-anchor="middle">3</text>
+          <path class="wire" d="M190 100 H282"/>
+          <path class="tip" d="M294 100 L281 93 L281 107 Z"/>
+          <text class="small mono" x="240" y="86" text-anchor="middle">Convert[U]</text>
+          <text class="sm" x="240" y="124" text-anchor="middle">Go 1.27</text>
+          <rect class="acc" x="298" y="50" width="170" height="100" rx="10"/>
+          <text class="small mono" x="383" y="74" text-anchor="middle">Stack[string]</text>
+          <rect class="box" x="322" y="90" width="56" height="40" rx="4"/>
+          <rect class="box" x="388" y="90" width="56" height="40" rx="4"/>
+          <text class="small mono" x="350" y="115" text-anchor="middle">"#1"</text>
+          <text class="small mono" x="416" y="115" text-anchor="middle">"#3"</text>
+        </svg>
+        <figcaption>Go 1.27 起，方法可以有自己的型別參數：<code>Stack[int]</code> 的 <code>Convert</code> 方法可以產生 <code>Stack[string]</code>。</figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <section aria-labelledby="code">
+    <h2 id="code">最小範例</h2>
+    <pre class="code"><code>func Map[T, U any](s []T, f func(T) U) []U {
+	out := make([]U, 0, len(s))
+	for _, v := range s {
+		out = append(out, f(v))
+	}
+	return out
+}
+
+type Stack[T any] struct{ items []T }
+
+func (s *Stack[T]) Push(v T) { s.items = append(s.items, v) }
+
+func main() {
+	fmt.Println(Map([]int{1, 2, 3}, strconv.Itoa))
+	var s Stack[string]
+	s.Push("Go")
+	fmt.Println(s.items, max(3, 7)) <span class="c">// max 是 Go 1.21 起的內建函式</span>
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out"><code>[1 2 3]
+[Go] 7</code></pre>
+  </section>
+
+  <section aria-labelledby="notes">
+    <h2 id="notes">工程師筆記</h2>
+    <ul class="notes">
+      <li>先寫具體型別，同樣的邏輯出現第二、三次再改成泛型。如果只是「呼叫某個方法」，interface 通常更簡單。</li>
+      <li>常用限制：<code>any</code>、<code>comparable</code>（可以用 <code>==</code>，能當 map key）、<code>cmp.Ordered</code>（可以用 <code>&lt;</code>）。</li>
+      <li><code>~T</code> 代表「底層型別是 T」。加了 <code>~</code>，自訂型別（像 <code>type Celsius float64</code>）才能用。</li>
+      <li>大多數時候型別參數會自動推斷，不用寫成 <code>Sum[int](…)</code>。</li>
+      <li>先找標準庫：Go 1.21 起有內建的 <code>min</code>、<code>max</code>、<code>clear</code>，<code>slices</code>、<code>maps</code> 套件也提供大量泛型函式。</li>
+      <li>Go 1.27 起方法可以有自己的型別參數；但介面的方法不能有型別參數，generic method 也不能拿來實作介面。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="java">
+    <h2 id="java">從 Java 來的你</h2>
+    <div class="table-wrap">
+      <table class="vs">
+        <thead><tr><th scope="col">主題</th><th scope="col">Java</th><th scope="col">Go</th></tr></thead>
+        <tbody>
+          <tr><th scope="row">語法</th><td class="java"><code>List&lt;T&gt;</code>、<code>&lt;T extends Comparable&lt;T&gt;&gt;</code></td><td><code>[T any]</code>、<code>[T cmp.Ordered]</code></td></tr>
+          <tr><th scope="row">執行期</th><td class="java">型別擦除，執行期不知道 T</td><td>沒有擦除，執行期仍知道 T 是什麼</td></tr>
+          <tr><th scope="row">基本型別</th><td class="java">不能用 <code>int</code>，要用 <code>Integer</code></td><td><code>Stack[int]</code> 直接用，不用裝箱</td></tr>
+          <tr><th scope="row">限制</th><td class="java">上界 <code>extends</code></td><td>用 interface 當限制，可以列出型別集合</td></tr>
+          <tr><th scope="row">泛型方法</th><td class="java">一直都有</td><td>Go 1.27 起才有，而且不能拿來實作介面</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section aria-labelledby="run">
+    <h2 id="run">動手跑</h2>
+    <p class="label">在 repo 根目錄</p>
+    <pre class="shell"><code>go run ./chapters/12-generics
+go test ./chapters/12-generics</code></pre>
+    <p><a href="https://github.com/xinqilin/GO-Playground/tree/main/chapters/12-generics">在 GitHub 看完整程式碼</a></p>
+  </section>
+</main>
+
+<nav class="pager" aria-label="章節導覽">
+  <a class="prev" href="11-errors.html">← 11 錯誤處理</a>
+  <a class="home" href="index.html">目錄</a>
+  <a class="next" href="13-iterators.html">13 疊代器 →</a>
+</nav>
+</body>
+</html>
