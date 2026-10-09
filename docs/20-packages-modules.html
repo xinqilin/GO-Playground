@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>package 與 module｜Go 圖解手冊</title>
+<meta name="description" content="Go 的 package 與 module：import 路徑怎麼組成、大小寫決定匯出、internal 目錄，以及 go.mod 與 go.sum。">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<header class="site">
+  <a href="index.html">Go 圖解手冊</a>
+  <span class="count">20 / 24</span>
+</header>
+
+<main class="page">
+  <header class="hero">
+    <div class="num" aria-hidden="true">20</div>
+    <p class="eyebrow">Part 4 · 工程實務 · 第 20 章</p>
+    <h1>package 與 module</h1>
+    <p class="analogy">module 是一整棟大樓，package 是裡面的房間；門牌就是 import 路徑。</p>
+  </header>
+
+  <section aria-labelledby="look">
+    <h2 id="look">看圖</h2>
+    <div class="figs">
+      <figure class="fig">
+        <svg viewBox="0 0 480 248" role="img" aria-label="go.mod 宣告 module 路徑；底下的 20-packages-modules 是 package main，greet 是 package greet，internal/counter 只有上一層能 import；import 路徑等於 module 路徑加資料夾路徑">
+          <title>module 與 package 的關係</title>
+          <rect class="acc" x="16" y="16" width="448" height="40" rx="6"/>
+          <text class="small mono" x="32" y="41">go.mod：module github.com/xinqilin/GO-Playground</text>
+          <path class="wire" d="M40 56 V88 H60 M80 106 V188 H100 M80 138 H100"/>
+          <rect class="soft" x="60" y="70" width="190" height="36" rx="6"/>
+          <text class="small mono" x="72" y="93">20-packages-modules/</text>
+          <text class="sm" x="262" y="93">package main</text>
+          <rect class="acc" x="100" y="120" width="170" height="36" rx="6"/>
+          <text class="small mono" x="112" y="143">greet/</text>
+          <text class="sm" x="282" y="143">package greet</text>
+          <rect class="hot" x="100" y="170" width="170" height="36" rx="6"/>
+          <text class="small mono" x="112" y="193">internal/counter/</text>
+          <text class="sm t-hot" x="282" y="193">只有上一層能 import</text>
+          <text class="small mono t-acc" x="16" y="236">import ".../chapters/20-packages-modules/greet"</text>
+        </svg>
+        <figcaption>module 是整個專案，有一個 <code>go.mod</code>；package 是裡面的一個資料夾。import 路徑就是 module 路徑接上資料夾路徑。</figcaption>
+      </figure>
+
+      <figure class="fig">
+        <svg viewBox="0 0 480 206" role="img" aria-label="greet 套件像一間房子：大寫的 Hello 和 Prefix 開在外牆，main 可以使用；小寫的 normalize 在屋裡，main 用不到">
+          <title>大寫開門，小寫關門</title>
+          <rect class="soft" x="200" y="30" width="260" height="160" rx="12"/>
+          <text class="small mono" x="216" y="54">package greet</text>
+          <rect class="acc" x="190" y="74" width="120" height="34" rx="6"/>
+          <rect class="acc" x="190" y="120" width="120" height="34" rx="6"/>
+          <text class="small mono" x="250" y="96" text-anchor="middle">Hello()</text>
+          <text class="small mono" x="250" y="142" text-anchor="middle">Prefix</text>
+          <text class="sm" x="385" y="84" text-anchor="middle">只有自己人用</text>
+          <rect class="box" x="330" y="96" width="110" height="34" rx="6"/>
+          <text class="small mono" x="385" y="118" text-anchor="middle">normalize()</text>
+          <rect class="soft" x="16" y="86" width="100" height="40" rx="6"/>
+          <text class="mono" x="66" y="112" text-anchor="middle">main</text>
+          <path class="wire acc-ln" d="M116 98 H150 V91 H180 M150 98 V137 H180"/>
+          <path class="tip acc-tip" d="M190 91 L178 85 L178 97 Z"/>
+          <path class="tip acc-tip" d="M190 137 L178 131 L178 143 Z"/>
+          <path class="wire hot-ln dash" d="M66 126 V176 H385 V152"/>
+          <path class="wire hot-ln" d="M377 136 L393 152 M393 136 L377 152"/>
+        </svg>
+        <figcaption>名稱大寫開頭，就是開在外牆的門，其他套件進得來；小寫開頭的放在屋裡，只有同一個套件能用。</figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <section aria-labelledby="code">
+    <h2 id="code">最小範例</h2>
+    <p class="label">greet/greet.go（節錄）</p>
+    <pre class="code"><code>package greet
+
+var Prefix = "哈囉"
+
+func Hello(name string) string { <span class="c">// 大寫開頭：其他套件可以用</span>
+	return Prefix + "，" + normalize(name)
+}
+
+func normalize(name string) string { … } <span class="c">// 小寫開頭：只有 greet 自己能用</span></code></pre>
+    <p class="label">main.go（節錄）</p>
+    <pre class="code"><code>import (
+	"github.com/xinqilin/GO-Playground/chapters/20-packages-modules/greet"
+	"github.com/xinqilin/GO-Playground/chapters/20-packages-modules/internal/counter"
+)
+
+func init() { fmt.Println("init：在 main 之前執行") }
+
+func main() {
+	fmt.Println(greet.Hello("Gopher"))
+	fmt.Println(greet.Hello("  "))
+	greet.Prefix = "嗨"
+	fmt.Println(greet.Hello("Go"))
+	fmt.Println(counter.Next(), counter.Next())
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out"><code>init：在 main 之前執行
+哈囉，Gopher
+哈囉，陌生人
+嗨，Go
+1 2</code></pre>
+  </section>
+
+  <section aria-labelledby="notes">
+    <h2 id="notes">工程師筆記</h2>
+    <ul class="notes">
+      <li>一個資料夾就是一個 package，裡面的檔案 package 名稱要一樣；package 名稱通常就是資料夾的最後一段。</li>
+      <li><code>internal/</code> 底下的 package 只有它的上一層目錄樹能 import，用來藏實作細節。</li>
+      <li><code>go get</code> 新增依賴、<code>go mod tidy</code> 整理 <code>go.mod</code> 和 <code>go.sum</code>；<code>go.sum</code> 記錄依賴的校驗碼，要一起 commit。</li>
+      <li>不能循環 import：A import 了 B，B 就不能再 import A。遇到了通常代表要再切出一個 package。</li>
+      <li>package 名稱短、小寫、不加底線；避免 <code>util</code>、<code>common</code> 這種什麼都放的名字。</li>
+      <li><code>init()</code> 會在 main 之前自動執行。用多了會讓啟動順序難以追蹤，能不用就不用。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="java">
+    <h2 id="java">從 Java 來的你</h2>
+    <div class="table-wrap">
+      <table class="vs">
+        <thead><tr><th scope="col">主題</th><th scope="col">Java</th><th scope="col">Go</th></tr></thead>
+        <tbody>
+          <tr><th scope="row">專案描述</th><td class="java"><code>pom.xml</code> / <code>build.gradle</code></td><td><code>go.mod</code></td></tr>
+          <tr><th scope="row">依賴校驗</th><td class="java">固定版本號或 lock 檔</td><td><code>go.sum</code> 記錄校驗碼</td></tr>
+          <tr><th scope="row">命名空間</th><td class="java">反向網域 <code>com.example.app</code></td><td>import 路徑用 repo 網址</td></tr>
+          <tr><th scope="row">可見性</th><td class="java"><code>public</code>、<code>protected</code>、package-private、<code>private</code></td><td>只有兩種：大寫匯出、小寫不匯出</td></tr>
+          <tr><th scope="row">模組封裝</th><td class="java">JPMS <code>module-info.java</code> 的 exports</td><td><code>internal/</code> 目錄</td></tr>
+          <tr><th scope="row">套件來源</th><td class="java">Maven Central</td><td>直接從版本控制抓，預設經過 proxy.golang.org</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section aria-labelledby="run">
+    <h2 id="run">動手跑</h2>
+    <p class="label">在 repo 根目錄</p>
+    <pre class="shell"><code>go run ./chapters/20-packages-modules
+go test ./chapters/20-packages-modules/...
+go doc ./chapters/20-packages-modules/greet   <span class="c"># 看 greet 的文件</span></code></pre>
+    <p><a href="https://github.com/xinqilin/GO-Playground/tree/main/chapters/20-packages-modules">在 GitHub 看完整程式碼</a></p>
+  </section>
+</main>
+
+<nav class="pager" aria-label="章節導覽">
+  <a class="prev" href="19-concurrency-patterns.html">← 19 並行模式</a>
+  <a class="home" href="index.html">目錄</a>
+  <a class="next" href="21-testing.html">21 測試 →</a>
+</nav>
+</body>
+</html>

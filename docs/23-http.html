@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>HTTP 服務｜Go 圖解手冊</title>
+<meta name="description" content="只用標準庫 net/http 寫 HTTP 服務：Go 1.22 的方法與路徑路由、middleware、JSON 回應，以及用 httptest 測試。">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<header class="site">
+  <a href="index.html">Go 圖解手冊</a>
+  <span class="count">23 / 24</span>
+</header>
+
+<main class="page">
+  <header class="hero">
+    <div class="num" aria-hidden="true">23</div>
+    <p class="eyebrow">Part 4 · 工程實務 · 第 23 章</p>
+    <h1>HTTP 服務</h1>
+    <p class="analogy">HTTP server 像一間餐廳：路由是帶位的服務生，handler 是廚師，middleware 是門口的登記簿。</p>
+  </header>
+
+  <section aria-labelledby="look">
+    <h2 id="look">看圖</h2>
+    <div class="figs">
+      <figure class="fig">
+        <svg viewBox="0 0 480 226" role="img" aria-label="curl 送出的請求先經過 logRequests middleware，再由 ServeMux 依方法和路徑找到 hello、create 或 get handler，回應原路回去">
+          <title>一個請求走過的路</title>
+          <rect class="soft" x="12" y="80" width="80" height="70" rx="8"/>
+          <text class="small mono" x="52" y="120" text-anchor="middle">curl</text>
+          <rect class="wire acc-ln dash" x="110" y="20" width="358" height="196" rx="14"/>
+          <text class="small mono t-acc" x="126" y="42">logRequests（middleware）</text>
+          <rect class="acc" x="124" y="60" width="170" height="136" rx="8"/>
+          <text class="small mono bold" x="209" y="82" text-anchor="middle">ServeMux</text>
+          <text class="sm mono" x="134" y="110">GET /hello/{name}</text>
+          <text class="sm mono" x="134" y="140">POST /notes</text>
+          <text class="sm mono" x="134" y="170">GET /notes/{id}</text>
+          <path class="wire" d="M294 105 H310 M294 135 H310 M294 165 H310"/>
+          <path class="tip" d="M320 105 L310 99 L310 111 Z"/>
+          <path class="tip" d="M320 135 L310 129 L310 141 Z"/>
+          <path class="tip" d="M320 165 L310 159 L310 171 Z"/>
+          <rect class="hot" x="320" y="92" width="130" height="26" rx="6"/>
+          <rect class="soft" x="320" y="122" width="130" height="26" rx="6"/>
+          <rect class="soft" x="320" y="152" width="130" height="26" rx="6"/>
+          <text class="small mono t-hot" x="385" y="110" text-anchor="middle">hello</text>
+          <text class="small mono" x="385" y="140" text-anchor="middle">create</text>
+          <text class="small mono" x="385" y="170" text-anchor="middle">get</text>
+          <path class="wire" d="M92 105 H114"/>
+          <path class="tip" d="M124 105 L112 99 L112 111 Z"/>
+          <path class="wire acc-ln dash" d="M124 135 H102"/>
+          <path class="tip acc-tip" d="M92 135 L104 129 L104 141 Z"/>
+        </svg>
+        <figcaption>請求先經過 middleware，再由 <code>ServeMux</code> 依「方法 + 路徑」找到對應的 handler；路徑裡的 <code>{name}</code> 用 <code>r.PathValue</code> 取出。</figcaption>
+      </figure>
+
+      <figure class="fig">
+        <svg viewBox="0 0 480 162" role="img" aria-label="httptest 用假的請求呼叫真的 handler，再用 Recorder 收下回應，直接檢查狀態碼和內容，不用開 port">
+          <title>httptest：不開 port 也能測</title>
+          <rect class="soft" x="12" y="50" width="120" height="60" rx="8"/>
+          <rect class="acc" x="180" y="50" width="120" height="60" rx="8"/>
+          <rect class="soft" x="348" y="50" width="120" height="60" rx="8"/>
+          <text class="small mono" x="72" y="76" text-anchor="middle">NewRequest</text>
+          <text class="small" x="72" y="98" text-anchor="middle">假的請求</text>
+          <text class="small mono" x="240" y="76" text-anchor="middle">ServeHTTP</text>
+          <text class="small" x="240" y="98" text-anchor="middle">真的 handler</text>
+          <text class="small mono" x="408" y="76" text-anchor="middle">Recorder</text>
+          <text class="small" x="408" y="98" text-anchor="middle">收下回應</text>
+          <path class="wire" d="M132 80 H168 M300 80 H336"/>
+          <path class="tip" d="M178 80 L166 74 L166 86 Z"/>
+          <path class="tip" d="M346 80 L334 74 L334 86 Z"/>
+          <text class="small t-acc" x="240" y="146" text-anchor="middle">直接檢查 rec.Code、rec.Body，不用開 port、不用網路</text>
+        </svg>
+        <figcaption><code>httptest</code> 用假的請求和假的 ResponseWriter 直接呼叫 handler，測試快、穩定，也不需要網路。</figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <section aria-labelledby="code">
+    <h2 id="code">最小範例</h2>
+    <pre class="code"><code>func main() {
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /hello/{name}", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintf(w, "哈囉，%s\n", r.PathValue("name"))
+	})
+	srv := &amp;http.Server{
+		Addr:              ":8080",
+		Handler:           mux,
+		ReadHeaderTimeout: 5 * time.Second,
+	}
+	log.Fatal(srv.ListenAndServe())
+}</code></pre>
+    <p class="label">另一個終端機</p>
+    <pre class="out"><code>$ curl localhost:8080/hello/Gopher
+哈囉，Gopher</code></pre>
+  </section>
+
+  <section aria-labelledby="notes">
+    <h2 id="notes">工程師筆記</h2>
+    <ul class="notes">
+      <li>Go 1.22 起 <code>ServeMux</code> 支援方法和路徑變數：<code>"GET /notes/{id}"</code>，用 <code>r.PathValue("id")</code> 取值；方法不對會自動回 405。</li>
+      <li>handler 會被很多 goroutine 同時呼叫，共用的資料要加鎖。</li>
+      <li><code>http.Server</code> 一定要設逾時（至少 <code>ReadHeaderTimeout</code>）；直接呼叫 <code>http.ListenAndServe</code> 沒有任何逾時。</li>
+      <li>middleware 就是「收一個 <code>http.Handler</code>、回傳一個 <code>http.Handler</code>」的函式，可以一層一層包起來。</li>
+      <li>HTTP client 也要設逾時：<code>&amp;http.Client{Timeout: 10 * time.Second}</code>；預設的 <code>http.DefaultClient</code> 沒有逾時。</li>
+      <li>關機時呼叫 <code>srv.Shutdown(ctx)</code>，等進行中的請求做完再結束；專題 todoapi 有完整示範。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="java">
+    <h2 id="java">從 Java 來的你</h2>
+    <div class="table-wrap">
+      <table class="vs">
+        <thead><tr><th scope="col">主題</th><th scope="col">Java</th><th scope="col">Go</th></tr></thead>
+        <tbody>
+          <tr><th scope="row">框架</th><td class="java">Spring MVC、Spring Boot</td><td>標準庫 <code>net/http</code> 就能上線</td></tr>
+          <tr><th scope="row">路由</th><td class="java"><code>@GetMapping("/notes/{id}")</code></td><td><code>mux.HandleFunc("GET /notes/{id}", h)</code></td></tr>
+          <tr><th scope="row">路徑變數</th><td class="java"><code>@PathVariable</code></td><td><code>r.PathValue("id")</code></td></tr>
+          <tr><th scope="row">攔截器</th><td class="java"><code>Filter</code>、<code>HandlerInterceptor</code></td><td>middleware：包住 <code>http.Handler</code> 的函式</td></tr>
+          <tr><th scope="row">測試</th><td class="java"><code>MockMvc</code></td><td><code>httptest.NewRecorder</code></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section aria-labelledby="run">
+    <h2 id="run">動手跑</h2>
+    <p class="label">在 repo 根目錄啟動，再開另一個終端機</p>
+    <pre class="shell"><code>go run ./chapters/23-http
+
+curl localhost:8080/hello/Gopher
+curl -X POST -d '{"text":"買牛奶"}' localhost:8080/notes
+curl localhost:8080/notes/1
+go test ./chapters/23-http   <span class="c"># 用 httptest，不用開 server</span></code></pre>
+    <p class="label">對應的回應（由測試比對）</p>
+    <pre class="out"><code>200 哈囉，Gopher
+201 {"id":1,"text":"買牛奶"}
+200 {"id":1,"text":"買牛奶"}
+404 404 page not found
+405 Method Not Allowed</code></pre>
+    <p><a href="https://github.com/xinqilin/GO-Playground/tree/main/chapters/23-http">在 GitHub 看完整程式碼</a></p>
+  </section>
+</main>
+
+<nav class="pager" aria-label="章節導覽">
+  <a class="prev" href="22-stdlib.html">← 22 標準庫精選</a>
+  <a class="home" href="index.html">目錄</a>
+  <a class="next" href="24-toolchain.html">24 工具鏈 →</a>
+</nav>
+</body>
+</html>

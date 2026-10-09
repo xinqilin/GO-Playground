@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>工具鏈｜Go 圖解手冊</title>
+<meta name="description" content="go 指令裡的工具：gofmt、go vet、go fix、go doc，build tag、-ldflags 寫入版本號、交叉編譯，以及 pprof。">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<header class="site">
+  <a href="index.html">Go 圖解手冊</a>
+  <span class="count">24 / 24</span>
+</header>
+
+<main class="page">
+  <header class="hero">
+    <div class="num" aria-hidden="true">24</div>
+    <p class="eyebrow">Part 4 · 工程實務 · 第 24 章</p>
+    <h1>工具鏈</h1>
+    <p class="analogy">go 指令是一整箱工具：排版、檢查、文件、測試、編譯都在裡面，不用另外安裝。</p>
+  </header>
+
+  <section aria-labelledby="look">
+    <h2 id="look">看圖</h2>
+    <div class="figs">
+      <figure class="fig">
+        <svg viewBox="0 0 480 196" role="img" aria-label="go 指令的工具：gofmt 排版、go vet 抓可疑寫法、go fix 換成新寫法、go doc 查文件、go test 測試、go build 編譯、go run 編譯並執行、go mod 管理依賴">
+          <title>一個 go 指令，一整箱工具</title>
+          <rect class="acc" x="14" y="20" width="104" height="70" rx="8"/>
+          <rect class="acc" x="130" y="20" width="104" height="70" rx="8"/>
+          <rect class="hot" x="246" y="20" width="104" height="70" rx="8"/>
+          <rect class="acc" x="362" y="20" width="104" height="70" rx="8"/>
+          <rect class="acc" x="14" y="106" width="104" height="70" rx="8"/>
+          <rect class="acc" x="130" y="106" width="104" height="70" rx="8"/>
+          <rect class="acc" x="246" y="106" width="104" height="70" rx="8"/>
+          <rect class="acc" x="362" y="106" width="104" height="70" rx="8"/>
+          <text class="small mono bold" x="66" y="50" text-anchor="middle">gofmt</text>
+          <text class="sm" x="66" y="74" text-anchor="middle">排版</text>
+          <text class="small mono bold" x="182" y="50" text-anchor="middle">go vet</text>
+          <text class="sm" x="182" y="74" text-anchor="middle">抓可疑寫法</text>
+          <text class="small mono bold t-hot" x="298" y="50" text-anchor="middle">go fix</text>
+          <text class="sm" x="298" y="74" text-anchor="middle">換成新寫法</text>
+          <text class="small mono bold" x="414" y="50" text-anchor="middle">go doc</text>
+          <text class="sm" x="414" y="74" text-anchor="middle">查文件</text>
+          <text class="small mono bold" x="66" y="136" text-anchor="middle">go test</text>
+          <text class="sm" x="66" y="160" text-anchor="middle">測試</text>
+          <text class="small mono bold" x="182" y="136" text-anchor="middle">go build</text>
+          <text class="sm" x="182" y="160" text-anchor="middle">編譯</text>
+          <text class="small mono bold" x="298" y="136" text-anchor="middle">go run</text>
+          <text class="sm" x="298" y="160" text-anchor="middle">編譯並執行</text>
+          <text class="small mono bold" x="414" y="136" text-anchor="middle">go mod</text>
+          <text class="sm" x="414" y="160" text-anchor="middle">管理依賴</text>
+        </svg>
+        <figcaption>go 指令本身就是一整箱工具：排版、檢查、文件、測試、編譯、依賴管理都在裡面。</figcaption>
+      </figure>
+
+      <figure class="fig">
+        <svg viewBox="0 0 480 196" role="img" aria-label="同一份 main.go，設定不同的 GOOS 和 GOARCH，就能編出 linux/amd64、windows/amd64 的 app.exe、darwin/arm64 三種執行檔">
+          <title>交叉編譯</title>
+          <path class="box" d="M16 60 H66 L86 80 V140 H16 Z"/>
+          <path class="wire" d="M66 60 V80 H86"/>
+          <path class="wire faint" d="M28 96 H72 M28 110 H62 M28 124 H70"/>
+          <text class="small mono" x="51" y="162" text-anchor="middle">main.go</text>
+          <path class="wire" d="M96 100 H140 M140 40 V160 M140 40 H170 M140 160 H170 M140 100 H170"/>
+          <path class="tip" d="M180 40 L168 34 L168 46 Z"/>
+          <path class="tip" d="M180 100 L168 94 L168 106 Z"/>
+          <path class="tip" d="M180 160 L168 154 L168 166 Z"/>
+          <rect class="acc" x="182" y="20" width="150" height="40" rx="6"/>
+          <rect class="hot" x="182" y="80" width="150" height="40" rx="6"/>
+          <rect class="acc" x="182" y="140" width="150" height="40" rx="6"/>
+          <text class="small mono" x="257" y="45" text-anchor="middle">linux/amd64</text>
+          <text class="small mono t-hot" x="257" y="105" text-anchor="middle">windows/amd64</text>
+          <text class="small mono" x="257" y="165" text-anchor="middle">darwin/arm64</text>
+          <path class="wire" d="M332 40 H344 M332 100 H344 M332 160 H344"/>
+          <path class="tip" d="M354 40 L344 34 L344 46 Z"/>
+          <path class="tip" d="M354 100 L344 94 L344 106 Z"/>
+          <path class="tip" d="M354 160 L344 154 L344 166 Z"/>
+          <text class="small mono" x="362" y="45">app</text>
+          <text class="small mono t-hot" x="362" y="105">app.exe</text>
+          <text class="small mono" x="362" y="165">app</text>
+        </svg>
+        <figcaption>設好 <code>GOOS</code> 和 <code>GOARCH</code>，同一份程式碼就能在 Mac 上編出 Linux 或 Windows 的執行檔。這個 repo 以前的 <code>.exe</code> 就是這樣來的，但編譯產物不該放進 git。</figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <section aria-labelledby="code">
+    <h2 id="code">最小範例</h2>
+    <p class="label">edition_free.go 與 edition_pro.go</p>
+    <pre class="code"><code>//go:build !pro
+
+package main
+
+const edition = "免費版"
+
+<span class="c">// ---- edition_pro.go ----</span>
+//go:build pro
+
+package main
+
+const edition = "專業版"</code></pre>
+    <p class="label">main.go（節錄）</p>
+    <pre class="code"><code>var version = "dev" <span class="c">// 編譯時用 -ldflags 改掉</span>
+
+func describe() string {
+	return fmt.Sprintf("版本 %s，%s", version, edition)
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out"><code>$ go run -tags pro ./chapters/24-toolchain
+版本 dev，專業版
+平台 darwin/arm64
+$ go run -ldflags "-X main.version=1.2.3" ./chapters/24-toolchain
+版本 1.2.3，免費版
+平台 darwin/arm64</code></pre>
+  </section>
+
+  <section aria-labelledby="notes">
+    <h2 id="notes">工程師筆記</h2>
+    <ul class="notes">
+      <li><code>gofmt -l .</code>、<code>go vet ./...</code>、<code>go test -race ./...</code> 是提交前的基本三件事，這個 repo 的 CI 也是跑這三個。</li>
+      <li><code>go fix -diff ./...</code> 會列出可以換成新寫法的地方（例如三段式迴圈改成 <code>range 3</code>、<code>errors.As</code> 改成 <code>errors.AsType</code>）。這個 repo 有幾處刻意保留舊寫法做對照，所以會被列出來。</li>
+      <li>build tag 寫在檔案第一行：<code>//go:build pro</code>，用 <code>-tags pro</code> 切換；檔名結尾是 <code>_windows.go</code>、<code>_linux.go</code> 的檔案會自動依平台挑選。</li>
+      <li><code>-ldflags "-X main.version=1.2.3"</code> 在編譯時寫入版本號，CI 發版時很常用。</li>
+      <li>交叉編譯只要設 <code>GOOS</code>、<code>GOARCH</code>；只有用到 cgo 的程式才會麻煩。</li>
+      <li>效能分析：<code>go test -cpuprofile cpu.out</code> 產生 profile，再用 <code>go tool pprof cpu.out</code> 找熱點；服務可以匯入 <code>net/http/pprof</code> 線上查看。依賴的已知漏洞用 <code>govulncheck</code> 掃描（另外安裝）。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="java">
+    <h2 id="java">從 Java 來的你</h2>
+    <div class="table-wrap">
+      <table class="vs">
+        <thead><tr><th scope="col">主題</th><th scope="col">Java</th><th scope="col">Go</th></tr></thead>
+        <tbody>
+          <tr><th scope="row">建置</th><td class="java">Maven / Gradle 與外掛</td><td><code>go build</code>，內建</td></tr>
+          <tr><th scope="row">靜態檢查</th><td class="java">SpotBugs、Error Prone</td><td><code>go vet</code></td></tr>
+          <tr><th scope="row">格式化</th><td class="java">各家 formatter 設定</td><td><code>gofmt</code>，只有一種</td></tr>
+          <tr><th scope="row">產物</th><td class="java"><code>.jar</code>，要有 JVM</td><td>單一原生執行檔</td></tr>
+          <tr><th scope="row">多平台</th><td class="java">一個 jar 到處跑</td><td>每個平台編一次，用 <code>GOOS</code>/<code>GOARCH</code> 交叉編譯</td></tr>
+          <tr><th scope="row">效能分析</th><td class="java">JFR、async-profiler</td><td><code>pprof</code></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section aria-labelledby="run">
+    <h2 id="run">動手跑</h2>
+    <p class="label">在 repo 根目錄</p>
+    <pre class="shell"><code>gofmt -l .
+go vet ./...
+go fix -diff ./...
+go doc strings.Cut
+go run -tags pro ./chapters/24-toolchain
+GOOS=windows GOARCH=amd64 go build -o bin/hello.exe ./chapters/00-hello</code></pre>
+    <p><a href="https://github.com/xinqilin/GO-Playground/tree/main/chapters/24-toolchain">在 GitHub 看完整程式碼</a></p>
+  </section>
+</main>
+
+<nav class="pager" aria-label="章節導覽">
+  <a class="prev" href="23-http.html">← 23 HTTP 服務</a>
+  <a class="home" href="index.html">目錄</a>
+  <a class="next" href="project-fibonacci.html">專題：fibonacci →</a>
+</nav>
+</body>
+</html>

@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>標準庫精選｜Go 圖解手冊</title>
+<meta name="description" content="Go 標準庫的常用工具：time 的參考時間格式、encoding/json 與 struct tag、os 讀寫檔、log/slog，以及 Go 1.27 的 uuid。">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<header class="site">
+  <a href="index.html">Go 圖解手冊</a>
+  <span class="count">22 / 24</span>
+</header>
+
+<main class="page">
+  <header class="hero">
+    <div class="num" aria-hidden="true">22</div>
+    <p class="eyebrow">Part 4 · 工程實務 · 第 22 章</p>
+    <h1>標準庫精選</h1>
+    <p class="analogy">標準庫是一個隨附的工具箱：時間、JSON、檔案、log、UUID 都有，大部分工作不用裝第三方套件。</p>
+  </header>
+
+  <section aria-labelledby="look">
+    <h2 id="look">看圖</h2>
+    <div class="figs">
+      <figure class="fig">
+        <svg viewBox="0 0 480 188" role="img" aria-label="Go 的時間格式範本是 2006-01-02 15:04:05：月是 1、日是 2、時是下午 3 點、分是 4、秒是 5、年是 6">
+          <title>參考時間 2006-01-02 15:04:05</title>
+          <rect class="acc" x="16" y="40" width="88" height="50" rx="4"/>
+          <rect class="acc" x="124" y="40" width="52" height="50" rx="4"/>
+          <rect class="acc" x="196" y="40" width="52" height="50" rx="4"/>
+          <rect class="acc" x="268" y="40" width="52" height="50" rx="4"/>
+          <rect class="acc" x="340" y="40" width="52" height="50" rx="4"/>
+          <rect class="acc" x="412" y="40" width="52" height="50" rx="4"/>
+          <text class="lg mono" x="60" y="76" text-anchor="middle">2006</text>
+          <text class="lg mono" x="150" y="76" text-anchor="middle">01</text>
+          <text class="lg mono" x="222" y="76" text-anchor="middle">02</text>
+          <text class="lg mono" x="294" y="76" text-anchor="middle">15</text>
+          <text class="lg mono" x="366" y="76" text-anchor="middle">04</text>
+          <text class="lg mono" x="438" y="76" text-anchor="middle">05</text>
+          <text class="mono" x="114" y="72" text-anchor="middle">-</text>
+          <text class="mono" x="186" y="72" text-anchor="middle">-</text>
+          <text class="mono" x="330" y="72" text-anchor="middle">:</text>
+          <text class="mono" x="402" y="72" text-anchor="middle">:</text>
+          <text class="small" x="60" y="114" text-anchor="middle">年</text>
+          <text class="small" x="150" y="114" text-anchor="middle">月</text>
+          <text class="small" x="222" y="114" text-anchor="middle">日</text>
+          <text class="small" x="294" y="114" text-anchor="middle">時</text>
+          <text class="small" x="366" y="114" text-anchor="middle">分</text>
+          <text class="small" x="438" y="114" text-anchor="middle">秒</text>
+          <text class="bold t-hot" x="60" y="146" text-anchor="middle">6</text>
+          <text class="bold t-hot" x="150" y="146" text-anchor="middle">1</text>
+          <text class="bold t-hot" x="222" y="146" text-anchor="middle">2</text>
+          <text class="bold t-hot" x="294" y="146" text-anchor="middle">3</text>
+          <text class="bold t-hot" x="366" y="146" text-anchor="middle">4</text>
+          <text class="bold t-hot" x="438" y="146" text-anchor="middle">5</text>
+          <text class="sm" x="240" y="178" text-anchor="middle">1 月 2 日 下午 3 點 4 分 5 秒，2006 年</text>
+        </svg>
+        <figcaption>Go 的時間格式不用 yyyy-MM-dd，而是直接寫出一個固定的時間：<code>2006-01-02 15:04:05</code>。記法是 1、2、3、4、5、6。</figcaption>
+      </figure>
+
+      <figure class="fig">
+        <svg viewBox="0 0 480 206" role="img" aria-label="struct tag 把 Name 對應到 JSON 的 name、Age 對應到 age 並在沒有值時省略；小寫的 email 沒有匯出，不會出現在 JSON 裡">
+          <title>struct tag 是 JSON 的翻譯表</title>
+          <rect class="soft" x="16" y="20" width="160" height="170" rx="10"/>
+          <rect class="acc" x="320" y="20" width="144" height="170" rx="10"/>
+          <text class="small mono bold" x="28" y="44">User</text>
+          <text class="small mono bold" x="332" y="44">JSON</text>
+          <text class="small mono" x="28" y="80">Name string</text>
+          <text class="small mono" x="28" y="116">Age  *int</text>
+          <text class="small mono" x="28" y="152">email string</text>
+          <path class="wire acc-ln" d="M176 75 H306 M176 111 H306"/>
+          <path class="tip acc-tip" d="M316 75 L304 69 L304 81 Z"/>
+          <path class="tip acc-tip" d="M316 111 L304 105 L304 117 Z"/>
+          <text class="sm mono" x="248" y="66" text-anchor="middle">"name"</text>
+          <text class="sm mono" x="248" y="102" text-anchor="middle">age,omitempty</text>
+          <path class="wire hot-ln dash" d="M176 147 H290"/>
+          <path class="wire hot-ln" d="M292 139 L308 155 M308 139 L292 155"/>
+          <text class="sm t-hot" x="248" y="138" text-anchor="middle">小寫，沒匯出</text>
+          <text class="small mono" x="332" y="80">"name"</text>
+          <text class="small mono" x="332" y="116">"age"</text>
+          <text class="small t-hot" x="332" y="152">不會出現</text>
+        </svg>
+        <figcaption>struct tag 是欄位和 JSON 之間的翻譯表；沒有匯出的欄位，<code>encoding/json</code> 看不到。</figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <section aria-labelledby="code">
+    <h2 id="code">最小範例</h2>
+    <pre class="code"><code>type User struct {
+	Name string `json:"name"`
+	Age  *int   `json:"age,omitempty"`
+}
+
+func main() {
+	t := time.Date(2026, time.October, 9, 14, 30, 0, 0, time.UTC)
+	fmt.Println(t.Format("2006-01-02 15:04")) <span class="c">// 用參考時間當範本</span>
+
+	b, err := json.Marshal(User{Name: "小明", Age: new(30)})
+	fmt.Println(string(b), err)
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out"><code>2026-10-09 14:30
+{"name":"小明","age":30} &lt;nil&gt;</code></pre>
+  </section>
+
+  <section aria-labelledby="notes">
+    <h2 id="notes">工程師筆記</h2>
+    <ul class="notes">
+      <li>常用的時間格式已經定義好：<code>time.RFC3339</code>、<code>time.DateTime</code>、<code>time.DateOnly</code>。時間計算用 <code>time.Duration</code>（<code>90 * time.Minute</code>），存資料庫和傳 API 盡量用 UTC。</li>
+      <li>JSON 欄位要匯出才會被編碼。區分「沒有值」和「零值」，用指標或 <code>omitzero</code>（Go 1.24）。</li>
+      <li>Go 1.27 起 <code>encoding/json</code> 改用 v2 的實作，v1 的 API 不變，但錯誤訊息的文字可能不同，程式不要比對錯誤字串。</li>
+      <li><code>log/slog</code> 是標準的結構化 log；正式環境用 <code>slog.NewJSONHandler</code>，交給 log 平台搜尋。</li>
+      <li><code>uuid</code> 是 Go 1.27 新加入的套件：<code>uuid.New()</code> 目前等同 v4；需要依時間排序（例如資料庫主鍵）就用 <code>uuid.NewV7()</code>。</li>
+      <li>小檔案直接 <code>os.ReadFile</code> / <code>os.WriteFile</code>；大檔案用 <code>os.Open</code> 搭配 <code>bufio.Scanner</code> 一行一行讀。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="java">
+    <h2 id="java">從 Java 來的你</h2>
+    <div class="table-wrap">
+      <table class="vs">
+        <thead><tr><th scope="col">主題</th><th scope="col">Java</th><th scope="col">Go</th></tr></thead>
+        <tbody>
+          <tr><th scope="row">日期格式</th><td class="java"><code>DateTimeFormatter.ofPattern("yyyy-MM-dd")</code></td><td><code>t.Format("2006-01-02")</code></td></tr>
+          <tr><th scope="row">JSON</th><td class="java">Jackson、Gson（第三方）</td><td><code>encoding/json</code>（標準庫）</td></tr>
+          <tr><th scope="row">欄位對應</th><td class="java"><code>@JsonProperty("name")</code></td><td>struct tag <code>json:"name"</code></td></tr>
+          <tr><th scope="row">log</th><td class="java">SLF4J + Logback</td><td><code>log/slog</code></td></tr>
+          <tr><th scope="row">UUID</th><td class="java"><code>UUID.randomUUID()</code></td><td><code>uuid.New()</code>、<code>uuid.NewV7()</code></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section aria-labelledby="run">
+    <h2 id="run">動手跑</h2>
+    <p class="label">在 repo 根目錄</p>
+    <pre class="shell"><code>go run ./chapters/22-stdlib
+go test ./chapters/22-stdlib</code></pre>
+    <p><a href="https://github.com/xinqilin/GO-Playground/tree/main/chapters/22-stdlib">在 GitHub 看完整程式碼</a></p>
+  </section>
+</main>
+
+<nav class="pager" aria-label="章節導覽">
+  <a class="prev" href="21-testing.html">← 21 測試</a>
+  <a class="home" href="index.html">目錄</a>
+  <a class="next" href="23-http.html">23 HTTP 服務 →</a>
+</nav>
+</body>
+</html>
