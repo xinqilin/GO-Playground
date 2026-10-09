@@ -1,0 +1,218 @@
+/*
+ * Go 圖解手冊 共用樣式
+ * 版面：工程師的方格筆記本。單欄閱讀，圖解畫在方格紙卡上，章號用等寬大數字標出順序。
+ * 顏色全部是 token：深色模式只重新定義 token，元件規則不直接寫色碼。
+ */
+:root {
+  --bg: #f6f8fa;
+  --surface: #ffffff;
+  --fg: #17212b;
+  --muted: #5a6777;
+  --line: #d3dbe4;
+  --grid: #e8eef4;
+  --accent: #0a7194;
+  --accent-soft: #e0f1f7;
+  --hot: #c4430c;
+  --hot-soft: #fcebe2;
+  --code-bg: #edf2f6;
+  --term-bg: #17212b;
+  --term-fg: #e6edf3;
+  --term-muted: #93a1b1;
+
+  --font-body: -apple-system, BlinkMacSystemFont, "PingFang TC", "Noto Sans TC", "Microsoft JhengHei", "Segoe UI", system-ui, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  --measure: 46rem;
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0e1419;
+    --surface: #141c23;
+    --fg: #e2e8ee;
+    --muted: #96a3b2;
+    --line: #2a3641;
+    --grid: #1a242e;
+    --accent: #5cc3e2;
+    --accent-soft: #11303a;
+    --hot: #ff8c57;
+    --hot-soft: #3a2015;
+    --code-bg: #111920;
+    --term-bg: #080c10;
+    --term-fg: #e2e8ee;
+    --term-muted: #8592a1;
+    color-scheme: dark;
+  }
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+
+html { -webkit-text-size-adjust: 100%; }
+
+body {
+  margin: 0;
+  padding-inline: 16px;
+  background: var(--bg);
+  color: var(--fg);
+  font: 17px/1.8 var(--font-body);
+}
+
+p { margin: 0 0 12px; }
+
+a { color: var(--accent); text-underline-offset: 3px; }
+a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 3px; }
+
+.site, .page, .pager { max-width: var(--measure); margin-inline: auto; }
+
+/* 頂端列 */
+.site {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  padding-block: 18px 10px;
+  border-bottom: 1px solid var(--line);
+  font-size: 14px;
+  color: var(--muted);
+}
+.site a { color: var(--fg); font-weight: 700; text-decoration: none; }
+.site .count { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+
+/* 章首：大章號 + 標題 + 一句比喻 */
+.hero {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  column-gap: 20px;
+  align-items: end;
+  padding-block: 40px 8px;
+}
+.hero .num {
+  grid-row: 1 / span 2;
+  font-family: var(--font-mono);
+  font-size: 76px;
+  font-weight: 700;
+  line-height: 0.9;
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+}
+.hero .eyebrow { margin: 0; font-size: 14px; color: var(--muted); letter-spacing: 0.08em; }
+.hero h1 { margin: 0; font-size: 40px; line-height: 1.2; text-wrap: balance; }
+.hero .analogy { grid-column: 1 / -1; margin: 18px 0 0; font-size: 21px; line-height: 1.6; color: var(--muted); text-wrap: balance; }
+
+/* 區塊 */
+.page > section { padding-block: 32px 0; }
+.page h2 { margin: 0 0 16px; font-size: 24px; line-height: 1.3; text-wrap: balance; }
+.page h3 { margin: 24px 0 8px; font-size: 18px; }
+
+/* 看圖：方格紙卡 */
+.figs { display: grid; gap: 20px; }
+.fig {
+  margin: 0;
+  padding: 20px 16px 16px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background-color: var(--surface);
+  background-image:
+    linear-gradient(var(--grid) 1px, transparent 1px),
+    linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+  background-size: 24px 24px;
+}
+.fig svg {
+  display: block;
+  width: 100%;
+  max-width: 560px;
+  height: auto;
+  margin-inline: auto;
+  color: var(--fg);
+  font-family: var(--font-body);
+}
+.fig figcaption { margin-top: 14px; font-size: 18px; line-height: 1.6; text-align: center; text-wrap: balance; }
+
+/* SVG 元件：形狀與文字都從 token 取色 */
+.fig text { fill: currentColor; font-size: 18px; }
+.fig .box { fill: var(--surface); stroke: currentColor; stroke-width: 2.5; }
+.fig .soft { fill: var(--code-bg); stroke: var(--muted); stroke-width: 2; }
+.fig .acc { fill: var(--accent-soft); stroke: var(--accent); stroke-width: 2.5; }
+.fig .hot { fill: var(--hot-soft); stroke: var(--hot); stroke-width: 2.5; }
+.fig .wire { fill: none; stroke: currentColor; stroke-width: 2.5; stroke-linecap: round; stroke-linejoin: round; }
+.fig .wire.acc-ln { stroke: var(--accent); }
+.fig .wire.hot-ln { stroke: var(--hot); }
+.fig .wire.faint { stroke: var(--line); }
+.fig .dash { stroke-dasharray: 7 6; }
+.fig .tip { fill: currentColor; }
+.fig .tip.acc-tip { fill: var(--accent); }
+.fig .tip.hot-tip { fill: var(--hot); }
+.fig .sm { font-size: 14px; fill: var(--muted); }
+.fig .lg { font-size: 30px; font-weight: 700; }
+.fig .mono { font-family: var(--font-mono); }
+.fig .bold { font-weight: 700; }
+.fig .mute { fill: var(--muted); }
+.fig .t-acc { fill: var(--accent); }
+.fig .t-hot { fill: var(--hot); }
+
+/* 程式碼 */
+code { font-family: var(--font-mono); font-size: 0.88em; padding: 0.1em 0.35em; border-radius: 4px; background: var(--code-bg); }
+pre {
+  margin: 0;
+  overflow-x: auto;
+  padding: 14px 18px;
+  border-radius: 10px;
+  font: 15px/1.65 var(--font-mono);
+  tab-size: 4;
+}
+pre code { padding: 0; background: none; font-size: inherit; }
+pre.code { background: var(--code-bg); border: 1px solid var(--line); }
+pre.out { background: var(--surface); border: 1px dashed var(--muted); }
+pre.shell { background: var(--term-bg); color: var(--term-fg); }
+pre .c { color: var(--muted); }
+pre.shell .c { color: var(--term-muted); }
+.label { margin: 18px 0 6px; font: 13px/1.4 var(--font-mono); letter-spacing: 0.08em; color: var(--muted); }
+.label:first-child { margin-top: 0; }
+
+/* 工程師筆記 */
+.notes { display: grid; gap: 12px; margin: 0; padding: 0; list-style: none; }
+.notes li { position: relative; padding-left: 22px; }
+.notes li::before {
+  content: "";
+  position: absolute;
+  left: 2px;
+  top: 0.72em;
+  width: 9px;
+  height: 9px;
+  border-radius: 2px;
+  background: var(--accent);
+}
+
+/* 從 Java 來的你 */
+.table-wrap { overflow-x: auto; }
+table.vs { width: 100%; border-collapse: collapse; font-size: 16px; line-height: 1.6; }
+.vs th, .vs td { padding: 10px 12px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+.vs thead th { font-size: 13px; font-weight: 600; letter-spacing: 0.06em; color: var(--muted); }
+.vs tbody th { font-weight: 600; white-space: nowrap; }
+.vs td.java { color: var(--muted); }
+
+/* 上一章 / 目錄 / 下一章 */
+.pager {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  gap: 12px;
+  margin-top: 40px;
+  padding-block: 20px 48px;
+  border-top: 1px solid var(--line);
+  font-size: 15px;
+}
+.pager a { text-decoration: none; }
+.pager .home { text-align: center; }
+.pager .next { text-align: right; }
+
+@media (max-width: 560px) {
+  body { font-size: 16px; }
+  .hero { column-gap: 14px; padding-block: 28px 4px; }
+  .hero .num { font-size: 54px; }
+  .hero h1 { font-size: 30px; }
+  .hero .analogy { font-size: 18px; }
+  .page h2 { font-size: 21px; }
+  .fig { padding: 14px 10px 12px; }
+  .fig figcaption { font-size: 16px; }
+  pre { font-size: 14px; padding: 12px 14px; }
+}
