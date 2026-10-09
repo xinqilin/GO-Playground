@@ -143,6 +143,7 @@ a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-
 .fig .tip.acc-tip { fill: var(--accent); }
 .fig .tip.hot-tip { fill: var(--hot); }
 .fig .sm { font-size: 14px; fill: var(--muted); }
+.fig .small { font-size: 14px; }
 .fig .lg { font-size: 30px; font-weight: 700; }
 .fig .mono { font-family: var(--font-mono); }
 .fig .bold { font-weight: 700; }

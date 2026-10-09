@@ -1,0 +1,198 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>流程控制｜Go 圖解手冊</title>
+<meta name="description" content="Go 的 if、for、switch：if 的初始化敘述、for 的四種寫法、switch 不會往下掉，以及有標籤的 break。">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<header class="site">
+  <a href="index.html">Go 圖解手冊</a>
+  <span class="count">03 / 24</span>
+</header>
+
+<main class="page">
+  <header class="hero">
+    <div class="num" aria-hidden="true">03</div>
+    <p class="eyebrow">Part 1 · 基礎 · 第 03 章</p>
+    <h1>流程控制</h1>
+    <p class="analogy">Go 只有 if、for、switch 三種路標，沒有 while，也沒有三元運算子。</p>
+  </header>
+
+  <section aria-labelledby="look">
+    <h2 id="look">看圖</h2>
+    <div class="figs">
+      <figure class="fig">
+        <svg viewBox="0 0 480 206" role="img" aria-label="if 前面先宣告 n 和 err，它們只活在 if 和 else 兩個區塊裡，離開之後就不存在">
+          <title>if 可以先做一件事</title>
+          <text class="small mono" x="240" y="30" text-anchor="middle">if n, err := strconv.Atoi(s); err != nil {</text>
+          <rect class="wire acc-ln dash" x="20" y="46" width="440" height="110" rx="14"/>
+          <text class="sm t-acc" x="36" y="70">n、err 只活在這個框裡</text>
+          <rect class="soft" x="44" y="84" width="180" height="56" rx="6"/>
+          <rect class="soft" x="256" y="84" width="180" height="56" rx="6"/>
+          <text class="small mono" x="134" y="106" text-anchor="middle">err != nil</text>
+          <text class="small" x="134" y="128" text-anchor="middle">印出「不是數字」</text>
+          <text class="small mono" x="346" y="106" text-anchor="middle">else</text>
+          <text class="small" x="346" y="128" text-anchor="middle">用 n 算兩倍</text>
+          <text class="t-hot" x="240" y="190" text-anchor="middle">離開 if 之後，n 和 err 就不存在了</text>
+        </svg>
+        <figcaption><code>if</code> 前面可以先算一個值；它只活在 if/else 裡，不會弄髒外面。</figcaption>
+      </figure>
+
+      <figure class="fig">
+        <svg viewBox="0 0 480 300" role="img" aria-label="for 的四種寫法：三段式計數、只寫條件像 while、range 走過每個元素、什麼都不寫的無窮迴圈用 break 離開">
+          <title>for 一個關鍵字，四種寫法</title>
+          <rect class="soft" x="12" y="12" width="224" height="132" rx="10"/>
+          <rect class="soft" x="244" y="12" width="224" height="132" rx="10"/>
+          <rect class="soft" x="12" y="156" width="224" height="132" rx="10"/>
+          <rect class="soft" x="244" y="156" width="224" height="132" rx="10"/>
+
+          <text class="small mono" x="26" y="38">for i := 0; i &lt; 3; i++</text>
+          <circle class="acc" cx="62" cy="98" r="18"/>
+          <circle class="acc" cx="124" cy="98" r="18"/>
+          <circle class="acc" cx="186" cy="98" r="18"/>
+          <text class="bold t-acc" x="62" y="104" text-anchor="middle">0</text>
+          <text class="bold t-acc" x="124" y="104" text-anchor="middle">1</text>
+          <text class="bold t-acc" x="186" y="104" text-anchor="middle">2</text>
+          <path class="wire" d="M82 98 H96 M144 98 H158"/>
+          <path class="tip" d="M104 98 L94 92 L94 104 Z"/>
+          <path class="tip" d="M166 98 L156 92 L156 104 Z"/>
+
+          <text class="small mono" x="258" y="38">for n &lt; 100</text>
+          <text class="mono" x="356" y="92" text-anchor="middle">1→3→9→27→81→243</text>
+          <text class="small t-hot" x="356" y="122" text-anchor="middle">到 243 不再小於 100，停</text>
+
+          <text class="small mono" x="26" y="182">for i, v := range s</text>
+          <rect class="acc" x="38" y="204" width="52" height="40" rx="4"/>
+          <rect class="acc" x="98" y="204" width="52" height="40" rx="4"/>
+          <rect class="acc" x="158" y="204" width="52" height="40" rx="4"/>
+          <text class="mono" x="64" y="230" text-anchor="middle">a</text>
+          <text class="mono" x="124" y="230" text-anchor="middle">b</text>
+          <text class="mono" x="184" y="230" text-anchor="middle">c</text>
+          <text class="sm mono" x="64" y="268" text-anchor="middle">i=0</text>
+          <text class="sm mono" x="124" y="268" text-anchor="middle">i=1</text>
+          <text class="sm mono" x="184" y="268" text-anchor="middle">i=2</text>
+
+          <text class="small mono" x="258" y="182">for { … }</text>
+          <rect class="wire" x="274" y="206" width="90" height="52" rx="12"/>
+          <path class="tip" d="M324 206 L311 199 L311 213 Z"/>
+          <text class="small" x="319" y="238" text-anchor="middle">一直跑</text>
+          <path class="wire hot-ln" d="M364 232 H420"/>
+          <path class="tip hot-tip" d="M432 232 L419 225 L419 239 Z"/>
+          <text class="small mono t-hot" x="392" y="222" text-anchor="middle">break</text>
+        </svg>
+        <figcaption>Go 只有 <code>for</code> 一個迴圈關鍵字：三段式、只寫條件、<code>range</code>、無窮迴圈，都是它。</figcaption>
+      </figure>
+
+      <figure class="fig">
+        <svg viewBox="0 0 480 236" role="img" aria-label="switch 拿 a 去比對，符合 case a 就執行完結束，不會往下掉；只有寫了 fallthrough 才會跑進 case b">
+          <title>switch 找到就停</title>
+          <circle class="acc" cx="40" cy="60" r="24"/>
+          <text class="mono bold t-acc" x="40" y="66" text-anchor="middle">"a"</text>
+          <path class="wire" d="M64 60 H90"/>
+          <path class="tip" d="M100 60 L88 54 L88 66 Z"/>
+          <rect class="acc" x="100" y="38" width="200" height="44" rx="6"/>
+          <rect class="soft" x="100" y="108" width="200" height="44" rx="6"/>
+          <rect class="soft" x="100" y="178" width="200" height="44" rx="6"/>
+          <text class="mono" x="116" y="66">case "a":</text>
+          <text class="mono" x="116" y="136">case "b":</text>
+          <text class="mono" x="116" y="206">default:</text>
+          <path class="wire" d="M300 56 H404"/>
+          <path class="tip" d="M416 56 L403 49 L403 63 Z"/>
+          <text class="sm" x="352" y="44" text-anchor="middle">自動結束</text>
+          <text class="bold" x="446" y="62" text-anchor="middle">結束</text>
+          <path class="wire hot-ln dash" d="M300 72 H330 V130 H312"/>
+          <path class="tip hot-tip" d="M300 130 L312 124 L312 136 Z"/>
+          <text class="small mono t-hot" x="338" y="106">fallthrough</text>
+        </svg>
+        <figcaption><code>switch</code> 找到符合的 case 就結束，不會往下掉；真的要往下掉，才寫 <code>fallthrough</code>。</figcaption>
+      </figure>
+
+      <figure class="fig">
+        <svg viewBox="0 0 480 216" role="img" aria-label="在內層迴圈找到答案後，break outer 一次跳出內外兩層迴圈">
+          <title>有標籤的 break</title>
+          <rect class="wire acc-ln dash" x="20" y="20" width="330" height="180" rx="14"/>
+          <text class="small mono t-acc" x="36" y="46">outer: for i := …</text>
+          <rect class="wire dash" x="50" y="64" width="270" height="116" rx="12"/>
+          <text class="small mono" x="66" y="90">for j := …</text>
+          <circle class="hot" cx="130" cy="136" r="10"/>
+          <text class="small" x="130" y="166" text-anchor="middle">找到答案</text>
+          <path class="wire hot-ln" d="M142 136 H446"/>
+          <path class="tip hot-tip" d="M458 136 L445 129 L445 143 Z"/>
+          <text class="small mono t-hot" x="404" y="124" text-anchor="middle">break outer</text>
+          <text class="small" x="410" y="162" text-anchor="middle">兩層都跳出</text>
+        </svg>
+        <figcaption><code>break</code> 加上標籤，可以一次跳出好幾層迴圈；沒有標籤只會跳出最內層。</figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <section aria-labelledby="code">
+    <h2 id="code">最小範例</h2>
+    <pre class="code"><code>func main() {
+	if n, err := strconv.Atoi("42"); err == nil {
+		fmt.Println("兩倍是", n*2)
+	}
+	for i := range 3 {
+		fmt.Print(i)
+	}
+	fmt.Println()
+	switch day := "六"; day {
+	case "六", "日":
+		fmt.Println("週末")
+	default:
+		fmt.Println("平日")
+	}
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out"><code>兩倍是 84
+012
+週末</code></pre>
+  </section>
+
+  <section aria-labelledby="notes">
+    <h2 id="notes">工程師筆記</h2>
+    <ul class="notes">
+      <li>條件不加括號，但大括號一定要寫，而且 <code>{</code> 要跟條件在同一行。</li>
+      <li>沒有 <code>while</code>、<code>do-while</code>，全部用 <code>for</code>；也沒有三元運算子，寫成 if/else。</li>
+      <li>Go 1.22 起，迴圈變數每一圈都是新的一份，在 closure 或 goroutine 裡用到迴圈變數不會再全部拿到最後一個值。</li>
+      <li><code>switch</code> 的 case 不用寫 <code>break</code>；case 可以是任何運算式，也可以列多個值。</li>
+      <li><code>fallthrough</code> 不檢查下一個 case 的條件就直接執行，實務上很少用。</li>
+      <li><code>break</code>、<code>continue</code> 加標籤可以作用在外層迴圈。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="java">
+    <h2 id="java">從 Java 來的你</h2>
+    <div class="table-wrap">
+      <table class="vs">
+        <thead><tr><th scope="col">主題</th><th scope="col">Java</th><th scope="col">Go</th></tr></thead>
+        <tbody>
+          <tr><th scope="row">迴圈</th><td class="java"><code>for</code>、<code>while</code>、<code>do-while</code>、for-each</td><td>只有 <code>for</code></td></tr>
+          <tr><th scope="row">走訪集合</th><td class="java"><code>for (var x : list)</code></td><td><code>for i, x := range list</code></td></tr>
+          <tr><th scope="row">switch 往下掉</th><td class="java">傳統 switch 預設會往下掉，要寫 <code>break</code></td><td>預設不會，要往下掉才寫 <code>fallthrough</code></td></tr>
+          <tr><th scope="row">三元運算子</th><td class="java"><code>cond ? a : b</code></td><td>沒有，寫 if/else</td></tr>
+          <tr><th scope="row">跳出外層迴圈</th><td class="java">標籤加 <code>break label</code></td><td>一樣：標籤加 <code>break label</code></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section aria-labelledby="run">
+    <h2 id="run">動手跑</h2>
+    <p class="label">在 repo 根目錄</p>
+    <pre class="shell"><code>go run ./chapters/03-control-flow
+go test ./chapters/03-control-flow</code></pre>
+    <p><a href="https://github.com/xinqilin/GO-Playground/tree/main/chapters/03-control-flow">在 GitHub 看完整程式碼</a></p>
+  </section>
+</main>
+
+<nav class="pager" aria-label="章節導覽">
+  <a class="prev" href="02-input-output.html">← 02 輸入與輸出</a>
+  <a class="home" href="index.html">目錄</a>
+  <a class="next" href="04-functions.html">04 函式 →</a>
+</nav>
+</body>
+</html>

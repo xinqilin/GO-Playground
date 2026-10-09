@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>map｜Go 圖解手冊</title>
+<meta name="description" content="Go 的 map：用 key 直接查找、找不到時的零值與 comma-ok、走訪順序不固定，以及 nil map。">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<header class="site">
+  <a href="index.html">Go 圖解手冊</a>
+  <span class="count">07 / 24</span>
+</header>
+
+<main class="page">
+  <header class="hero">
+    <div class="num" aria-hidden="true">07</div>
+    <p class="eyebrow">Part 1 · 基礎 · 第 07 章</p>
+    <h1>map</h1>
+    <p class="analogy">map 是一排有名牌的置物櫃：報上名字，就直接打開那一格。</p>
+  </header>
+
+  <section aria-labelledby="look">
+    <h2 id="look">看圖</h2>
+    <div class="figs">
+      <figure class="fig">
+        <svg viewBox="0 0 480 206" role="img" aria-label="四個置物櫃各有名牌；ages 小美 直接打開小美那一格，拿到 22">
+          <title>用 key 直接找到櫃子</title>
+          <text class="mono" x="24" y="42">ages["小美"]</text>
+          <path class="wire hot-ln" d="M168 36 H187 V66"/>
+          <path class="tip hot-tip" d="M187 76 L180 63 L194 63 Z"/>
+          <rect class="soft" x="33" y="80" width="96" height="110" rx="6"/>
+          <rect class="acc" x="139" y="80" width="96" height="110" rx="6"/>
+          <rect class="soft" x="245" y="80" width="96" height="110" rx="6"/>
+          <rect class="soft" x="351" y="80" width="96" height="110" rx="6"/>
+          <rect class="box" x="45" y="92" width="72" height="28" rx="4"/>
+          <rect class="box" x="151" y="92" width="72" height="28" rx="4"/>
+          <rect class="box" x="257" y="92" width="72" height="28" rx="4"/>
+          <rect class="box" x="363" y="92" width="72" height="28" rx="4"/>
+          <text class="small" x="81" y="111" text-anchor="middle">小明</text>
+          <text class="small bold" x="187" y="111" text-anchor="middle">小美</text>
+          <text class="small" x="293" y="111" text-anchor="middle">阿德</text>
+          <text class="small" x="399" y="111" text-anchor="middle">小玉</text>
+          <text class="lg" x="81" y="166" text-anchor="middle">19</text>
+          <text class="lg t-acc" x="187" y="166" text-anchor="middle">22</text>
+          <text class="lg" x="293" y="166" text-anchor="middle">31</text>
+          <text class="lg" x="399" y="166" text-anchor="middle">27</text>
+        </svg>
+        <figcaption>map 用 key 直接打開對應的櫃子，不用一格一格找。</figcaption>
+      </figure>
+
+      <figure class="fig">
+        <svg viewBox="0 0 480 236" role="img" aria-label="查蘋果：櫃子存在，值是 0，ok 是 true；查香蕉：沒有這個櫃子，拿到零值 0，ok 是 false">
+          <title>找不到的 key：comma-ok</title>
+          <path class="wire faint" d="M240 12 V226"/>
+          <text class="small mono" x="120" y="30" text-anchor="middle">v, ok := stock["蘋果"]</text>
+          <rect class="acc" x="70" y="48" width="100" height="110" rx="6"/>
+          <rect class="box" x="84" y="60" width="72" height="28" rx="4"/>
+          <text class="small" x="120" y="79" text-anchor="middle">蘋果</text>
+          <text class="lg" x="120" y="138" text-anchor="middle">0</text>
+          <text class="mono" x="120" y="196" text-anchor="middle">v = 0</text>
+          <text class="mono t-acc" x="120" y="222" text-anchor="middle">ok = true</text>
+
+          <text class="small mono" x="360" y="30" text-anchor="middle">v, ok := stock["香蕉"]</text>
+          <rect class="wire dash" x="310" y="48" width="100" height="110" rx="6"/>
+          <text class="lg mute" x="360" y="116" text-anchor="middle">?</text>
+          <text class="mono" x="360" y="196" text-anchor="middle">v = 0（零值）</text>
+          <text class="mono t-hot" x="360" y="222" text-anchor="middle">ok = false</text>
+        </svg>
+        <figcaption>找不到 key 不會報錯，只會拿到零值；要分辨「沒有這格」和「這格放的是 0」，看第二個回傳值 <code>ok</code>。</figcaption>
+      </figure>
+
+      <figure class="fig">
+        <svg viewBox="0 0 480 214" role="img" aria-label="同一個 map 走訪兩次，順序可能是 c a b，也可能是 b c a；先排序 key 就固定是 a b c">
+          <title>走訪順序不固定</title>
+          <rect class="soft" x="16" y="44" width="110" height="130" rx="10"/>
+          <text class="sm" x="71" y="68" text-anchor="middle">map</text>
+          <text class="mono" x="71" y="100" text-anchor="middle">a:1</text>
+          <text class="mono" x="71" y="128" text-anchor="middle">b:2</text>
+          <text class="mono" x="71" y="156" text-anchor="middle">c:3</text>
+          <text class="small" x="146" y="60">第 1 次</text>
+          <text class="small" x="146" y="124">第 2 次</text>
+          <text class="small t-acc bold" x="146" y="188">先排序</text>
+          <rect class="soft" x="226" y="36" width="44" height="36" rx="6"/>
+          <rect class="soft" x="276" y="36" width="44" height="36" rx="6"/>
+          <rect class="soft" x="326" y="36" width="44" height="36" rx="6"/>
+          <text class="mono" x="248" y="60" text-anchor="middle">c</text>
+          <text class="mono" x="298" y="60" text-anchor="middle">a</text>
+          <text class="mono" x="348" y="60" text-anchor="middle">b</text>
+          <rect class="soft" x="226" y="100" width="44" height="36" rx="6"/>
+          <rect class="soft" x="276" y="100" width="44" height="36" rx="6"/>
+          <rect class="soft" x="326" y="100" width="44" height="36" rx="6"/>
+          <text class="mono" x="248" y="124" text-anchor="middle">b</text>
+          <text class="mono" x="298" y="124" text-anchor="middle">c</text>
+          <text class="mono" x="348" y="124" text-anchor="middle">a</text>
+          <rect class="acc" x="226" y="164" width="44" height="36" rx="6"/>
+          <rect class="acc" x="276" y="164" width="44" height="36" rx="6"/>
+          <rect class="acc" x="326" y="164" width="44" height="36" rx="6"/>
+          <text class="mono t-acc" x="248" y="188" text-anchor="middle">a</text>
+          <text class="mono t-acc" x="298" y="188" text-anchor="middle">b</text>
+          <text class="mono t-acc" x="348" y="188" text-anchor="middle">c</text>
+          <text class="small t-hot" x="428" y="84" text-anchor="middle">每次跑</text>
+          <text class="small t-hot" x="428" y="106" text-anchor="middle">都可能不同</text>
+        </svg>
+        <figcaption>Go 刻意讓 map 的走訪順序每次都可能不同。需要固定順序，就先把 key 取出來排序。</figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <section aria-labelledby="code">
+    <h2 id="code">最小範例</h2>
+    <pre class="code"><code>func main() {
+	stock := map[string]int{"蘋果": 0}
+	n, ok := stock["芒果"] <span class="c">// 不存在：拿到零值和 false</span>
+	fmt.Println(n, ok)
+
+	counts := map[string]int{}
+	for _, w := range strings.Fields("go is go") {
+		counts[w]++
+	}
+	for _, k := range slices.Sorted(maps.Keys(counts)) {
+		fmt.Println(k, counts[k])
+	}
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out"><code>0 false
+go 2
+is 1</code></pre>
+  </section>
+
+  <section aria-labelledby="notes">
+    <h2 id="notes">工程師筆記</h2>
+    <ul class="notes">
+      <li>map 要用 <code>make</code> 或字面值建立；只宣告的 nil map 可以讀，寫入會 panic：<code>assignment to entry in nil map</code>。</li>
+      <li>讀不存在的 key 拿到零值，所以 <code>counts[w]++</code> 不用先檢查 key 在不在。</li>
+      <li>走訪順序不固定，而且是刻意的；要固定順序就 <code>slices.Sorted(maps.Keys(m))</code>。</li>
+      <li>key 必須能用 <code>==</code> 比較：slice、map、func 不能當 key；欄位都能比較的 struct 可以。</li>
+      <li>map 不能同時被多個 goroutine 寫入，會直接 <code>fatal error: concurrent map writes</code>，要加 <code>sync.Mutex</code>（第 17 章）。</li>
+      <li>map 裡的值不能取地址：<code>m[k].Field = 1</code> 編譯不過，要整個取出、修改、再放回去。要做 set 就用 <code>map[string]struct{}</code>。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="java">
+    <h2 id="java">從 Java 來的你</h2>
+    <div class="table-wrap">
+      <table class="vs">
+        <thead><tr><th scope="col">主題</th><th scope="col">Java</th><th scope="col">Go</th></tr></thead>
+        <tbody>
+          <tr><th scope="row">型別</th><td class="java"><code>HashMap&lt;String, Integer&gt;</code></td><td><code>map[string]int</code>，語言內建</td></tr>
+          <tr><th scope="row">找不到</th><td class="java"><code>get</code> 回傳 <code>null</code></td><td>回傳零值，用 <code>v, ok := m[k]</code> 分辨</td></tr>
+          <tr><th scope="row">走訪順序</th><td class="java"><code>HashMap</code> 不保證；<code>TreeMap</code>、<code>LinkedHashMap</code> 可固定</td><td>不保證，而且每次刻意不同；要排序自己來</td></tr>
+          <tr><th scope="row">並行存取</th><td class="java"><code>ConcurrentHashMap</code></td><td>自己加 <code>sync.Mutex</code>，或用 <code>sync.Map</code></td></tr>
+          <tr><th scope="row">Set</th><td class="java"><code>HashSet</code></td><td><code>map[T]struct{}</code></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section aria-labelledby="run">
+    <h2 id="run">動手跑</h2>
+    <p class="label">在 repo 根目錄</p>
+    <pre class="shell"><code>go run ./chapters/07-maps
+go test ./chapters/07-maps</code></pre>
+    <p><a href="https://github.com/xinqilin/GO-Playground/tree/main/chapters/07-maps">在 GitHub 看完整程式碼</a></p>
+  </section>
+</main>
+
+<nav class="pager" aria-label="章節導覽">
+  <a class="prev" href="06-arrays-slices.html">← 06 陣列與切片</a>
+  <a class="home" href="index.html">目錄</a>
+  <a class="next" href="08-strings-runes.html">08 字串與 rune →</a>
+</nav>
+</body>
+</html>

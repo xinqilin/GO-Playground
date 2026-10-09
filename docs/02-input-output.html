@@ -1,0 +1,185 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>輸入與輸出｜Go 圖解手冊</title>
+<meta name="description" content="用 io.Reader 與 io.Writer 寫出好測試的輸入輸出、bufio.Scanner 逐行讀取，以及 Printf 的格式化動詞。">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<header class="site">
+  <a href="index.html">Go 圖解手冊</a>
+  <span class="count">02 / 24</span>
+</header>
+
+<main class="page">
+  <header class="hero">
+    <div class="num" aria-hidden="true">02</div>
+    <p class="eyebrow">Part 1 · 基礎 · 第 02 章</p>
+    <h1>輸入與輸出</h1>
+    <p class="analogy">程式是一台果汁機：從 io.Reader 倒進原料，從 io.Writer 倒出結果。</p>
+  </header>
+
+  <section aria-labelledby="look">
+    <h2 id="look">看圖</h2>
+    <div class="figs">
+      <figure class="fig">
+        <svg viewBox="0 0 480 228" role="img" aria-label="run 函式左邊接 io.Reader，可以是 os.Stdin、檔案或測試用的 strings.NewReader；右邊接 io.Writer，可以是 os.Stdout、檔案或測試用的 strings.Builder">
+          <title>run 只認得 io.Reader 和 io.Writer</title>
+          <text class="bold mono" x="80" y="40" text-anchor="middle">io.Reader</text>
+          <text class="bold mono" x="400" y="40" text-anchor="middle">io.Writer</text>
+          <rect class="soft" x="8" y="56" width="144" height="40" rx="6"/>
+          <rect class="soft" x="8" y="106" width="144" height="40" rx="6"/>
+          <rect class="hot" x="8" y="156" width="144" height="40" rx="6"/>
+          <text class="small mono" x="80" y="81" text-anchor="middle">os.Stdin</text>
+          <text class="small mono" x="80" y="131" text-anchor="middle">os.Open(檔案)</text>
+          <text class="small mono" x="80" y="181" text-anchor="middle">strings.NewReader</text>
+          <path class="wire" d="M152 76 H164 M152 126 H164 M152 176 H164 M164 76 V176 M164 126 H184"/>
+          <path class="tip" d="M196 126 L183 119 L183 133 Z"/>
+          <rect class="acc" x="196" y="86" width="88" height="80" rx="10"/>
+          <text class="mono bold" x="240" y="132" text-anchor="middle">run</text>
+          <path class="wire" d="M284 126 H316 M316 76 V176"/>
+          <path class="tip" d="M328 76 L315 69 L315 83 Z"/>
+          <path class="tip" d="M328 126 L315 119 L315 133 Z"/>
+          <path class="tip" d="M328 176 L315 169 L315 183 Z"/>
+          <rect class="soft" x="328" y="56" width="144" height="40" rx="6"/>
+          <rect class="soft" x="328" y="106" width="144" height="40" rx="6"/>
+          <rect class="hot" x="328" y="156" width="144" height="40" rx="6"/>
+          <text class="small mono" x="400" y="81" text-anchor="middle">os.Stdout</text>
+          <text class="small mono" x="400" y="131" text-anchor="middle">os.Create(檔案)</text>
+          <text class="small mono" x="400" y="181" text-anchor="middle">strings.Builder</text>
+          <text class="sm t-hot" x="80" y="218" text-anchor="middle">測試時用這個</text>
+          <text class="sm t-hot" x="400" y="218" text-anchor="middle">測試時用這個</text>
+        </svg>
+        <figcaption><code>run</code> 只認得 <code>io.Reader</code> 和 <code>io.Writer</code>：平常接鍵盤和螢幕，測試時換成字串。</figcaption>
+      </figure>
+
+      <figure class="fig">
+        <svg viewBox="0 0 480 196" role="img" aria-label="輸入 3、4、5 三行，Scanner 每次 Scan 切下一行，第四次 Scan 回傳 false 表示讀完">
+          <title>Scanner 一次切一行</title>
+          <rect class="soft" x="40" y="24" width="90" height="44" rx="4"/>
+          <rect class="soft" x="150" y="24" width="90" height="44" rx="4"/>
+          <rect class="soft" x="260" y="24" width="90" height="44" rx="4"/>
+          <rect class="soft dash" x="370" y="24" width="90" height="44" rx="4"/>
+          <text class="mono" x="85" y="52" text-anchor="middle">3\n</text>
+          <text class="mono" x="195" y="52" text-anchor="middle">4\n</text>
+          <text class="mono" x="305" y="52" text-anchor="middle">5\n</text>
+          <text class="sm" x="415" y="51" text-anchor="middle">沒有了</text>
+          <path class="wire" d="M85 72 V104 M195 72 V104 M305 72 V104 M415 72 V104"/>
+          <path class="tip" d="M85 116 L78 103 L92 103 Z"/>
+          <path class="tip" d="M195 116 L188 103 L202 103 Z"/>
+          <path class="tip" d="M305 116 L298 103 L312 103 Z"/>
+          <path class="tip" d="M415 116 L408 103 L422 103 Z"/>
+          <text class="sm mono" x="93" y="94">Scan()</text>
+          <rect class="acc" x="40" y="122" width="90" height="56" rx="6"/>
+          <rect class="acc" x="150" y="122" width="90" height="56" rx="6"/>
+          <rect class="acc" x="260" y="122" width="90" height="56" rx="6"/>
+          <rect class="hot" x="370" y="122" width="90" height="56" rx="6"/>
+          <text class="lg" x="85" y="161" text-anchor="middle">3</text>
+          <text class="lg" x="195" y="161" text-anchor="middle">4</text>
+          <text class="lg" x="305" y="161" text-anchor="middle">5</text>
+          <text class="mono bold t-hot" x="415" y="156" text-anchor="middle">false</text>
+        </svg>
+        <figcaption><code>bufio.Scanner</code> 每次 <code>Scan()</code> 切下一行；回傳 false 就是讀完了，記得再檢查 <code>sc.Err()</code>。</figcaption>
+      </figure>
+
+      <figure class="fig">
+        <svg viewBox="0 0 480 240" role="img" aria-label="格式字串「共 %d 個，平均 %.2f」像填空題，3 填進 %d、4.0 填進 %.2f，印出「共 3 個，平均 4.00」">
+          <title>Printf 是填空題</title>
+          <rect class="acc" x="137" y="16" width="56" height="40" rx="6"/>
+          <rect class="acc" x="329" y="16" width="64" height="40" rx="6"/>
+          <text class="bold" x="165" y="43" text-anchor="middle">3</text>
+          <text class="bold" x="361" y="43" text-anchor="middle">4.0</text>
+          <path class="wire" d="M165 56 V74 M361 56 V74"/>
+          <path class="tip" d="M165 84 L158 71 L172 71 Z"/>
+          <path class="tip" d="M361 84 L354 71 L368 71 Z"/>
+          <rect class="soft" x="77" y="88" width="50" height="46" rx="4"/>
+          <rect class="hot" x="133" y="88" width="64" height="46" rx="4"/>
+          <rect class="soft" x="203" y="88" width="110" height="46" rx="4"/>
+          <rect class="hot" x="319" y="88" width="84" height="46" rx="4"/>
+          <text x="102" y="117" text-anchor="middle">共</text>
+          <text class="mono bold t-hot" x="165" y="117" text-anchor="middle">%d</text>
+          <text x="258" y="117" text-anchor="middle">個，平均</text>
+          <text class="mono bold t-hot" x="361" y="117" text-anchor="middle">%.2f</text>
+          <path class="wire" d="M240 140 V164"/>
+          <path class="tip" d="M240 176 L233 163 L247 163 Z"/>
+          <text class="sm mono" x="250" y="160">Printf</text>
+          <rect class="acc" x="77" y="182" width="326" height="46" rx="6"/>
+          <text class="bold" x="240" y="211" text-anchor="middle">共 3 個，平均 4.00</text>
+        </svg>
+        <figcaption>格式字串是填空題：<code>%d</code>、<code>%.2f</code> 是空格，後面的值依序填進去。</figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <section aria-labelledby="code">
+    <h2 id="code">最小範例</h2>
+    <pre class="code"><code>func run(in io.Reader, out io.Writer) error {
+	sc := bufio.NewScanner(in)
+	sum := 0
+	for sc.Scan() {
+		n, err := strconv.Atoi(sc.Text())
+		if err != nil {
+			return err
+		}
+		sum += n
+	}
+	fmt.Fprintf(out, "總和 %d\n", sum)
+	return sc.Err()
+}
+
+func main() {
+	err := run(strings.NewReader("3\n4\n5\n"), os.Stdout)
+	fmt.Println("err:", err)
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out"><code>總和 12
+err: &lt;nil&gt;</code></pre>
+  </section>
+
+  <section aria-labelledby="notes">
+    <h2 id="notes">工程師筆記</h2>
+    <ul class="notes">
+      <li>函式收 <code>io.Reader</code> / <code>io.Writer</code>，不要直接用 <code>os.Stdin</code> / <code>os.Stdout</code>：測試時就能餵字串進去，把結果收進 <code>strings.Builder</code>。</li>
+      <li><code>Scan()</code> 回傳 false 之後要檢查 <code>sc.Err()</code>，才知道是讀完了還是出錯。</li>
+      <li><code>bufio.Scanner</code> 預設一行最多 64KB，超過要用 <code>sc.Buffer</code> 調大。</li>
+      <li>提示訊息寫到 <code>os.Stderr</code>，<code>os.Stdout</code> 只放結果，接 pipe 時比較乾淨。</li>
+      <li>常用動詞：<code>%v</code> 預設格式、<code>%+v</code> 加上欄位名、<code>%#v</code> Go 語法、<code>%T</code> 型別、<code>%q</code> 加引號。</li>
+      <li>命令列參數在 <code>os.Args</code>，<code>os.Args[0]</code> 是程式本身；要解析參數用標準庫的 <code>flag</code>。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="java">
+    <h2 id="java">從 Java 來的你</h2>
+    <div class="table-wrap">
+      <table class="vs">
+        <thead><tr><th scope="col">主題</th><th scope="col">Java</th><th scope="col">Go</th></tr></thead>
+        <tbody>
+          <tr><th scope="row">印出</th><td class="java"><code>System.out.println</code> / <code>printf</code></td><td><code>fmt.Println</code> / <code>fmt.Printf</code></td></tr>
+          <tr><th scope="row">讀一行</th><td class="java"><code>BufferedReader.readLine()</code></td><td><code>bufio.Scanner</code></td></tr>
+          <tr><th scope="row">串流抽象</th><td class="java"><code>InputStream</code> / <code>OutputStream</code> 類別階層</td><td><code>io.Reader</code> / <code>io.Writer</code>，各只有一個方法</td></tr>
+          <tr><th scope="row">格式化成字串</th><td class="java"><code>String.format</code></td><td><code>fmt.Sprintf</code></td></tr>
+          <tr><th scope="row">讀取失敗</th><td class="java">丟 <code>IOException</code></td><td><code>Scan()</code> 回傳 false，再看 <code>Err()</code></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section aria-labelledby="run">
+    <h2 id="run">動手跑</h2>
+    <p class="label">在 repo 根目錄</p>
+    <pre class="shell"><code>printf '3\n4\n5\n' | go run ./chapters/02-input-output
+go run ./chapters/02-input-output   <span class="c"># 自己輸入，每行一個數字，Ctrl-D 結束</span>
+go test ./chapters/02-input-output</code></pre>
+    <p><a href="https://github.com/xinqilin/GO-Playground/tree/main/chapters/02-input-output">在 GitHub 看完整程式碼</a></p>
+  </section>
+</main>
+
+<nav class="pager" aria-label="章節導覽">
+  <a class="prev" href="01-variables.html">← 01 變數與型別</a>
+  <a class="home" href="index.html">目錄</a>
+  <a class="next" href="03-control-flow.html">03 流程控制 →</a>
+</nav>
+</body>
+</html>
