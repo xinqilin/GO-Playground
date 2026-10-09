@@ -1,0 +1,183 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>interface｜Go 圖解手冊</title>
+<meta name="description" content="Go 的 interface：隱式實作、interface 值裡的型別與值、type switch，以及 nil interface 的陷阱。">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<header class="site">
+  <a href="index.html">Go 圖解手冊</a>
+  <span class="count">10 / 24</span>
+</header>
+
+<main class="page">
+  <header class="hero">
+    <div class="num" aria-hidden="true">10</div>
+    <p class="eyebrow">Part 2 · 型別系統 · 第 10 章</p>
+    <h1>interface</h1>
+    <p class="analogy">interface 是一張「會做什麼」的清單：方法對上了就符合，不用先報名。</p>
+  </header>
+
+  <section aria-labelledby="look">
+    <h2 id="look">看圖</h2>
+    <div class="figs">
+      <figure class="fig">
+        <svg viewBox="0 0 480 244" role="img" aria-label="Shape 清單要求 Area 和 Perimeter；Rect 和 Circle 兩個都有，自動符合；Line 只有 Length，不符合">
+          <title>interface 是一張技能清單</title>
+          <rect class="acc" x="150" y="16" width="180" height="80" rx="8"/>
+          <text class="mono bold" x="240" y="40" text-anchor="middle">Shape</text>
+          <text class="small mono" x="240" y="64" text-anchor="middle">Area()</text>
+          <text class="small mono" x="240" y="86" text-anchor="middle">Perimeter()</text>
+          <path class="wire acc-ln" d="M200 96 V122 H85 V138 M240 96 V138"/>
+          <path class="tip acc-tip" d="M85 148 L78 135 L92 135 Z"/>
+          <path class="tip acc-tip" d="M240 148 L233 135 L247 135 Z"/>
+          <path class="wire hot-ln dash" d="M280 96 V122 H395 V128"/>
+          <path class="wire hot-ln" d="M387 128 L403 144 M403 128 L387 144"/>
+          <text class="sm t-acc" x="140" y="116" text-anchor="middle">自動符合</text>
+          <text class="sm t-hot" x="436" y="116" text-anchor="middle">缺方法</text>
+          <rect class="soft" x="20" y="150" width="130" height="80" rx="8"/>
+          <rect class="soft" x="175" y="150" width="130" height="80" rx="8"/>
+          <rect class="soft" x="330" y="150" width="130" height="80" rx="8"/>
+          <text class="mono bold" x="85" y="174" text-anchor="middle">Rect</text>
+          <text class="small mono" x="85" y="198" text-anchor="middle">Area()</text>
+          <text class="small mono" x="85" y="218" text-anchor="middle">Perimeter()</text>
+          <text class="mono bold" x="240" y="174" text-anchor="middle">Circle</text>
+          <text class="small mono" x="240" y="198" text-anchor="middle">Area()</text>
+          <text class="small mono" x="240" y="218" text-anchor="middle">Perimeter()</text>
+          <text class="mono bold" x="395" y="174" text-anchor="middle">Line</text>
+          <text class="small mono" x="395" y="198" text-anchor="middle">Length()</text>
+        </svg>
+        <figcaption>Shape 只是一張清單：有 <code>Area()</code> 和 <code>Perimeter()</code> 的型別自動符合，不用宣告 implements。</figcaption>
+      </figure>
+
+      <figure class="fig">
+        <svg viewBox="0 0 480 256" role="img" aria-label="interface 的值有型別和值兩格；兩格都是 nil 才等於 nil；裝了 nil 的 *MyErr 時型別那格有東西，所以不等於 nil">
+          <title>interface 裡裝著型別和值</title>
+          <text class="sm" x="76" y="22" text-anchor="middle">型別</text>
+          <text class="sm" x="196" y="22" text-anchor="middle">值</text>
+          <rect class="acc" x="16" y="32" width="120" height="50"/>
+          <rect class="acc" x="136" y="32" width="120" height="50"/>
+          <text class="mono" x="76" y="63" text-anchor="middle">Rect</text>
+          <text class="mono" x="196" y="63" text-anchor="middle">{3 4}</text>
+          <text class="small mono" x="280" y="52">Shape = Rect{3, 4}</text>
+          <text class="small" x="280" y="76">不是 nil</text>
+
+          <rect class="soft" x="16" y="112" width="120" height="50"/>
+          <rect class="soft" x="136" y="112" width="120" height="50"/>
+          <text class="mono mute" x="76" y="143" text-anchor="middle">nil</text>
+          <text class="mono mute" x="196" y="143" text-anchor="middle">nil</text>
+          <text class="small mono" x="280" y="132">var e error</text>
+          <text class="small t-acc bold" x="280" y="156">e == nil</text>
+
+          <rect class="hot" x="16" y="192" width="120" height="50"/>
+          <rect class="soft" x="136" y="192" width="120" height="50"/>
+          <text class="mono t-hot" x="76" y="223" text-anchor="middle">*MyErr</text>
+          <text class="mono mute" x="196" y="223" text-anchor="middle">nil</text>
+          <text class="small mono" x="280" y="212">error = (*MyErr)(nil)</text>
+          <text class="small t-hot bold" x="280" y="236">e != nil</text>
+        </svg>
+        <figcaption>interface 的值有「型別」和「值」兩格。兩格都空才等於 nil；裝了一個 nil 指標，型別那格有東西，就不是 nil。</figcaption>
+      </figure>
+
+      <figure class="fig">
+        <svg viewBox="0 0 480 208" role="img" aria-label="type switch 依實際型別分類：Rect 進 case Shape，42 進 case int，字串 hi 進 default">
+          <title>type switch 是分類機</title>
+          <rect class="soft" x="12" y="40" width="110" height="34" rx="6"/>
+          <rect class="soft" x="12" y="93" width="110" height="34" rx="6"/>
+          <rect class="soft" x="12" y="146" width="110" height="34" rx="6"/>
+          <text class="small mono" x="67" y="62" text-anchor="middle">Rect{1, 2}</text>
+          <text class="small mono" x="67" y="115" text-anchor="middle">42</text>
+          <text class="small mono" x="67" y="168" text-anchor="middle">"hi"</text>
+          <path class="wire" d="M122 57 H140 M122 110 H140 M122 163 H140 M140 57 V163 M140 110 H158"/>
+          <path class="tip" d="M168 110 L156 104 L156 116 Z"/>
+          <rect class="acc" x="170" y="70" width="120" height="80" rx="10"/>
+          <text class="small mono" x="230" y="106" text-anchor="middle">switch</text>
+          <text class="small mono" x="230" y="128" text-anchor="middle">v.(type)</text>
+          <path class="wire" d="M290 110 H306 M306 57 V163 M306 57 H320 M306 163 H320"/>
+          <path class="tip" d="M330 57 L318 51 L318 63 Z"/>
+          <path class="tip" d="M330 110 L318 104 L318 116 Z"/>
+          <path class="tip" d="M330 163 L318 157 L318 169 Z"/>
+          <rect class="acc" x="332" y="40" width="136" height="34" rx="6"/>
+          <rect class="acc" x="332" y="93" width="136" height="34" rx="6"/>
+          <rect class="soft" x="332" y="146" width="136" height="34" rx="6"/>
+          <text class="small mono" x="400" y="62" text-anchor="middle">case Shape</text>
+          <text class="small mono" x="400" y="115" text-anchor="middle">case int</text>
+          <text class="small mono" x="400" y="168" text-anchor="middle">default</text>
+        </svg>
+        <figcaption>type switch 依實際型別分類；只想取出某個具體型別，用 <code>v.(T)</code> 加上 <code>ok</code>，就不會 panic。</figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <section aria-labelledby="code">
+    <h2 id="code">最小範例</h2>
+    <pre class="code"><code>type Shape interface{ Area() float64 }
+
+type Rect struct{ W, H float64 }
+type Circle struct{ R float64 }
+
+func (r Rect) Area() float64   { return r.W * r.H }
+func (c Circle) Area() float64 { return math.Pi * c.R * c.R }
+
+func main() {
+	for _, s := range []Shape{Rect{3, 4}, Circle{1}} {
+		fmt.Printf("%T %.2f\n", s, s.Area())
+	}
+	var v any = Rect{1, 2}
+	if r, ok := v.(Rect); ok {
+		fmt.Println("寬", r.W)
+	}
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out"><code>main.Rect 12.00
+main.Circle 3.14
+寬 1</code></pre>
+  </section>
+
+  <section aria-labelledby="notes">
+    <h2 id="notes">工程師筆記</h2>
+    <ul class="notes">
+      <li>interface 越小越好。標準庫最常用的 <code>io.Reader</code>、<code>io.Writer</code>、<code>fmt.Stringer</code>、<code>error</code> 都只有一個方法。</li>
+      <li>慣例是「參數收 interface、回傳具體型別」；interface 由使用的那一方定義，真的需要時再抽出來。</li>
+      <li><code>var _ Shape = Rect{}</code> 讓編譯器幫你確認型別有實作介面。</li>
+      <li>不帶 ok 的 <code>v.(Rect)</code>，型別不符會 panic；不確定時用 <code>r, ok := v.(Rect)</code>。</li>
+      <li>函式回傳 <code>error</code> 時，沒錯就直接 <code>return nil</code>，不要回傳一個值是 nil 的具體型別指標，否則呼叫端的 <code>err != nil</code> 會成立。</li>
+      <li>方法是 pointer receiver 時，只有指標符合介面：要放 <code>&amp;T{}</code> 進去，放 <code>T{}</code> 會編譯錯誤。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="java">
+    <h2 id="java">從 Java 來的你</h2>
+    <div class="table-wrap">
+      <table class="vs">
+        <thead><tr><th scope="col">主題</th><th scope="col">Java</th><th scope="col">Go</th></tr></thead>
+        <tbody>
+          <tr><th scope="row">實作介面</th><td class="java"><code>class Rect implements Shape</code></td><td>不用宣告，方法對上就符合</td></tr>
+          <tr><th scope="row">介面放哪</th><td class="java">通常和實作放在一起</td><td>慣例放在使用端，而且越小越好</td></tr>
+          <tr><th scope="row">型別判斷</th><td class="java"><code>instanceof</code>、pattern matching switch</td><td><code>v.(T)</code>、type switch</td></tr>
+          <tr><th scope="row">萬用型別</th><td class="java"><code>Object</code></td><td><code>any</code>（就是 <code>interface{}</code>）</td></tr>
+          <tr><th scope="row">轉成字串</th><td class="java"><code>toString()</code></td><td><code>String() string</code>（<code>fmt.Stringer</code>）</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section aria-labelledby="run">
+    <h2 id="run">動手跑</h2>
+    <p class="label">在 repo 根目錄</p>
+    <pre class="shell"><code>go run ./chapters/10-interfaces
+go test ./chapters/10-interfaces</code></pre>
+    <p><a href="https://github.com/xinqilin/GO-Playground/tree/main/chapters/10-interfaces">在 GitHub 看完整程式碼</a></p>
+  </section>
+</main>
+
+<nav class="pager" aria-label="章節導覽">
+  <a class="prev" href="09-structs-methods.html">← 09 struct 與方法</a>
+  <a class="home" href="index.html">目錄</a>
+  <a class="next" href="11-errors.html">11 錯誤處理 →</a>
+</nav>
+</body>
+</html>

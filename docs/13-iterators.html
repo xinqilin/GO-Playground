@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>疊代器｜Go 圖解手冊</title>
+<meta name="description" content="Go 1.23 的 range-over-func 疊代器：iter.Seq 與 yield 的來回、提早 break，以及把疊代器接成管線。">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<header class="site">
+  <a href="index.html">Go 圖解手冊</a>
+  <span class="count">13 / 24</span>
+</header>
+
+<main class="page">
+  <header class="hero">
+    <div class="num" aria-hidden="true">13</div>
+    <p class="eyebrow">Part 2 · 型別系統 · 第 13 章</p>
+    <h1>疊代器</h1>
+    <p class="analogy">疊代器是一台發球機：你要一顆，它丟一顆；你喊停，它就停。</p>
+  </header>
+
+  <section aria-labelledby="look">
+    <h2 id="look">看圖</h2>
+    <div class="figs">
+      <figure class="fig">
+        <svg viewBox="0 0 480 296" role="img" aria-label="Countdown 每次呼叫 yield 交出一個數字，迴圈回答 true 繼續；交出 2 時迴圈 break，yield 回傳 false，Countdown 就 return">
+          <title>yield 的一來一回</title>
+          <rect class="acc" x="40" y="16" width="160" height="40" rx="8"/>
+          <rect class="soft" x="280" y="16" width="160" height="40" rx="8"/>
+          <text class="small mono" x="120" y="41" text-anchor="middle">Countdown(5)</text>
+          <text class="small mono" x="360" y="41" text-anchor="middle">for n := range</text>
+          <path class="wire faint" d="M120 56 V292 M360 56 V292"/>
+
+          <path class="wire" d="M120 80 H346 M120 130 H346 M120 180 H346"/>
+          <path class="tip" d="M358 80 L346 74 L346 86 Z"/>
+          <path class="tip" d="M358 130 L346 124 L346 136 Z"/>
+          <path class="tip" d="M358 180 L346 174 L346 186 Z"/>
+          <text class="small mono" x="240" y="72" text-anchor="middle">yield(5)</text>
+          <text class="small mono" x="240" y="122" text-anchor="middle">yield(4)</text>
+          <text class="small mono" x="240" y="172" text-anchor="middle">yield(3)</text>
+          <path class="wire faint" d="M360 104 H134 M360 154 H134 M360 204 H134"/>
+          <path class="tip" d="M122 104 L134 98 L134 110 Z"/>
+          <path class="tip" d="M122 154 L134 148 L134 160 Z"/>
+          <path class="tip" d="M122 204 L134 198 L134 210 Z"/>
+          <text class="sm" x="240" y="99" text-anchor="middle">true</text>
+          <text class="sm" x="240" y="149" text-anchor="middle">true</text>
+          <text class="sm" x="240" y="199" text-anchor="middle">true</text>
+          <text class="small" x="372" y="84">印出 5</text>
+          <text class="small" x="372" y="134">印出 4</text>
+          <text class="small" x="372" y="184">印出 3</text>
+
+          <path class="wire" d="M120 230 H346"/>
+          <path class="tip" d="M358 230 L346 224 L346 236 Z"/>
+          <text class="small mono" x="240" y="222" text-anchor="middle">yield(2)</text>
+          <text class="small bold t-hot" x="372" y="234">break</text>
+          <path class="wire hot-ln" d="M360 254 H134"/>
+          <path class="tip hot-tip" d="M122 254 L134 248 L134 260 Z"/>
+          <text class="small t-hot" x="240" y="249" text-anchor="middle">false</text>
+          <text class="small mono bold t-hot" x="132" y="284">return</text>
+        </svg>
+        <figcaption>range 每要一個值，疊代器就呼叫一次 <code>yield</code>。迴圈 break 時 <code>yield</code> 回傳 false，疊代器要馬上 return。</figcaption>
+      </figure>
+
+      <figure class="fig">
+        <svg viewBox="0 0 480 196" role="img" aria-label="疊代器像水管接起來：Fib 產生費氏數列，Filter 只留偶數，Take 取 5 個就停，Collect 收成 slice，得到 0 2 8 34 144">
+          <title>疊代器可以接起來</title>
+          <rect class="soft" x="18" y="30" width="96" height="62" rx="8"/>
+          <rect class="soft" x="134" y="30" width="96" height="62" rx="8"/>
+          <rect class="soft" x="250" y="30" width="96" height="62" rx="8"/>
+          <rect class="acc" x="366" y="30" width="96" height="62" rx="8"/>
+          <text class="small mono bold" x="66" y="56" text-anchor="middle">Fib()</text>
+          <text class="sm" x="66" y="78" text-anchor="middle">0 1 1 2 3…</text>
+          <text class="small mono bold" x="182" y="56" text-anchor="middle">Filter</text>
+          <text class="sm" x="182" y="78" text-anchor="middle">只留偶數</text>
+          <text class="small mono bold" x="298" y="56" text-anchor="middle">Take(5)</text>
+          <text class="sm" x="298" y="78" text-anchor="middle">拿滿就停</text>
+          <text class="small mono bold" x="414" y="56" text-anchor="middle">Collect</text>
+          <text class="sm" x="414" y="78" text-anchor="middle">收成 slice</text>
+          <path class="wire" d="M114 61 H124 M230 61 H240 M346 61 H356"/>
+          <path class="tip" d="M134 61 L123 55 L123 67 Z"/>
+          <path class="tip" d="M250 61 L239 55 L239 67 Z"/>
+          <path class="tip" d="M366 61 L355 55 L355 67 Z"/>
+          <path class="wire hot-ln dash" d="M298 98 V114 H66 V98"/>
+          <text class="sm t-hot" x="182" y="132" text-anchor="middle">拿滿 5 個就叫上游停</text>
+          <text class="small mono bold t-acc" x="414" y="168" text-anchor="middle">[0 2 8 34 144]</text>
+        </svg>
+        <figcaption>疊代器可以像水管一樣接起來。值一次流過一個，<code>Take</code> 拿滿 5 個就叫上游停下，無限的 <code>Fib</code> 也不會跑不完。</figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <section aria-labelledby="code">
+    <h2 id="code">最小範例</h2>
+    <pre class="code"><code>func Countdown(n int) iter.Seq[int] {
+	return func(yield func(int) bool) {
+		for i := n; i &gt;= 1; i-- {
+			if !yield(i) {
+				return
+			}
+		}
+	}
+}
+
+func main() {
+	for n := range Countdown(5) {
+		if n == 2 {
+			break <span class="c">// 這時 yield 回傳 false</span>
+		}
+		fmt.Println(n)
+	}
+	fmt.Println(slices.Collect(Countdown(3)))
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out"><code>5
+4
+3
+[3 2 1]</code></pre>
+  </section>
+
+  <section aria-labelledby="notes">
+    <h2 id="notes">工程師筆記</h2>
+    <ul class="notes">
+      <li><code>iter.Seq[V]</code> 就是 <code>func(yield func(V) bool)</code>；<code>iter.Seq2[K, V]</code> 一次交出兩個值，像 <code>slices.All</code> 交出 index 和值。</li>
+      <li>一定要檢查 <code>yield</code> 的回傳值。使用端 break 之後還繼續 yield，會 panic：<code>range function continued iteration after function for loop body returned false</code>。</li>
+      <li>疊代器是惰性的：沒有 range 就不會執行，所以可以表示無限長的序列。</li>
+      <li>標準庫：<code>slices.All</code>、<code>slices.Values</code>、<code>slices.Collect</code>、<code>slices.Sorted</code>、<code>maps.Keys</code>、<code>maps.Values</code>（Go 1.23），<code>strings.SplitSeq</code>、<code>strings.Lines</code>（Go 1.24）。</li>
+      <li>想用「呼叫 next() 拿下一個」的方式，用 <code>iter.Pull</code>，用完記得呼叫 stop。</li>
+      <li>一般的 slice 直接 range 就好；需要組合、惰性，或想隱藏內部資料結構時，才自己寫疊代器。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="java">
+    <h2 id="java">從 Java 來的你</h2>
+    <div class="table-wrap">
+      <table class="vs">
+        <thead><tr><th scope="col">主題</th><th scope="col">Java</th><th scope="col">Go</th></tr></thead>
+        <tbody>
+          <tr><th scope="row">疊代介面</th><td class="java"><code>Iterator&lt;T&gt;</code> 的 <code>hasNext()</code> / <code>next()</code></td><td><code>iter.Seq[T]</code>：一個接收 yield 的函式</td></tr>
+          <tr><th scope="row">迴圈</th><td class="java">for-each 要實作 <code>Iterable</code></td><td><code>for v := range seq</code></td></tr>
+          <tr><th scope="row">惰性串流</th><td class="java"><code>Stream</code> API</td><td>把 <code>iter.Seq</code> 接起來，或用 <code>slices</code>、<code>maps</code> 的函式</td></tr>
+          <tr><th scope="row">提早結束</th><td class="java"><code>break</code> 之後 iterator 不會知道</td><td><code>break</code> 讓 yield 回傳 false，疊代器可以收尾</td></tr>
+          <tr><th scope="row">拉取式</th><td class="java"><code>next()</code> 本來就是</td><td><code>iter.Pull</code> 轉成 next 和 stop</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section aria-labelledby="run">
+    <h2 id="run">動手跑</h2>
+    <p class="label">在 repo 根目錄</p>
+    <pre class="shell"><code>go run ./chapters/13-iterators
+go test ./chapters/13-iterators</code></pre>
+    <p><a href="https://github.com/xinqilin/GO-Playground/tree/main/chapters/13-iterators">在 GitHub 看完整程式碼</a></p>
+  </section>
+</main>
+
+<nav class="pager" aria-label="章節導覽">
+  <a class="prev" href="12-generics.html">← 12 泛型</a>
+  <a class="home" href="index.html">目錄</a>
+  <a class="next" href="14-goroutines.html">14 goroutine →</a>
+</nav>
+</body>
+</html>

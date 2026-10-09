@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>struct 與方法｜Go 圖解手冊</title>
+<meta name="description" content="Go 的 struct 與方法：value receiver 與 pointer receiver 的差別，以及用嵌入做組合。">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<header class="site">
+  <a href="index.html">Go 圖解手冊</a>
+  <span class="count">09 / 24</span>
+</header>
+
+<main class="page">
+  <header class="hero">
+    <div class="num" aria-hidden="true">09</div>
+    <p class="eyebrow">Part 2 · 型別系統 · 第 09 章</p>
+    <h1>struct 與方法</h1>
+    <p class="analogy">struct 是一張表格，把相關的欄位放在一起；方法是綁在這張表格上的函式。</p>
+  </header>
+
+  <section aria-labelledby="look">
+    <h2 id="look">看圖</h2>
+    <div class="figs">
+      <figure class="fig">
+        <svg viewBox="0 0 480 196" role="img" aria-label="Point 是一張有 X、Y 兩個欄位的表格；Point{X: 3, Y: 4} 填了值，Point{} 沒填，欄位都是零值 0">
+          <title>struct 是一張表格</title>
+          <rect class="acc" x="30" y="24" width="180" height="38" rx="6"/>
+          <text class="mono bold" x="120" y="49" text-anchor="middle">Point</text>
+          <rect class="box" x="30" y="62" width="180" height="46"/>
+          <rect class="box" x="30" y="108" width="180" height="46"/>
+          <path class="wire faint" d="M90 62 V154"/>
+          <text class="mono" x="60" y="92" text-anchor="middle">X</text>
+          <text class="mono" x="60" y="138" text-anchor="middle">Y</text>
+          <text class="lg" x="150" y="96" text-anchor="middle">3</text>
+          <text class="lg" x="150" y="142" text-anchor="middle">4</text>
+          <text class="small mono" x="120" y="182" text-anchor="middle">Point{X: 3, Y: 4}</text>
+
+          <rect class="acc" x="270" y="24" width="180" height="38" rx="6"/>
+          <text class="mono bold" x="360" y="49" text-anchor="middle">Point</text>
+          <rect class="box" x="270" y="62" width="180" height="46"/>
+          <rect class="box" x="270" y="108" width="180" height="46"/>
+          <path class="wire faint" d="M330 62 V154"/>
+          <text class="mono" x="300" y="92" text-anchor="middle">X</text>
+          <text class="mono" x="300" y="138" text-anchor="middle">Y</text>
+          <text class="lg mute" x="390" y="96" text-anchor="middle">0</text>
+          <text class="lg mute" x="390" y="142" text-anchor="middle">0</text>
+          <text class="small mono" x="360" y="182" text-anchor="middle">Point{}</text>
+        </svg>
+        <figcaption>struct 把相關的欄位綁成一張表格；沒填的欄位就是零值。</figcaption>
+      </figure>
+
+      <figure class="fig">
+        <svg viewBox="0 0 480 296" role="img" aria-label="Dist2 是 value receiver，拿到 p 的影印本只能讀；Move 是 pointer receiver，拿到 p 的地址，改到原本的 p">
+          <title>value receiver 與 pointer receiver</title>
+          <path class="wire faint" d="M240 12 V286"/>
+          <text class="mono bold" x="117" y="28" text-anchor="middle">p.Dist2()</text>
+          <text class="sm" x="117" y="50" text-anchor="middle">value receiver：拿到影印本</text>
+          <rect class="acc" x="57" y="66" width="120" height="70" rx="6"/>
+          <text class="mono" x="117" y="96" text-anchor="middle">X: 3</text>
+          <text class="mono" x="117" y="122" text-anchor="middle">Y: 4</text>
+          <path class="wire" d="M117 142 V166"/>
+          <path class="tip" d="M117 176 L110 163 L124 163 Z"/>
+          <text class="sm" x="126" y="160">複製</text>
+          <rect class="soft dash" x="57" y="180" width="120" height="70" rx="6"/>
+          <text class="mono" x="117" y="210" text-anchor="middle">X: 3</text>
+          <text class="mono" x="117" y="236" text-anchor="middle">Y: 4</text>
+          <text class="bold" x="117" y="280" text-anchor="middle">回傳 25</text>
+
+          <text class="mono bold" x="363" y="28" text-anchor="middle">p.Move(1, 1)</text>
+          <text class="sm" x="363" y="50" text-anchor="middle">pointer receiver：拿到地址</text>
+          <rect class="acc" x="303" y="66" width="120" height="70" rx="6"/>
+          <text class="mono t-hot" x="363" y="96" text-anchor="middle">X: 4</text>
+          <text class="mono t-hot" x="363" y="122" text-anchor="middle">Y: 5</text>
+          <path class="wire" d="M343 142 V178"/>
+          <path class="tip" d="M343 188 L336 175 L350 175 Z"/>
+          <text class="sm" x="334" y="166" text-anchor="end">給地址</text>
+          <rect class="hot" x="318" y="192" width="90" height="44" rx="4"/>
+          <text class="mono" x="363" y="221" text-anchor="middle">&amp;p</text>
+          <path class="wire hot-ln" d="M383 192 V154"/>
+          <path class="tip hot-tip" d="M383 142 L376 155 L390 155 Z"/>
+          <text class="sm t-hot" x="392" y="172">改原本的</text>
+          <text class="small t-hot" x="363" y="280" text-anchor="middle">p 變成 {4 5}</text>
+        </svg>
+        <figcaption>value receiver 拿到影印本，只能讀；pointer receiver 拿到地址，改的是原本那一張。</figcaption>
+      </figure>
+
+      <figure class="fig">
+        <svg viewBox="0 0 480 246" role="img" aria-label="Dog 裡面裝著一個 Animal；d.Name 直接拿到 Animal 的 Name，d.Hello() 呼叫的是 Animal 的 Hello">
+          <title>嵌入是組合，不是繼承</title>
+          <rect class="soft" x="150" y="20" width="310" height="210" rx="12"/>
+          <text class="mono bold" x="166" y="46">Dog</text>
+          <rect class="acc" x="170" y="60" width="270" height="96" rx="10"/>
+          <text class="small mono t-acc" x="186" y="82">Animal</text>
+          <text class="mono" x="186" y="116">Name 小黑</text>
+          <rect class="box" x="320" y="118" width="104" height="30" rx="6"/>
+          <text class="small mono" x="372" y="138" text-anchor="middle">Hello()</text>
+          <text class="mono" x="166" y="200">Breed 柴犬</text>
+          <text class="small mono" x="14" y="110">d.Name</text>
+          <path class="wire acc-ln" d="M80 106 H158"/>
+          <path class="tip acc-tip" d="M168 106 L156 100 L156 112 Z"/>
+          <text class="small mono" x="14" y="140">d.Hello()</text>
+          <path class="wire acc-ln" d="M92 136 H306"/>
+          <path class="tip acc-tip" d="M316 136 L304 130 L304 142 Z"/>
+        </svg>
+        <figcaption>Dog 裡面裝著一個 Animal。<code>d.Name</code> 其實是 <code>d.Animal.Name</code>，方法也一樣被提升上來。</figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <section aria-labelledby="code">
+    <h2 id="code">最小範例</h2>
+    <pre class="code"><code>type Point struct{ X, Y int }
+
+func (p Point) Dist2() int { return p.X*p.X + p.Y*p.Y } <span class="c">// 只讀：value receiver</span>
+
+func (p *Point) Move(dx, dy int) { p.X += dx; p.Y += dy } <span class="c">// 要改：pointer receiver</span>
+
+type Animal struct{ Name string }
+
+func (a Animal) Hello() string { return "我是" + a.Name }
+
+type Dog struct {
+	Animal <span class="c">// 嵌入：欄位和方法都被提升</span>
+	Breed  string
+}
+
+func main() {
+	p := Point{X: 3, Y: 4}
+	p.Move(1, 1)
+	d := Dog{Name: "小白", Breed: "米克斯"} <span class="c">// Go 1.27 起可以這樣寫</span>
+	fmt.Println(p, p.Dist2(), d.Hello())
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out"><code>{4 5} 41 我是小白</code></pre>
+  </section>
+
+  <section aria-labelledby="notes">
+    <h2 id="notes">工程師筆記</h2>
+    <ul class="notes">
+      <li>receiver 怎麼選：要修改、struct 很大、或含有不能複製的欄位（例如 <code>sync.Mutex</code>）就用指標；同一個型別的方法最好統一。</li>
+      <li>用變數呼叫 pointer receiver 的方法時，Go 會自動取地址；但 map 裡的值、函式回傳值不能取地址，就不能這樣呼叫。</li>
+      <li>嵌入是組合：被嵌入型別的方法拿到的仍是它自己那一份，不知道外面包著 Dog。沒有 override，也沒有透過嵌入的多型。</li>
+      <li>欄位大寫開頭才會匯出；<code>encoding/json</code> 只看得到匯出的欄位，用 struct tag 改 JSON 名稱（第 22 章）。</li>
+      <li>Go 1.27 起，struct 字面值可以直接用被提升的欄位當 key：<code>Dog{Name: "小白"}</code>。</li>
+      <li>建構子只是慣例：寫一個 <code>NewXxx</code> 函式回傳 <code>*Xxx</code>。零值就能用的型別不需要建構子。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="java">
+    <h2 id="java">從 Java 來的你</h2>
+    <div class="table-wrap">
+      <table class="vs">
+        <thead><tr><th scope="col">主題</th><th scope="col">Java</th><th scope="col">Go</th></tr></thead>
+        <tbody>
+          <tr><th scope="row">類別</th><td class="java"><code>class</code> 包含欄位、方法、建構子</td><td><code>struct</code> 只放欄位，方法另外宣告</td></tr>
+          <tr><th scope="row">建立物件</th><td class="java"><code>new Point(1, 2)</code></td><td><code>Point{X: 1, Y: 2}</code>，或慣例的 <code>NewPoint</code></td></tr>
+          <tr><th scope="row">this</th><td class="java">隱含的 <code>this</code></td><td>receiver 明寫：<code>func (p *Point) Move()</code></td></tr>
+          <tr><th scope="row">繼承</th><td class="java"><code>extends</code></td><td>沒有繼承，用嵌入做組合</td></tr>
+          <tr><th scope="row">可見性</th><td class="java"><code>public</code> / <code>private</code></td><td>大寫開頭匯出，小寫只在 package 內可見</td></tr>
+          <tr><th scope="row">相等</th><td class="java">自己寫 <code>equals()</code></td><td>欄位都能比較時直接 <code>==</code></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section aria-labelledby="run">
+    <h2 id="run">動手跑</h2>
+    <p class="label">在 repo 根目錄</p>
+    <pre class="shell"><code>go run ./chapters/09-structs-methods
+go test ./chapters/09-structs-methods</code></pre>
+    <p><a href="https://github.com/xinqilin/GO-Playground/tree/main/chapters/09-structs-methods">在 GitHub 看完整程式碼</a></p>
+  </section>
+</main>
+
+<nav class="pager" aria-label="章節導覽">
+  <a class="prev" href="08-strings-runes.html">← 08 字串與 rune</a>
+  <a class="home" href="index.html">目錄</a>
+  <a class="next" href="10-interfaces.html">10 interface →</a>
+</nav>
+</body>
+</html>
