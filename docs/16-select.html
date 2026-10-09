@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>select｜Go 圖解手冊</title>
+<meta name="description" content="Go 的 select：同時等多個 channel、用 time.After 做逾時、用 default 做非阻塞，以及用 nil channel 停用 case。">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<header class="site">
+  <a href="index.html">Go 圖解手冊</a>
+  <span class="count">16 / 24</span>
+</header>
+
+<main class="page">
+  <header class="hero">
+    <div class="num" aria-hidden="true">16</div>
+    <p class="eyebrow">Part 3 · 並行 · 第 16 章</p>
+    <h1>select</h1>
+    <p class="analogy">select 是同時盯著好幾個窗口的櫃檯：哪一個先有人，就先處理哪一個。</p>
+  </header>
+
+  <section aria-labelledby="look">
+    <h2 id="look">看圖</h2>
+    <div class="figs">
+      <figure class="fig">
+        <svg viewBox="0 0 480 206" role="img" aria-label="select 同時等結果、計時器和取消訊號三個 channel；計時器先準備好，所以回傳逾時">
+          <title>select 同時盯好幾個 channel</title>
+          <rect class="soft" x="16" y="30" width="150" height="40" rx="6"/>
+          <rect class="hot" x="16" y="90" width="150" height="40" rx="6"/>
+          <rect class="soft" x="16" y="150" width="150" height="40" rx="6"/>
+          <text class="small mono" x="91" y="55" text-anchor="middle">&lt;-result</text>
+          <text class="small mono t-hot" x="91" y="115" text-anchor="middle">&lt;-time.After(1s)</text>
+          <text class="small mono" x="91" y="175" text-anchor="middle">&lt;-ctx.Done()</text>
+          <path class="wire" d="M166 50 H200 V170 H166 M166 110 H220"/>
+          <path class="tip" d="M232 110 L220 104 L220 116 Z"/>
+          <rect class="acc" x="232" y="78" width="100" height="64" rx="10"/>
+          <text class="mono bold" x="282" y="116" text-anchor="middle">select</text>
+          <path class="wire hot-ln" d="M332 110 H392"/>
+          <path class="tip hot-tip" d="M404 110 L392 104 L392 116 Z"/>
+          <text class="sm t-hot" x="368" y="96" text-anchor="middle">先到先處理</text>
+          <text class="bold t-hot" x="440" y="116" text-anchor="middle">逾時</text>
+        </svg>
+        <figcaption>select 同時盯著好幾個 channel，哪一個先準備好就處理哪一個；這裡是計時器先響，所以回傳逾時。</figcaption>
+      </figure>
+
+      <figure class="fig">
+        <svg viewBox="0 0 480 180" role="img" aria-label="加了 default 的 select：channel 是空的就走 default，馬上離開；channel 裡有 5 就收到 5">
+          <title>default：不等就走</title>
+          <text class="sm mono" x="50" y="28" text-anchor="middle">ch</text>
+          <rect class="soft dash" x="20" y="36" width="60" height="40" rx="6"/>
+          <path class="wire" d="M80 56 H128"/>
+          <path class="tip" d="M138 56 L126 50 L126 62 Z"/>
+          <rect class="acc" x="140" y="36" width="100" height="40" rx="8"/>
+          <text class="small mono" x="190" y="61" text-anchor="middle">select</text>
+          <path class="wire hot-ln" d="M240 56 H298"/>
+          <path class="tip hot-tip" d="M310 56 L298 50 L298 62 Z"/>
+          <text class="small t-hot" x="316" y="61">default：現在沒有</text>
+
+          <text class="sm mono" x="50" y="108" text-anchor="middle">ch</text>
+          <rect class="acc" x="20" y="116" width="60" height="40" rx="6"/>
+          <text class="bold" x="50" y="142" text-anchor="middle">5</text>
+          <path class="wire" d="M80 136 H128"/>
+          <path class="tip" d="M138 136 L126 130 L126 142 Z"/>
+          <rect class="acc" x="140" y="116" width="100" height="40" rx="8"/>
+          <text class="small mono" x="190" y="141" text-anchor="middle">select</text>
+          <path class="wire acc-ln" d="M240 136 H298"/>
+          <path class="tip acc-tip" d="M310 136 L298 130 L298 142 Z"/>
+          <text class="small t-acc" x="316" y="141">case：收到 5</text>
+        </svg>
+        <figcaption>加了 <code>default</code>，select 就不會卡住：沒有東西可收時直接走 default。</figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <section aria-labelledby="code">
+    <h2 id="code">最小範例</h2>
+    <pre class="code"><code>func main() {
+	slow := make(chan string) <span class="c">// 永遠不會有人送</span>
+	select {
+	case v := &lt;-slow:
+		fmt.Println(v)
+	case &lt;-time.After(50 * time.Millisecond):
+		fmt.Println("逾時")
+	}
+
+	ready := make(chan int, 1)
+	select {
+	case v := &lt;-ready:
+		fmt.Println(v)
+	default:
+		fmt.Println("現在沒有，先做別的")
+	}
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out"><code>逾時
+現在沒有，先做別的</code></pre>
+  </section>
+
+  <section aria-labelledby="notes">
+    <h2 id="notes">工程師筆記</h2>
+    <ul class="notes">
+      <li>好幾個 case 同時準備好時，select 隨機挑一個，不是由上往下。</li>
+      <li><code>time.After</code> 每次呼叫都建一個新的計時器。Go 1.23 起沒人用的計時器會被回收，在迴圈裡用也不會洩漏；熱點迴圈改用 <code>time.NewTimer</code> 搭配 <code>Reset</code> 比較省。</li>
+      <li><code>default</code> 讓 select 不阻塞；但在迴圈裡只有 default 沒有任何等待，會變成空轉吃滿 CPU。</li>
+      <li>把 channel 變數設成 nil 可以停用某個 case：從 nil channel 收會永遠卡住，select 就不會選它。</li>
+      <li>需要等待時，通常同時盯著 <code>ctx.Done()</code>，上層取消時才能馬上離開（第 18 章）。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="java">
+    <h2 id="java">從 Java 來的你</h2>
+    <div class="table-wrap">
+      <table class="vs">
+        <thead><tr><th scope="col">主題</th><th scope="col">Java</th><th scope="col">Go</th></tr></thead>
+        <tbody>
+          <tr><th scope="row">等多個來源</th><td class="java"><code>CompletableFuture.anyOf</code>、NIO <code>Selector</code></td><td><code>select</code></td></tr>
+          <tr><th scope="row">逾時</th><td class="java"><code>future.get(1, SECONDS)</code></td><td><code>case &lt;-time.After(time.Second)</code></td></tr>
+          <tr><th scope="row">不阻塞地取</th><td class="java"><code>queue.poll()</code></td><td><code>select</code> 加上 <code>default</code></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section aria-labelledby="run">
+    <h2 id="run">動手跑</h2>
+    <p class="label">在 repo 根目錄</p>
+    <pre class="shell"><code>go run ./chapters/16-select
+go test -race ./chapters/16-select</code></pre>
+    <p><a href="https://github.com/xinqilin/GO-Playground/tree/main/chapters/16-select">在 GitHub 看完整程式碼</a></p>
+  </section>
+</main>
+
+<nav class="pager" aria-label="章節導覽">
+  <a class="prev" href="15-channels.html">← 15 channel</a>
+  <a class="home" href="index.html">目錄</a>
+  <a class="next" href="17-sync.html">17 sync 與 data race →</a>
+</nav>
+</body>
+</html>

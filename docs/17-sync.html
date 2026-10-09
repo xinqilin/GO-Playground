@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>sync 與 data race｜Go 圖解手冊</title>
+<meta name="description" content="什麼是 data race、怎麼用 race detector 抓出來，以及 sync.Mutex、atomic 與 sync.OnceValue。">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<header class="site">
+  <a href="index.html">Go 圖解手冊</a>
+  <span class="count">17 / 24</span>
+</header>
+
+<main class="page">
+  <header class="hero">
+    <div class="num" aria-hidden="true">17</div>
+    <p class="eyebrow">Part 3 · 並行 · 第 17 章</p>
+    <h1>sync 與 data race</h1>
+    <p class="analogy">好幾個人同時在同一格寫字，結果一定亂掉；Mutex 是那一格的鑰匙。</p>
+  </header>
+
+  <section aria-labelledby="look">
+    <h2 id="look">看圖</h2>
+    <div class="figs">
+      <figure class="fig">
+        <svg viewBox="0 0 480 262" role="img" aria-label="count 原本是 5；G1 和 G2 交錯執行，都讀到 5、都加 1、都寫回 6，結果少算了一次">
+          <title>data race：同時寫同一格</title>
+          <rect class="acc" x="180" y="16" width="120" height="36" rx="6"/>
+          <text class="small" x="240" y="39" text-anchor="middle">count = 5</text>
+          <text class="small mono bold" x="16" y="106">G1</text>
+          <rect class="soft" x="60" y="84" width="110" height="36" rx="6"/>
+          <rect class="soft" x="180" y="84" width="110" height="36" rx="6"/>
+          <rect class="soft" x="300" y="84" width="110" height="36" rx="6"/>
+          <text class="small" x="115" y="107" text-anchor="middle">讀到 5</text>
+          <text class="small" x="235" y="107" text-anchor="middle">加 1 得 6</text>
+          <text class="small" x="355" y="107" text-anchor="middle">寫回 6</text>
+          <text class="small mono bold" x="16" y="176">G2</text>
+          <rect class="soft" x="100" y="154" width="110" height="36" rx="6"/>
+          <rect class="soft" x="220" y="154" width="110" height="36" rx="6"/>
+          <rect class="soft" x="340" y="154" width="110" height="36" rx="6"/>
+          <text class="small" x="155" y="177" text-anchor="middle">讀到 5</text>
+          <text class="small" x="275" y="177" text-anchor="middle">加 1 得 6</text>
+          <text class="small" x="395" y="177" text-anchor="middle">寫回 6</text>
+          <rect class="hot" x="150" y="214" width="180" height="36" rx="6"/>
+          <text class="small bold t-hot" x="240" y="237" text-anchor="middle">count = 6，少算一次</text>
+        </svg>
+        <figcaption><code>count++</code> 是「讀、加、寫」三步。兩個 goroutine 交錯執行，都讀到 5、都寫回 6，就少算了一次。這叫 data race。</figcaption>
+      </figure>
+
+      <figure class="fig">
+        <svg viewBox="0 0 480 200" role="img" aria-label="Mutex 一次只讓一個 goroutine 進房間；G1 在裡面做 count++，G2、G3、G4 在門外排隊">
+          <title>Mutex 是一把鑰匙</title>
+          <rect class="acc" x="240" y="40" width="200" height="120" rx="12"/>
+          <text class="small mono t-acc" x="256" y="64">mu.Lock()</text>
+          <circle class="hot" cx="340" cy="104" r="22"/>
+          <text class="small bold t-hot" x="340" y="109" text-anchor="middle">G1</text>
+          <text class="small mono" x="340" y="146" text-anchor="middle">count++</text>
+          <circle class="soft" cx="180" cy="104" r="22"/>
+          <circle class="soft" cx="120" cy="104" r="22"/>
+          <circle class="soft" cx="60" cy="104" r="22"/>
+          <text class="small bold" x="180" y="109" text-anchor="middle">G2</text>
+          <text class="small bold" x="120" y="109" text-anchor="middle">G3</text>
+          <text class="small bold" x="60" y="109" text-anchor="middle">G4</text>
+          <path class="wire" d="M204 104 H230"/>
+          <path class="tip" d="M240 104 L228 98 L228 110 Z"/>
+          <text class="sm" x="120" y="150" text-anchor="middle">排隊等鑰匙</text>
+          <text class="small t-acc" x="340" y="188" text-anchor="middle">Unlock() 之後，下一個才能進去</text>
+        </svg>
+        <figcaption>Mutex 一次只讓一個 goroutine 進去；其他人在門外排隊，等前一個 Unlock 才輪到下一個。</figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <section aria-labelledby="code">
+    <h2 id="code">最小範例</h2>
+    <pre class="code"><code>type Counter struct {
+	mu sync.Mutex
+	n  int
+}
+
+func (c *Counter) Inc() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.n++
+}
+
+func main() {
+	var c Counter
+	var hits atomic.Int64
+	var wg sync.WaitGroup
+	for range 1000 {
+		wg.Go(func() { c.Inc(); hits.Add(1) })
+	}
+	wg.Wait()
+	fmt.Println(c.n, hits.Load())
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out"><code>1000 1000</code></pre>
+  </section>
+
+  <section aria-labelledby="notes">
+    <h2 id="notes">工程師筆記</h2>
+    <ul class="notes">
+      <li>有疑慮就跑 <code>go test -race</code>：它在執行時抓出真的發生的 data race。CI 建議一直開著。</li>
+      <li><code>sync.Mutex</code> 不可重入：同一個 goroutine 重複 Lock 會卡死。</li>
+      <li>含有 Mutex 的 struct 不要複製，用指標傳遞；<code>go vet</code> 的 copylocks 檢查會抓這個錯。</li>
+      <li>讀多寫少用 <code>sync.RWMutex</code>；只有一個數字時，用 <code>atomic.Int64</code> 這類型別比較簡單。</li>
+      <li><code>sync.OnceValue</code>（Go 1.21）把「只做一次」和「回傳結果」包在一起，適合延遲初始化。</li>
+      <li>鎖的範圍越小越好；拿著鎖時不要做 I/O，也不要等 channel。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="java">
+    <h2 id="java">從 Java 來的你</h2>
+    <div class="table-wrap">
+      <table class="vs">
+        <thead><tr><th scope="col">主題</th><th scope="col">Java</th><th scope="col">Go</th></tr></thead>
+        <tbody>
+          <tr><th scope="row">互斥鎖</th><td class="java"><code>synchronized</code>、<code>ReentrantLock</code>（可重入）</td><td><code>sync.Mutex</code>（不可重入）</td></tr>
+          <tr><th scope="row">讀寫鎖</th><td class="java"><code>ReentrantReadWriteLock</code></td><td><code>sync.RWMutex</code></td></tr>
+          <tr><th scope="row">原子操作</th><td class="java"><code>AtomicLong</code></td><td><code>atomic.Int64</code></td></tr>
+          <tr><th scope="row">只執行一次</th><td class="java">靜態初始化、double-checked locking</td><td><code>sync.Once</code>、<code>sync.OnceValue</code></td></tr>
+          <tr><th scope="row">找出 race</th><td class="java">JDK 沒有內建工具</td><td><code>go test -race</code>、<code>go run -race</code></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section aria-labelledby="run">
+    <h2 id="run">動手跑</h2>
+    <p class="label">在 repo 根目錄</p>
+    <pre class="shell"><code>go run ./chapters/17-sync
+go test -race ./chapters/17-sync
+go run -race ./chapters/17-sync/race   <span class="c"># 故意寫錯的版本</span></code></pre>
+    <p class="label">故意寫錯的版本會印出（節錄）</p>
+    <pre class="out"><code>==================
+WARNING: DATA RACE
+Read at 0x00c00011c038 by goroutine 9:
+  main.main.func1()
+      .../chapters/17-sync/race/main.go:18 +0x2c
+...
+count = 853 （應該是 1000）
+Found 2 data race(s)</code></pre>
+    <p><a href="https://github.com/xinqilin/GO-Playground/tree/main/chapters/17-sync">在 GitHub 看完整程式碼</a></p>
+  </section>
+</main>
+
+<nav class="pager" aria-label="章節導覽">
+  <a class="prev" href="16-select.html">← 16 select</a>
+  <a class="home" href="index.html">目錄</a>
+  <a class="next" href="18-context.html">18 context →</a>
+</nav>
+</body>
+</html>
