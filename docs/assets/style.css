@@ -250,3 +250,114 @@ table.vs { width: 100%; border-collapse: collapse; font-size: 16px; line-height:
   .cover h1 { font-size: 38px; }
   .cover .lede { font-size: 18px; }
 }
+
+/*
+ * 長文章節（.page.long）
+ * 每節先圖、再說明、再程式碼和輸出；只新增 class，不影響舊格式的頁面。
+ */
+.long pre { margin: 12px 0 16px; }
+.long .label + pre { margin-top: 0; }
+.long .fig { margin: 18px 0 20px; }
+.long h3 { margin: 28px 0 10px; font-size: 19px; line-height: 1.4; }
+.long ul.notes { margin-bottom: 12px; }
+
+/* 本章內容：頁內目錄 */
+.toc-inline {
+  margin-top: 28px;
+  padding: 16px 20px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+}
+.toc-inline .label { margin: 0 0 8px; }
+.toc-inline ol { margin: 0; padding-left: 1.6em; columns: 2 15rem; column-gap: 32px; }
+.toc-inline li { break-inside: avoid; }
+.toc-inline a { text-decoration: none; }
+.toc-inline a:hover { text-decoration: underline; }
+
+/* 提醒框 */
+.callout {
+  margin: 16px 0;
+  padding: 12px 16px;
+  border-left: 4px solid var(--accent);
+  border-radius: 0 10px 10px 0;
+  background: var(--accent-soft);
+}
+.callout.warn { border-left-color: var(--hot); background: var(--hot-soft); }
+.callout > :last-child { margin-bottom: 0; }
+.callout .title { display: block; margin-bottom: 4px; font-weight: 700; }
+
+/* 深入：第一次讀可以跳過 */
+.deep {
+  margin: 24px 0 8px;
+  padding: 4px 18px 8px;
+  border: 1px dashed var(--muted);
+  border-radius: 12px;
+}
+.deep > .tag {
+  display: inline-block;
+  margin: 14px 0 0;
+  font: 12px/1.4 var(--font-mono);
+  letter-spacing: 0.08em;
+  color: var(--muted);
+}
+.deep > h3 { margin-top: 4px; }
+
+/* 錯誤寫法 / 正確寫法 */
+.compare { display: grid; gap: 4px; margin: 12px 0 16px; }
+.compare .label { margin: 8px 0 6px; }
+.compare .label.bad { color: var(--hot); }
+.compare .label.good { color: var(--accent); }
+.compare pre { margin: 0 0 4px; }
+pre.code.bad { border-color: var(--hot); }
+pre.code.good { border-color: var(--accent); }
+pre.out.err { border-color: var(--hot); }
+
+/* 練習 */
+.exercises { display: grid; gap: 16px; margin: 0; padding: 0; list-style: none; }
+.exercises > li {
+  padding: 4px 18px 16px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+}
+.exercises h3 { margin: 14px 0 8px; font-size: 18px; }
+.level {
+  display: inline-block;
+  margin-right: 8px;
+  padding: 0 8px;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  font: 600 12px/1.8 var(--font-mono);
+  vertical-align: 2px;
+}
+.level.l1 { color: var(--accent); }
+.level.l2 { color: var(--fg); }
+.level.l3 { color: var(--hot); }
+.level.fix { color: var(--muted); }
+details { margin-top: 10px; }
+summary { cursor: pointer; color: var(--accent); font-weight: 600; }
+summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 3px; }
+details[open] > summary { margin-bottom: 6px; }
+details > :last-child { margin-bottom: 0; }
+
+/* 重點回顧：檢查清單 */
+.recap { display: grid; gap: 10px; margin: 0; padding: 0; list-style: none; }
+.recap li { position: relative; padding-left: 30px; }
+.recap li::before {
+  content: "";
+  position: absolute;
+  left: 2px;
+  top: 0.42em;
+  width: 14px;
+  height: 14px;
+  border: 2px solid var(--accent);
+  border-radius: 3px;
+}
+
+@media (max-width: 560px) {
+  .toc-inline { padding: 14px 16px; }
+  .deep { padding-inline: 12px; }
+  .exercises > li { padding-inline: 14px; }
+  .long h3 { font-size: 18px; }
+}
