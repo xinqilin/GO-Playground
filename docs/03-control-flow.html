@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>流程控制｜Go 圖解手冊</title>
-<meta name="description" content="Go 的 if、for、switch：if 的初始化敘述、for 的四種寫法、switch 不會往下掉，以及有標籤的 break。">
+<meta name="description" content="Go 的 if、for、switch 完整介紹：if 的初始化敘述與 guard clause、for 的四種寫法、range 在各種型別上的行為、標籤與 break 陷阱、switch 與 fallthrough，附常見錯誤與有測試的練習題。">
 <link rel="stylesheet" href="assets/style.css">
 </head>
 <body>
@@ -13,155 +13,1057 @@
   <span class="count">03 / 24</span>
 </header>
 
-<main class="page">
+<main class="page long">
   <header class="hero">
     <div class="num" aria-hidden="true">03</div>
     <p class="eyebrow">Part 1 · 基礎 · 第 03 章</p>
     <h1>流程控制</h1>
-    <p class="analogy">Go 只有 if、for、switch 三種路標，沒有 while，也沒有三元運算子。</p>
+    <p class="analogy">程式預設由上往下一行一行跑。流程控制就是路標：遇到岔路選一條（if、switch），遇到圓環繞幾圈（for）。Go 只準備了這三種路標。</p>
   </header>
 
-  <section aria-labelledby="look">
-    <h2 id="look">看圖</h2>
-    <div class="figs">
-      <figure class="fig">
-        <svg viewBox="0 0 480 206" role="img" aria-label="if 前面先宣告 n 和 err，它們只活在 if 和 else 兩個區塊裡，離開之後就不存在">
-          <title>if 可以先做一件事</title>
-          <text class="small mono" x="240" y="30" text-anchor="middle">if n, err := strconv.Atoi(s); err != nil {</text>
-          <rect class="wire acc-ln dash" x="20" y="46" width="440" height="110" rx="14"/>
-          <text class="sm t-acc" x="36" y="70">n、err 只活在這個框裡</text>
-          <rect class="soft" x="44" y="84" width="180" height="56" rx="6"/>
-          <rect class="soft" x="256" y="84" width="180" height="56" rx="6"/>
-          <text class="small mono" x="134" y="106" text-anchor="middle">err != nil</text>
-          <text class="small" x="134" y="128" text-anchor="middle">印出「不是數字」</text>
-          <text class="small mono" x="346" y="106" text-anchor="middle">else</text>
-          <text class="small" x="346" y="128" text-anchor="middle">用 n 算兩倍</text>
-          <text class="t-hot" x="240" y="190" text-anchor="middle">離開 if 之後，n 和 err 就不存在了</text>
-        </svg>
-        <figcaption><code>if</code> 前面可以先算一個值；它只活在 if/else 裡，不會弄髒外面。</figcaption>
-      </figure>
+  <nav class="toc-inline" aria-labelledby="toc-title">
+    <p class="label" id="toc-title">本章內容</p>
+    <ol>
+      <li><a href="#goals">本章你會學到</a></li>
+      <li><a href="#if">if：依條件走不同的路</a></li>
+      <li><a href="#for">for：Go 唯一的迴圈</a></li>
+      <li><a href="#range">range：走過一整組資料</a></li>
+      <li><a href="#jump">break、continue 與標籤</a></li>
+      <li><a href="#switch">switch：多選一</a></li>
+      <li><a href="#pitfalls">常見錯誤</a></li>
+      <li><a href="#java">從 Java 來的你</a></li>
+      <li><a href="#exercises">練習</a></li>
+      <li><a href="#recap">重點回顧</a></li>
+      <li><a href="#further">延伸閱讀</a></li>
+      <li><a href="#run">動手跑</a></li>
+    </ol>
+  </nav>
 
-      <figure class="fig">
-        <svg viewBox="0 0 480 300" role="img" aria-label="for 的四種寫法：三段式計數、只寫條件像 while、range 走過每個元素、什麼都不寫的無窮迴圈用 break 離開">
-          <title>for 一個關鍵字，四種寫法</title>
-          <rect class="soft" x="12" y="12" width="224" height="132" rx="10"/>
-          <rect class="soft" x="244" y="12" width="224" height="132" rx="10"/>
-          <rect class="soft" x="12" y="156" width="224" height="132" rx="10"/>
-          <rect class="soft" x="244" y="156" width="224" height="132" rx="10"/>
-
-          <text class="small mono" x="26" y="38">for i := 0; i &lt; 3; i++</text>
-          <circle class="acc" cx="62" cy="98" r="18"/>
-          <circle class="acc" cx="124" cy="98" r="18"/>
-          <circle class="acc" cx="186" cy="98" r="18"/>
-          <text class="bold t-acc" x="62" y="104" text-anchor="middle">0</text>
-          <text class="bold t-acc" x="124" y="104" text-anchor="middle">1</text>
-          <text class="bold t-acc" x="186" y="104" text-anchor="middle">2</text>
-          <path class="wire" d="M82 98 H96 M144 98 H158"/>
-          <path class="tip" d="M104 98 L94 92 L94 104 Z"/>
-          <path class="tip" d="M166 98 L156 92 L156 104 Z"/>
-
-          <text class="small mono" x="258" y="38">for n &lt; 100</text>
-          <text class="mono" x="356" y="92" text-anchor="middle">1→3→9→27→81→243</text>
-          <text class="small t-hot" x="356" y="122" text-anchor="middle">到 243 不再小於 100，停</text>
-
-          <text class="small mono" x="26" y="182">for i, v := range s</text>
-          <rect class="acc" x="38" y="204" width="52" height="40" rx="4"/>
-          <rect class="acc" x="98" y="204" width="52" height="40" rx="4"/>
-          <rect class="acc" x="158" y="204" width="52" height="40" rx="4"/>
-          <text class="mono" x="64" y="230" text-anchor="middle">a</text>
-          <text class="mono" x="124" y="230" text-anchor="middle">b</text>
-          <text class="mono" x="184" y="230" text-anchor="middle">c</text>
-          <text class="sm mono" x="64" y="268" text-anchor="middle">i=0</text>
-          <text class="sm mono" x="124" y="268" text-anchor="middle">i=1</text>
-          <text class="sm mono" x="184" y="268" text-anchor="middle">i=2</text>
-
-          <text class="small mono" x="258" y="182">for { … }</text>
-          <rect class="wire" x="274" y="206" width="90" height="52" rx="12"/>
-          <path class="tip" d="M324 206 L311 199 L311 213 Z"/>
-          <text class="small" x="319" y="238" text-anchor="middle">一直跑</text>
-          <path class="wire hot-ln" d="M364 232 H420"/>
-          <path class="tip hot-tip" d="M432 232 L419 225 L419 239 Z"/>
-          <text class="small mono t-hot" x="392" y="222" text-anchor="middle">break</text>
-        </svg>
-        <figcaption>Go 只有 <code>for</code> 一個迴圈關鍵字：三段式、只寫條件、<code>range</code>、無窮迴圈，都是它。</figcaption>
-      </figure>
-
-      <figure class="fig">
-        <svg viewBox="0 0 480 236" role="img" aria-label="switch 拿 a 去比對，符合 case a 就執行完結束，不會往下掉；只有寫了 fallthrough 才會跑進 case b">
-          <title>switch 找到就停</title>
-          <circle class="acc" cx="40" cy="60" r="24"/>
-          <text class="mono bold t-acc" x="40" y="66" text-anchor="middle">"a"</text>
-          <path class="wire" d="M64 60 H90"/>
-          <path class="tip" d="M100 60 L88 54 L88 66 Z"/>
-          <rect class="acc" x="100" y="38" width="200" height="44" rx="6"/>
-          <rect class="soft" x="100" y="108" width="200" height="44" rx="6"/>
-          <rect class="soft" x="100" y="178" width="200" height="44" rx="6"/>
-          <text class="mono" x="116" y="66">case "a":</text>
-          <text class="mono" x="116" y="136">case "b":</text>
-          <text class="mono" x="116" y="206">default:</text>
-          <path class="wire" d="M300 56 H404"/>
-          <path class="tip" d="M416 56 L403 49 L403 63 Z"/>
-          <text class="sm" x="352" y="44" text-anchor="middle">自動結束</text>
-          <text class="bold" x="446" y="62" text-anchor="middle">結束</text>
-          <path class="wire hot-ln dash" d="M300 72 H330 V130 H312"/>
-          <path class="tip hot-tip" d="M300 130 L312 124 L312 136 Z"/>
-          <text class="small mono t-hot" x="338" y="106">fallthrough</text>
-        </svg>
-        <figcaption><code>switch</code> 找到符合的 case 就結束，不會往下掉；真的要往下掉，才寫 <code>fallthrough</code>。</figcaption>
-      </figure>
-
-      <figure class="fig">
-        <svg viewBox="0 0 480 216" role="img" aria-label="在內層迴圈找到答案後，break outer 一次跳出內外兩層迴圈">
-          <title>有標籤的 break</title>
-          <rect class="wire acc-ln dash" x="20" y="20" width="330" height="180" rx="14"/>
-          <text class="small mono t-acc" x="36" y="46">outer: for i := …</text>
-          <rect class="wire dash" x="50" y="64" width="270" height="116" rx="12"/>
-          <text class="small mono" x="66" y="90">for j := …</text>
-          <circle class="hot" cx="130" cy="136" r="10"/>
-          <text class="small" x="130" y="166" text-anchor="middle">找到答案</text>
-          <path class="wire hot-ln" d="M142 136 H446"/>
-          <path class="tip hot-tip" d="M458 136 L445 129 L445 143 Z"/>
-          <text class="small mono t-hot" x="404" y="124" text-anchor="middle">break outer</text>
-          <text class="small" x="410" y="162" text-anchor="middle">兩層都跳出</text>
-        </svg>
-        <figcaption><code>break</code> 加上標籤，可以一次跳出好幾層迴圈；沒有標籤只會跳出最內層。</figcaption>
-      </figure>
-    </div>
+  <section aria-labelledby="goals">
+    <h2 id="goals">本章你會學到</h2>
+    <ul class="notes">
+      <li>用 <code>if</code>、<code>else if</code>、<code>else</code> 做判斷，並用「if 前面先做一件事」把暫時的變數關在小範圍裡。</li>
+      <li>用 guard clause 把一層一層的巢狀 if 攤平。</li>
+      <li>用 <code>for</code> 的四種寫法，取代其他語言的 for、while、do-while。</li>
+      <li>知道 <code>range</code> 在 slice、陣列、字串、map、channel、整數和函式上各給你什麼，以及「拿到的是複本」這件事。</li>
+      <li>用 <code>break</code>、<code>continue</code> 加上標籤控制多層迴圈，並避開「switch 裡的 break」這個陷阱。</li>
+      <li>用 <code>switch</code> 取代一長串 if-else，知道它預設不會往下掉，必要時才用 <code>fallthrough</code>。</li>
+    </ul>
+    <p>先備知識：第 <a href="01-variables.html">01 章</a>的變數與 <code>:=</code>，以及第 <a href="02-input-output.html">02 章</a>的 <code>fmt.Println</code>、<code>fmt.Printf</code>。</p>
   </section>
 
-  <section aria-labelledby="code">
-    <h2 id="code">最小範例</h2>
-    <pre class="code"><code>func main() {
-	if n, err := strconv.Atoi("42"); err == nil {
-		fmt.Println("兩倍是", n*2)
-	}
-	for i := range 3 {
-		fmt.Print(i)
-	}
-	fmt.Println()
-	switch day := "六"; day {
-	case "六", "日":
-		fmt.Println("週末")
-	default:
-		fmt.Println("平日")
+  <section aria-labelledby="if">
+    <h2 id="if">1. if：依條件走不同的路</h2>
+    <p><code>if</code> 後面接一個結果是 <code>bool</code> 的運算式：成立就執行大括號裡的程式，不成立就跳過。後面可以接任意多個 <code>else if</code>，最後可以有一個 <code>else</code>。Go 會由上往下檢查，第一個成立的區塊執行完就離開整組 if，後面的條件連看都不看。</p>
+    <pre class="code" data-src="chapters/03-control-flow/if.go#ifElse"><code>func ifElse() {
+	for _, temp := range []int{33, 24, 12} {
+		if temp &gt;= 30 {
+			fmt.Println(temp, "度：開冷氣")
+		} else if temp &gt;= 20 {
+			fmt.Println(temp, "度：開窗就好")
+		} else {
+			fmt.Println(temp, "度：穿外套")
+		}
 	}
 }</code></pre>
     <p class="label">輸出</p>
-    <pre class="out"><code>兩倍是 84
-012
-週末</code></pre>
+    <pre class="out" data-example="chapters/03-control-flow#Example_ifElse"><code>33 度：開冷氣
+24 度：開窗就好
+12 度：穿外套</code></pre>
+    <p>寫法上有四條規則，從其他語言過來的人要特別注意：</p>
+    <ul class="notes">
+      <li>條件不用加括號。寫成 <code>if (temp &gt;= 30)</code> 也能編譯，但 gofmt 會把多餘的括號拿掉。</li>
+      <li>大括號一定要寫，即使區塊只有一行。這讓「以為第二行也在 if 裡，其實不在」這一類 bug 根本不會發生。</li>
+      <li><code>{</code> 必須跟條件寫在同一行，換行會編譯錯誤，原因在<a href="#pit-brace">常見錯誤 1</a>。</li>
+      <li>條件只能是 <code>bool</code>。整數 0、空字串、nil 都不會自動被當成 false，要明確寫出 <code>n != 0</code>、<code>s != ""</code>、<code>p != nil</code>。</li>
+    </ul>
+    <aside class="callout">
+      <span class="title">沒有三元運算子</span>
+      <p>Go 刻意不提供 <code>cond ? a : b</code>，一律寫成 if/else。常見的寫法是先給預設值，再用 if 覆寫：<code>label := "平日"</code>，接著 <code>if weekend { label = "假日" }</code>。</p>
+    </aside>
+
+    <h3>1.2 if 前面先做一件事</h3>
+    <figure class="fig">
+      <svg viewBox="0 0 480 206" role="img" aria-label="if 前面先宣告 n 和 err，它們只活在 if 和 else 兩個區塊裡，離開之後就不存在">
+        <title>if 可以先做一件事</title>
+        <text class="small mono" x="240" y="30" text-anchor="middle">if n, err := strconv.Atoi(s); err != nil {</text>
+        <rect class="wire acc-ln dash" x="20" y="46" width="440" height="110" rx="14"/>
+        <text class="sm t-acc" x="36" y="70">n、err 只活在這個框裡</text>
+        <rect class="soft" x="44" y="84" width="180" height="56" rx="6"/>
+        <rect class="soft" x="256" y="84" width="180" height="56" rx="6"/>
+        <text class="small mono" x="134" y="106" text-anchor="middle">err != nil</text>
+        <text class="small" x="134" y="128" text-anchor="middle">印出「不是數字」</text>
+        <text class="small mono" x="346" y="106" text-anchor="middle">else</text>
+        <text class="small" x="346" y="128" text-anchor="middle">用 n 計算金額</text>
+        <text class="t-hot" x="240" y="190" text-anchor="middle">離開 if 之後，n 和 err 就不存在了</text>
+      </svg>
+      <figcaption>在 if 前面宣告的變數，每個分支都看得到，離開 if 就消失。</figcaption>
+    </figure>
+    <p>if 的條件前面可以放一個簡短敘述，用分號和條件隔開。最常見的用途是「呼叫一個會回傳錯誤的函式，馬上檢查錯誤」。下面的 <code>strconv.Atoi</code> 把字串轉成 int，失敗時回傳錯誤（錯誤在第 <a href="11-errors.html">11 章</a>細講）：</p>
+    <pre class="code" data-src="chapters/03-control-flow/if.go#ifInit"><code>func ifInit() {
+	for _, input := range []string{"3", "三", "0"} {
+		if n, err := strconv.Atoi(input); err != nil {
+			fmt.Printf("%q 不是數字\n", input)
+		} else if n &lt;= 0 {
+			fmt.Println("至少要訂 1 個")
+		} else {
+			fmt.Println("訂", n, "個便當，共", n*85, "元")
+		}
+		// 這裡已經看不到 n 和 err
+	}
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/03-control-flow#Example_ifInit"><code>訂 3 個便當，共 255 元
+"三" 不是數字
+至少要訂 1 個</code></pre>
+    <p>在這裡宣告的 <code>n</code> 和 <code>err</code>，作用域只有這一組 <code>if</code> / <code>else if</code> / <code>else</code>：每個分支都看得到它們，離開之後就消失。這樣變數的壽命剛好等於它被需要的範圍，下面的程式不會不小心用到「上一次留下來的 err」。如果 if 結束後還需要 <code>n</code>，就把 <code>n, err := strconv.Atoi(input)</code> 移到 if 前面單獨一行。</p>
+
+    <h3>1.3 guard clause：先處理例外，主流程靠左</h3>
+    <figure class="fig">
+      <svg viewBox="0 0 480 250" role="img" aria-label="左邊是巢狀寫法，每多一個檢查就往右縮一層，主要邏輯被擠到最右下；右邊是 guard clause，每個檢查不通過就往右離開，主要邏輯沿著左邊一路往下">
+        <title>巢狀 if 與 guard clause</title>
+        <text class="small bold" x="114" y="26" text-anchor="middle">巢狀：越寫越往右</text>
+        <rect class="soft" x="16" y="42" width="196" height="34" rx="6"/>
+        <rect class="soft" x="40" y="86" width="172" height="34" rx="6"/>
+        <rect class="soft" x="64" y="130" width="148" height="34" rx="6"/>
+        <rect class="acc" x="88" y="174" width="124" height="34" rx="6"/>
+        <text class="small" x="28" y="64">if 已付款 {</text>
+        <text class="small" x="52" y="108">if 有地址 {</text>
+        <text class="small" x="76" y="152">if 有商品 {</text>
+        <text class="small bold t-acc" x="150" y="196" text-anchor="middle">可以出貨</text>
+        <text class="small t-hot" x="114" y="236" text-anchor="middle">三個 else 散在下面各層</text>
+
+        <path class="wire faint" d="M228 20 V236"/>
+
+        <text class="small bold" x="360" y="26" text-anchor="middle">guard clause：一路往下</text>
+        <rect class="soft" x="244" y="42" width="116" height="32" rx="6"/>
+        <rect class="soft" x="244" y="94" width="116" height="32" rx="6"/>
+        <rect class="soft" x="244" y="146" width="116" height="32" rx="6"/>
+        <rect class="acc" x="244" y="198" width="116" height="32" rx="6"/>
+        <text class="small" x="302" y="63" text-anchor="middle">沒付款？</text>
+        <text class="small" x="302" y="115" text-anchor="middle">沒地址？</text>
+        <text class="small" x="302" y="167" text-anchor="middle">沒商品？</text>
+        <text class="small bold t-acc" x="302" y="219" text-anchor="middle">可以出貨</text>
+        <path class="wire" d="M302 74 V84 M302 126 V136 M302 178 V188"/>
+        <path class="tip" d="M302 94 L296 83 L308 83 Z"/>
+        <path class="tip" d="M302 146 L296 135 L308 135 Z"/>
+        <path class="tip" d="M302 198 L296 187 L308 187 Z"/>
+        <path class="wire hot-ln" d="M360 58 H372 M360 110 H372 M360 162 H372"/>
+        <path class="tip hot-tip" d="M382 58 L371 52 L371 64 Z"/>
+        <path class="tip hot-tip" d="M382 110 L371 104 L371 116 Z"/>
+        <path class="tip hot-tip" d="M382 162 L371 156 L371 168 Z"/>
+        <text class="sm" x="386" y="63">return</text>
+        <text class="sm" x="386" y="115">return</text>
+        <text class="sm" x="386" y="167">return</text>
+      </svg>
+      <figcaption>guard clause 把「不合格就離開」放在前面，正常流程沿著左邊往下走。</figcaption>
+    </figure>
+    <p>判斷條件一多，if 很容易越疊越深：每通過一個檢查就往右縮一層，真正要做的事被擠到最右邊，每個 <code>else</code> 又離它對應的 if 很遠。Go 社群偏好的寫法是 <strong>guard clause</strong>（防衛子句）：先檢查「不合格」的情況，處理完立刻 <code>return</code>，通過所有檢查之後的主流程就留在最外層。</p>
+    <div class="compare">
+      <p class="label bad">巢狀寫法（難讀）</p>
+      <pre class="code bad" data-src="chapters/03-control-flow/if.go#canShipNested"><code>func canShipNested(o order) string {
+	if o.paid {
+		if o.address != "" {
+			if o.items &gt; 0 {
+				return "可以出貨"
+			} else {
+				return "購物車是空的"
+			}
+		} else {
+			return "缺少地址"
+		}
+	} else {
+		return "還沒付款"
+	}
+}</code></pre>
+      <p class="label good">guard clause（建議）</p>
+      <pre class="code good" data-src="chapters/03-control-flow/if.go#canShip"><code>func canShip(o order) string {
+	if !o.paid {
+		return "還沒付款"
+	}
+	if o.address == "" {
+		return "缺少地址"
+	}
+	if o.items == 0 {
+		return "購物車是空的"
+	}
+	return "可以出貨"
+}</code></pre>
+    </div>
+    <p>用四筆訂單同時呼叫兩個版本，結果完全一樣，差別只在好不好讀：</p>
+    <pre class="code" data-src="chapters/03-control-flow/if.go#order,guardClause"><code>type order struct {
+	paid    bool
+	address string
+	items   int
+}
+
+func guardClause() {
+	orders := []order{
+		{paid: false},
+		{paid: true},
+		{paid: true, address: "台北市信義路 1 號"},
+		{paid: true, address: "台北市信義路 1 號", items: 2},
+	}
+	for _, o := range orders {
+		fmt.Println(canShipNested(o), "|", canShip(o))
+	}
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/03-control-flow#Example_guardClause"><code>還沒付款 | 還沒付款
+缺少地址 | 缺少地址
+購物車是空的 | 購物車是空的
+可以出貨 | 可以出貨</code></pre>
+    <p>讀 Go 程式碼時你會一直看到這個形狀：<code>if err != nil { return … }</code> 一段接一段，主流程沿著左邊往下走。這是刻意的：眼睛沿著左邊掃下來，就知道正常情況做了什麼；縮排進去的都是例外處理。另外，<code>return</code> 之後的 <code>else</code> 是多餘的，一些 linter 會把它標出來。</p>
+
+    <h3>1.4 作用域與 shadowing</h3>
+    <p>Go 的變數作用域以大括號為界：在某個區塊裡宣告的變數，只有這個區塊和更內層的區塊看得到。如果內層用 <code>:=</code> 宣告一個和外層同名的變數，產生的是一個全新的變數，把外層的「遮住」，這叫 shadowing。在內層區塊裡，這個名字指的是新變數；離開區塊之後，外層變數原封不動。</p>
+    <pre class="code" data-src="chapters/03-control-flow/if.go#shadowing"><code>func shadowing() {
+	limit := 100
+	if limit &gt; 50 {
+		limit := 50 // 新的 limit，只活在這個區塊
+		fmt.Println("區塊裡：", limit)
+	}
+	fmt.Println("區塊外：", limit)
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/03-control-flow#Example_shadowing"><code>區塊裡： 50
+區塊外： 100</code></pre>
+    <aside class="callout warn">
+      <span class="title">真實程式裡沒這麼明顯</span>
+      <p>在內層區塊裡，<code>:=</code> 左邊的名字全都算是這個區塊的新變數，即使外層已經有同名的變數。它最常和多個回傳值一起出現：<code>theme, err := readSetting(…)</code> 寫在 if 裡，就會不知不覺宣告出一個新的 <code>theme</code>。<a href="#pit-shadow">常見錯誤 2</a> 有完整的例子。</p>
+    </aside>
   </section>
 
-  <section aria-labelledby="notes">
-    <h2 id="notes">工程師筆記</h2>
+  <section aria-labelledby="for">
+    <h2 id="for">2. for：Go 唯一的迴圈</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 300" role="img" aria-label="for 的四種寫法：三段式計數、只寫條件像 while、range 走過每個元素、什麼都不寫的無窮迴圈用 break 離開">
+        <title>for 一個關鍵字，四種寫法</title>
+        <rect class="soft" x="12" y="12" width="224" height="132" rx="10"/>
+        <rect class="soft" x="244" y="12" width="224" height="132" rx="10"/>
+        <rect class="soft" x="12" y="156" width="224" height="132" rx="10"/>
+        <rect class="soft" x="244" y="156" width="224" height="132" rx="10"/>
+
+        <text class="small mono" x="26" y="38">for i := 0; i &lt; 3; i++</text>
+        <circle class="acc" cx="62" cy="98" r="18"/>
+        <circle class="acc" cx="124" cy="98" r="18"/>
+        <circle class="acc" cx="186" cy="98" r="18"/>
+        <text class="bold t-acc" x="62" y="104" text-anchor="middle">0</text>
+        <text class="bold t-acc" x="124" y="104" text-anchor="middle">1</text>
+        <text class="bold t-acc" x="186" y="104" text-anchor="middle">2</text>
+        <path class="wire" d="M82 98 H96 M144 98 H158"/>
+        <path class="tip" d="M104 98 L94 92 L94 104 Z"/>
+        <path class="tip" d="M166 98 L156 92 L156 104 Z"/>
+
+        <text class="small mono" x="258" y="38">for balance &lt; 10000</text>
+        <text class="mono" x="356" y="92" text-anchor="middle">0→3000→…→12000</text>
+        <text class="small t-hot" x="356" y="122" text-anchor="middle">到 12000 條件不成立，停</text>
+
+        <text class="small mono" x="26" y="182">for i, v := range s</text>
+        <rect class="acc" x="38" y="204" width="52" height="40" rx="4"/>
+        <rect class="acc" x="98" y="204" width="52" height="40" rx="4"/>
+        <rect class="acc" x="158" y="204" width="52" height="40" rx="4"/>
+        <text class="mono" x="64" y="230" text-anchor="middle">a</text>
+        <text class="mono" x="124" y="230" text-anchor="middle">b</text>
+        <text class="mono" x="184" y="230" text-anchor="middle">c</text>
+        <text class="sm mono" x="64" y="268" text-anchor="middle">i=0</text>
+        <text class="sm mono" x="124" y="268" text-anchor="middle">i=1</text>
+        <text class="sm mono" x="184" y="268" text-anchor="middle">i=2</text>
+
+        <text class="small mono" x="258" y="182">for { … }</text>
+        <rect class="wire" x="274" y="206" width="90" height="52" rx="12"/>
+        <path class="tip" d="M324 206 L311 199 L311 213 Z"/>
+        <text class="small" x="319" y="238" text-anchor="middle">一直跑</text>
+        <path class="wire hot-ln" d="M364 232 H420"/>
+        <path class="tip hot-tip" d="M432 232 L419 225 L419 239 Z"/>
+        <text class="small mono t-hot" x="392" y="222" text-anchor="middle">break</text>
+      </svg>
+      <figcaption>Go 只有 <code>for</code> 一個迴圈關鍵字：三段式、只寫條件、<code>range</code>、無窮迴圈，都是它。</figcaption>
+    </figure>
+    <p>其他語言有 for、while、do-while、for-each，Go 全部用 <code>for</code> 一個關鍵字表達，差別只在 for 後面寫了什麼。</p>
+
+    <h3>2.1 三段式</h3>
+    <p>寫法是 <code>for 初始化; 條件; 後置敘述 { … }</code>。初始化只在一開始做一次；每一圈開始前檢查條件，成立才進入；每一圈跑完之後執行後置敘述，再回去檢查條件。三段之間用分號隔開，和 if 一樣不加括號。</p>
+    <pre class="code" data-src="chapters/03-control-flow/loops.go#forClassic"><code>func forClassic() {
+	for n := 1; n &lt;= 3; n++ {
+		fmt.Printf("請 %d 號到櫃台\n", n)
+	}
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/03-control-flow#Example_forClassic"><code>請 1 號到櫃台
+請 2 號到櫃台
+請 3 號到櫃台</code></pre>
+    <p>初始化裡用 <code>:=</code> 宣告的 <code>n</code> 只活在這個 for 裡。後置敘述通常是 <code>n++</code>；要注意 Go 的 <code>++</code> 和 <code>--</code> 是敘述，不是運算式：不能寫 <code>x := n++</code>，也沒有 <code>++n</code> 這種寫法。</p>
+
+    <h3>2.2 只寫條件：Go 的 while</h3>
+    <pre class="code" data-src="chapters/03-control-flow/loops.go#forCondition"><code>func forCondition() {
+	balance, months := 0, 0
+	for balance &lt; 10000 {
+		balance += 3000
+		months++
+	}
+	fmt.Println(months, "個月後存到", balance, "元")
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/03-control-flow#Example_forCondition"><code>4 個月後存到 12000 元</code></pre>
+    <p>把初始化和後置敘述都拿掉、只留條件，就是其他語言的 while。目標是存到 10000 元，每個月存 3000：第 3 個月後是 9000，還不夠；第 4 個月後是 12000，條件不成立，迴圈結束。</p>
+
+    <h3>2.3 什麼都不寫：無窮迴圈</h3>
+    <pre class="code" data-src="chapters/03-control-flow/loops.go#forInfinite"><code>func forInfinite() {
+	queue := []string{"A01", "A02", "A03"}
+	for {
+		if len(queue) == 0 {
+			fmt.Println("沒有人在排隊了")
+			break
+		}
+		next := queue[0]
+		queue = queue[1:]
+		fmt.Println("叫號", next)
+	}
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/03-control-flow#Example_forInfinite"><code>叫號 A01
+叫號 A02
+叫號 A03
+沒有人在排隊了</code></pre>
+    <p><code>for { … }</code> 會一直跑，直到遇到 <code>break</code>、<code>return</code> 或程式結束。伺服器的主迴圈、「一直讀到沒有資料為止」這類情境很常用它。Go 也沒有 do-while（先做一次再檢查），一樣用無窮迴圈表達：把檢查放在迴圈的最後面，條件不成立就 break。</p>
+
+    <h3>2.4 range 一個整數</h3>
+    <pre class="code" data-src="chapters/03-control-flow/loops.go#forRangeInt"><code>func forRangeInt() {
+	for i := range 3 {
+		fmt.Println("第", i, "圈")
+	}
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/03-control-flow#Example_forRangeInt"><code>第 0 圈
+第 1 圈
+第 2 圈</code></pre>
+    <p>Go 1.22 起，<code>for i := range n</code> 會讓 i 依序是 0、1、…、n-1，等同 <code>for i := 0; i &lt; n; i++</code>，但更短，也不會打錯邊界。如果只是要重複 n 次、用不到 i，就寫 <code>for range n</code>。</p>
+
+    <h3>2.5 continue：跳過這一圈</h3>
+    <pre class="code" data-src="chapters/03-control-flow/loops.go#forContinue"><code>func forContinue() {
+	for n := range 10 {
+		if n%3 != 0 {
+			continue
+		}
+		fmt.Println(n, "是 3 的倍數")
+	}
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/03-control-flow#Example_forContinue"><code>0 是 3 的倍數
+3 是 3 的倍數
+6 是 3 的倍數
+9 是 3 的倍數</code></pre>
+    <p><code>continue</code> 會跳過這一圈剩下的程式，直接進入下一圈；如果是三段式，會先執行後置敘述。這和 guard clause 是同一個道理：在迴圈開頭用 continue 濾掉不需要處理的情況，主要邏輯就可以少縮一層。</p>
+    <aside class="callout">
+      <span class="title">三段都可以省略</span>
+      <p><code>for ; i &lt; 10; {</code> 是合法的，但 gofmt 會把它改寫成 <code>for i &lt; 10 {</code>。同樣地，<code>for ;; {</code> 會被改寫成 <code>for {</code>。</p>
+    </aside>
+  </section>
+
+  <section aria-labelledby="range">
+    <h2 id="range">3. range：走過一整組資料</h2>
+    <p><code>for 變數 := range 運算式</code> 會依序走過運算式裡的每個元素。運算式的型別決定了每一圈給你什麼：</p>
+    <div class="table-wrap">
+      <table class="vs">
+        <thead><tr><th scope="col">range 的對象</th><th scope="col">第一個值</th><th scope="col">第二個值</th></tr></thead>
+        <tbody>
+          <tr><th scope="row">slice、陣列</th><td>索引 <code>int</code></td><td>元素（複本）</td></tr>
+          <tr><th scope="row">字串</th><td>字元起始的 byte 位置 <code>int</code></td><td>字元 <code>rune</code></td></tr>
+          <tr><th scope="row">map</th><td>key</td><td>value</td></tr>
+          <tr><th scope="row">channel</th><td>收到的值</td><td>沒有</td></tr>
+          <tr><th scope="row">整數 n</th><td>0 到 n-1</td><td>沒有</td></tr>
+          <tr><th scope="row">特定形狀的函式</th><td colspan="2">由函式決定，見 3.6 與第 <a href="13-iterators.html">13 章</a></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>不需要的值用 <code>_</code> 丟掉：<code>for _, v := range s</code> 只要值；只要索引就寫 <code>for i := range s</code>，連 <code>_</code> 都不用寫。</p>
+
+    <h3>3.1 拿到的是複本</h3>
+    <figure class="fig">
+      <svg viewBox="0 0 480 204" role="img" aria-label="range 每一圈把 slice 的元素複製一份到 d，把 d 的 stock 改成 0 只改到複本；用 menu[i] 才會直接改到 slice 裡的元素">
+        <title>range 給的是複本</title>
+        <text class="small mono" x="24" y="26">for _, d := range menu</text>
+        <rect class="acc" x="24" y="40" width="140" height="44" rx="6"/>
+        <rect class="acc" x="180" y="40" width="140" height="44" rx="6"/>
+        <text class="small" x="94" y="67" text-anchor="middle">雞腿飯　3</text>
+        <text class="small" x="250" y="67" text-anchor="middle">排骨飯　5</text>
+        <path class="wire acc-ln" d="M366 62 H334"/>
+        <path class="tip acc-tip" d="M322 62 L335 55 L335 69 Z"/>
+        <text class="small mono t-acc" x="372" y="58">menu[i]</text>
+        <text class="sm" x="372" y="78">直接改到元素</text>
+        <path class="wire dash" d="M94 84 V128"/>
+        <path class="tip" d="M94 140 L87 127 L101 127 Z"/>
+        <text class="sm" x="104" y="116">每圈複製一份</text>
+        <rect class="hot" x="24" y="140" width="140" height="44" rx="6"/>
+        <text class="small" x="94" y="167" text-anchor="middle">d：雞腿飯　0</text>
+        <text class="small mono t-hot" x="180" y="158">d.stock = 0</text>
+        <text class="sm" x="180" y="180">只改到複本，menu 沒變</text>
+      </svg>
+      <figcaption>range 把元素複製到迴圈變數；要改 slice 本身，請用索引。</figcaption>
+    </figure>
+    <p>range 每一圈都會把元素<strong>複製</strong>到迴圈變數。元素是 int、string 這種小值時沒什麼差別，但當元素是 struct，又想透過迴圈變數修改欄位時就會出事：你改到的是複本。</p>
+    <pre class="code" data-src="chapters/03-control-flow/range.go#dish,rangeCopy"><code>type dish struct {
+	name  string
+	stock int
+}
+
+func rangeCopy() {
+	menu := []dish{{"雞腿飯", 3}, {"排骨飯", 5}}
+	for _, d := range menu {
+		d.stock = 0 // 改到的是複本 d
+	}
+	fmt.Println(menu)
+
+	for i := range menu {
+		menu[i].stock = 0 // 透過索引才改得到 menu 裡的元素
+	}
+	fmt.Println(menu)
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/03-control-flow#Example_rangeCopy"><code>[{雞腿飯 3} {排骨飯 5}]
+[{雞腿飯 0} {排骨飯 0}]</code></pre>
+    <p>要修改 slice 裡的元素，必須透過索引 <code>menu[i]</code>。另一種做法是讓 slice 存指標（<code>[]*dish</code>），這時複製的是指標，透過它修改就會改到同一份資料；指標在第 <a href="05-pointers.html">05 章</a>介紹。</p>
+
+    <section class="deep" aria-labelledby="range-array">
+      <p class="tag">深入：第一次讀可以先跳過</p>
+      <h3 id="range-array">3.2 range 陣列會先整個複製一份</h3>
+      <p>range 後面的運算式只在迴圈開始前求值一次。陣列在 Go 是「值」，求值一次就等於把整個陣列複製一份，迴圈走的是這份複本。slice 則只是一個指向底層陣列的小結構（第 <a href="06-arrays-slices.html">06 章</a>），複製它並不會複製底層資料。所以迴圈中途修改原本的資料，陣列版看不到，slice 版看得到：</p>
+      <pre class="code" data-src="chapters/03-control-flow/range.go#rangeArrayCopy"><code>func rangeArrayCopy() {
+	arr := [3]string{"空", "空", "空"}
+	var seen []string
+	for i, s := range arr {
+		if i == 0 {
+			arr[2] = "有人"
+		}
+		seen = append(seen, s)
+	}
+	fmt.Println("陣列：", seen)
+
+	sl := []string{"空", "空", "空"}
+	seen = nil
+	for i, s := range sl {
+		if i == 0 {
+			sl[2] = "有人"
+		}
+		seen = append(seen, s)
+	}
+	fmt.Println("slice：", seen)
+}</code></pre>
+      <p class="label">輸出</p>
+      <pre class="out" data-example="chapters/03-control-flow#Example_rangeArrayCopy"><code>陣列： [空 空 空]
+slice： [空 空 有人]</code></pre>
+      <p>大陣列每次 range 都整個複製，也很浪費記憶體和時間。需要時可以改成 range <code>arr[:]</code> 或 <code>&amp;arr</code>，這樣只會複製一個 slice header 或一個指標。只寫索引（<code>for i := range arr</code>）時不需要元素的值，就不會複製。實務上很少直接用陣列，這個差異知道就好。</p>
+    </section>
+
+    <h3>3.3 字串：一次一個字元</h3>
+    <figure class="fig">
+      <svg viewBox="0 0 480 206" role="img" aria-label="字串 Go語言 由 8 個 byte 組成：G 和 o 各一個 byte，語和言各三個 byte。range 給出的位置是 0、1、2、5">
+        <title>range 字串：一次一個字元</title>
+        <text class="small mono" x="24" y="24">s := "Go語言"</text>
+        <text class="sm mono bold t-acc" x="50" y="50" text-anchor="middle">0</text>
+        <text class="sm mono bold t-acc" x="104" y="50" text-anchor="middle">1</text>
+        <text class="sm mono bold t-acc" x="158" y="50" text-anchor="middle">2</text>
+        <text class="sm mono" x="212" y="50" text-anchor="middle">3</text>
+        <text class="sm mono" x="266" y="50" text-anchor="middle">4</text>
+        <text class="sm mono bold t-acc" x="320" y="50" text-anchor="middle">5</text>
+        <text class="sm mono" x="374" y="50" text-anchor="middle">6</text>
+        <text class="sm mono" x="428" y="50" text-anchor="middle">7</text>
+        <rect class="soft" x="24" y="58" width="52" height="40" rx="4"/>
+        <rect class="soft" x="78" y="58" width="52" height="40" rx="4"/>
+        <rect class="soft" x="132" y="58" width="52" height="40" rx="4"/>
+        <rect class="soft" x="186" y="58" width="52" height="40" rx="4"/>
+        <rect class="soft" x="240" y="58" width="52" height="40" rx="4"/>
+        <rect class="soft" x="294" y="58" width="52" height="40" rx="4"/>
+        <rect class="soft" x="348" y="58" width="52" height="40" rx="4"/>
+        <rect class="soft" x="402" y="58" width="52" height="40" rx="4"/>
+        <text class="small mono" x="50" y="83" text-anchor="middle">47</text>
+        <text class="small mono" x="104" y="83" text-anchor="middle">6F</text>
+        <text class="small mono" x="158" y="83" text-anchor="middle">E8</text>
+        <text class="small mono" x="212" y="83" text-anchor="middle">AA</text>
+        <text class="small mono" x="266" y="83" text-anchor="middle">9E</text>
+        <text class="small mono" x="320" y="83" text-anchor="middle">E8</text>
+        <text class="small mono" x="374" y="83" text-anchor="middle">A8</text>
+        <text class="small mono" x="428" y="83" text-anchor="middle">80</text>
+        <path class="wire acc-ln" d="M28 106 V114 H72 V106 M82 106 V114 H126 V106 M136 106 V114 H288 V106 M298 106 V114 H450 V106"/>
+        <text class="bold" x="50" y="140" text-anchor="middle">G</text>
+        <text class="bold" x="104" y="140" text-anchor="middle">o</text>
+        <text class="bold" x="212" y="140" text-anchor="middle">語</text>
+        <text class="bold" x="374" y="140" text-anchor="middle">言</text>
+        <text class="small t-acc" x="240" y="172" text-anchor="middle">range 給的位置是 0、1、2、5</text>
+        <text class="sm" x="240" y="196" text-anchor="middle">len(s) 是 8 個 byte，字元只有 4 個</text>
+      </svg>
+      <figcaption>英文字母 1 個 byte，中文字 3 個 byte；range 一次給你一整個字元。</figcaption>
+    </figure>
+    <p>Go 的字串是一串以 UTF-8 編碼的 byte。英文字母一個字元佔 1 byte，中文字大多佔 3 bytes。range 字串時，Go 會幫你解碼 UTF-8：每一圈給你一個字元（型別是 <code>rune</code>，其實就是 <code>int32</code>）和它在字串裡的起始 byte 位置，所以位置會跳號。</p>
+    <pre class="code" data-src="chapters/03-control-flow/range.go#rangeString"><code>func rangeString() {
+	s := "Go語言"
+	for i, r := range s {
+		fmt.Printf("位置 %d：%c（%U）\n", i, r, r)
+	}
+	fmt.Printf("len = %d，字元數 = %d\n", len(s), utf8.RuneCountInString(s))
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/03-control-flow#Example_rangeString"><code>位置 0：G（U+0047）
+位置 1：o（U+006F）
+位置 2：語（U+8A9E）
+位置 5：言（U+8A00）
+len = 8，字元數 = 4</code></pre>
+    <p>對照兩種走法：</p>
     <ul class="notes">
-      <li>條件不加括號，但大括號一定要寫，而且 <code>{</code> 要跟條件在同一行。</li>
-      <li>沒有 <code>while</code>、<code>do-while</code>，全部用 <code>for</code>；也沒有三元運算子，寫成 if/else。</li>
-      <li>Go 1.22 起，迴圈變數每一圈都是新的一份，在 closure 或 goroutine 裡用到迴圈變數不會再全部拿到最後一個值。</li>
-      <li><code>switch</code> 的 case 不用寫 <code>break</code>；case 可以是任何運算式，也可以列多個值。</li>
-      <li><code>fallthrough</code> 不檢查下一個 case 的條件就直接執行，實務上很少用。</li>
-      <li><code>break</code>、<code>continue</code> 加標籤可以作用在外層迴圈。</li>
+      <li><code>for i := 0; i &lt; len(s); i++</code> 用 <code>s[i]</code> 拿到的是 byte，一個中文字會被拆成三塊。</li>
+      <li><code>for i, r := range s</code> 拿到的是完整的字元。</li>
     </ul>
+    <p>要處理「字」就用 range，要處理原始資料（例如計算雜湊值）才逐 byte 走。如果字串裡有不合法的 UTF-8，range 會在那個位置給出 U+FFFD（替換字元），並且只前進 1 byte。UTF-8 的細節在第 <a href="08-strings-runes.html">08 章</a>。</p>
+
+    <h3>3.4 map：順序不固定</h3>
+    <p>range map 會給你 key 和 value，但順序沒有保證。Go 的規格沒有規定順序，實際上 runtime 每次 range 都會從不同的位置開始，同一個程式跑兩次，結果就可能不同。這是刻意的設計，讓「依賴順序」的程式在開發階段就露出問題。需要固定順序時，先把 key 排序再走：</p>
+    <pre class="code" data-src="chapters/03-control-flow/range.go#rangeMap"><code>func rangeMap() {
+	stock := map[string]int{"排骨": 5, "雞腿": 3, "魚排": 0}
+	for _, name := range slices.Sorted(maps.Keys(stock)) {
+		fmt.Println(name, stock[name])
+	}
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/03-control-flow#Example_rangeMap"><code>排骨 5
+雞腿 3
+魚排 0</code></pre>
+    <p><code>maps.Keys</code> 回傳所有的 key（它是一個可以 range 的函式），<code>slices.Sorted</code> 把它收集成排好序的 slice，兩個都是 Go 1.23 加入的。字串排序比的是 byte，所以中文是依 Unicode 碼位排序，不是依筆畫或注音。</p>
+    <aside class="callout">
+      <span class="title">一邊走一邊改 map</span>
+      <p>在 range 的過程中刪除還沒走到的 key，它就不會出現；新增的 key 則可能出現，也可能不出現。想要結果可預期，就先收集要刪的 key，迴圈結束後再刪。</p>
+    </aside>
+
+    <h3>3.5 channel：收到 close 為止</h3>
+    <pre class="code" data-src="chapters/03-control-flow/range.go#rangeChannel"><code>func rangeChannel() {
+	tickets := make(chan string, 3)
+	tickets &lt;- "A01"
+	tickets &lt;- "A02"
+	tickets &lt;- "A03"
+	close(tickets) // 沒有 close，range 會一直等下去
+	for t := range tickets {
+		fmt.Println("叫號", t)
+	}
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/03-control-flow#Example_rangeChannel"><code>叫號 A01
+叫號 A02
+叫號 A03</code></pre>
+    <p>range channel 會一直從 channel 接收值，直到 channel 被 close、而且裡面的值都收完為止。忘了 close 的話，迴圈會永遠等下去；如果其他 goroutine 也都在等，程式會因為死結（deadlock）而停止。channel 在第 <a href="15-channels.html">15 章</a>介紹，這裡先記住：range channel 一定要有人負責 close。</p>
+
+    <h3>3.6 函式：自己做一個可以 range 的東西</h3>
+    <pre class="code" data-src="chapters/03-control-flow/range.go#countdown,rangeFunc"><code>func countdown(from int) iter.Seq[int] {
+	return func(yield func(int) bool) {
+		for n := from; n &gt; 0; n-- {
+			if !yield(n) {
+				return
+			}
+		}
+	}
+}
+
+func rangeFunc() {
+	for n := range countdown(3) {
+		fmt.Println(n)
+	}
+	fmt.Println("發射")
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/03-control-flow#Example_rangeFunc"><code>3
+2
+1
+發射</code></pre>
+    <p>Go 1.23 起，range 後面也可以接特定形狀的函式。這個函式會收到一個 <code>yield</code> 函式，每呼叫一次 yield 就產生一個值；yield 回傳 false 代表使用者用 break 提早離開了，函式就應該停止。前面用過的 <code>maps.Keys</code> 就是這種函式。現在看得懂用法就好，第 <a href="13-iterators.html">13 章</a>會從頭講怎麼寫。</p>
+
+    <h3>3.7 range 的對象只求值一次</h3>
+    <pre class="code" data-src="chapters/03-control-flow/range.go#rangeOnce"><code>func rangeOnce() {
+	nums := []int{1, 2, 3}
+	count := 0
+	for _, n := range nums {
+		nums = append(nums, n*10)
+		count++
+	}
+	fmt.Println("跑了", count, "圈，nums =", nums)
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/03-control-flow#Example_rangeOnce"><code>跑了 3 圈，nums = [1 2 3 10 20 30]</code></pre>
+    <p>range 後面的運算式在迴圈開始前就求值好了，圈數也跟著固定。迴圈裡對 <code>nums</code> 做 append 會產生新的 slice，但 range 手上拿的還是一開始那個長度 3 的 slice，所以只跑 3 圈。三段式就不一樣：<code>for i := 0; i &lt; len(nums); i++</code> 的條件每一圈都會重新計算，如果迴圈裡一直 append，len 每圈都在變大，迴圈就永遠不會結束。</p>
+
+    <section class="deep" aria-labelledby="loopvar">
+      <p class="tag">深入：第一次讀可以先跳過</p>
+      <h3 id="loopvar">3.8 每一圈都是新的變數</h3>
+      <figure class="fig">
+        <svg viewBox="0 0 480 228" role="img" aria-label="左邊：range 迴圈每一圈都有新的 i，三個 closure 各自抓住 i 等於 0、1、2；右邊：j 宣告在迴圈外，三個 closure 抓住同一個 j，最後都是 3">
+          <title>每圈新變數與共用變數</title>
+          <text class="small mono" x="120" y="24" text-anchor="middle">for i := range 3</text>
+          <text class="sm" x="120" y="46" text-anchor="middle">每一圈都是新的 i</text>
+          <rect class="soft" x="24" y="64" width="56" height="34" rx="6"/>
+          <rect class="soft" x="92" y="64" width="56" height="34" rx="6"/>
+          <rect class="soft" x="160" y="64" width="56" height="34" rx="6"/>
+          <text class="small mono" x="52" y="86" text-anchor="middle">f0</text>
+          <text class="small mono" x="120" y="86" text-anchor="middle">f1</text>
+          <text class="small mono" x="188" y="86" text-anchor="middle">f2</text>
+          <path class="wire" d="M52 98 V140 M120 98 V140 M188 98 V140"/>
+          <rect class="acc" x="24" y="140" width="56" height="40" rx="6"/>
+          <rect class="acc" x="92" y="140" width="56" height="40" rx="6"/>
+          <rect class="acc" x="160" y="140" width="56" height="40" rx="6"/>
+          <text class="small mono" x="52" y="165" text-anchor="middle">i=0</text>
+          <text class="small mono" x="120" y="165" text-anchor="middle">i=1</text>
+          <text class="small mono" x="188" y="165" text-anchor="middle">i=2</text>
+          <text class="small bold t-acc" x="120" y="212" text-anchor="middle">印出 0 1 2</text>
+
+          <path class="wire faint" d="M240 14 V218"/>
+
+          <text class="small mono" x="360" y="24" text-anchor="middle">var j; for j = 0; …</text>
+          <text class="sm" x="360" y="46" text-anchor="middle">三個 closure 共用一個 j</text>
+          <rect class="soft" x="264" y="64" width="56" height="34" rx="6"/>
+          <rect class="soft" x="332" y="64" width="56" height="34" rx="6"/>
+          <rect class="soft" x="400" y="64" width="56" height="34" rx="6"/>
+          <text class="small mono" x="292" y="86" text-anchor="middle">f0</text>
+          <text class="small mono" x="360" y="86" text-anchor="middle">f1</text>
+          <text class="small mono" x="428" y="86" text-anchor="middle">f2</text>
+          <path class="wire" d="M292 98 L344 140 M360 98 V140 M428 98 L376 140"/>
+          <rect class="hot" x="316" y="140" width="88" height="40" rx="6"/>
+          <text class="small mono" x="360" y="165" text-anchor="middle">j=3</text>
+          <text class="small bold t-hot" x="360" y="212" text-anchor="middle">印出 3 3 3</text>
+        </svg>
+        <figcaption>closure 抓住的是變數本身，不是當下的值。每圈一個新變數，就各抓各的。</figcaption>
+      </figure>
+      <p>Go 1.22 改變了迴圈變數的語意：在 for 裡用 <code>:=</code> 宣告的迴圈變數（不論是 range 還是三段式），每一圈都是一個新的變數。只有當你把迴圈變數的位址或 closure 留到那一圈之後才使用時，才看得出差別：</p>
+      <pre class="code" data-src="chapters/03-control-flow/range.go#loopVarPerIteration"><code>func loopVarPerIteration() {
+	var perIter, shared []func() int
+	for i := range 3 {
+		perIter = append(perIter, func() int { return i }) // 每一圈的 i 都是新的
+	}
+
+	var j int
+	for j = 0; j &lt; 3; j++ {
+		shared = append(shared, func() int { return j }) // j 宣告在迴圈外，三個 closure 共用它
+	}
+
+	for k := range 3 {
+		fmt.Println(perIter[k](), shared[k]())
+	}
+}</code></pre>
+      <p class="label">輸出</p>
+      <pre class="out" data-example="chapters/03-control-flow#Example_loopVarPerIteration"><code>0 3
+1 3
+2 3</code></pre>
+      <p><code>perIter</code> 裡的三個 closure 各自抓住自己那一圈的 i，所以是 0、1、2。<code>shared</code> 用的 j 宣告在迴圈外面，三個 closure 抓住的是同一個 j，等到呼叫時 j 已經變成 3。在 Go 1.22 之前，<code>for i := range 3</code> 的 i 也是所有圈共用的，結果會和 shared 一樣；當時常見的修法是在迴圈裡多寫一行 <code>i := i</code>。</p>
+      <p>新語意只套用在 go.mod 宣告 <code>go 1.22</code> 以上的 module，本 repo 宣告的是 <code>go 1.27</code>。以後在舊文章或舊程式裡看到 <code>i := i</code>，知道它是在補這個洞就好，新程式不需要再寫。</p>
+    </section>
+  </section>
+
+  <section aria-labelledby="jump">
+    <h2 id="jump">4. break、continue 與標籤</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 236" role="img" aria-label="for 迴圈裡有一個 switch。switch 裡單獨寫 break 只會跳出 switch，迴圈繼續下一圈；寫 break loop 才會跳出整個 for">
+        <title>break 跳到哪裡</title>
+        <rect class="wire acc-ln dash" x="16" y="16" width="372" height="208" rx="14"/>
+        <text class="small mono t-acc" x="32" y="42">loop: for _, c := range cmds {</text>
+        <rect class="wire dash" x="40" y="60" width="210" height="140" rx="12"/>
+        <text class="small mono" x="56" y="86">switch c {</text>
+        <text class="small mono" x="56" y="114">case "stop":</text>
+        <text class="small mono t-hot" x="72" y="146">break</text>
+        <path class="wire hot-ln" d="M124 141 H238"/>
+        <path class="tip hot-tip" d="M250 141 L237 134 L237 148 Z"/>
+        <text class="sm" x="260" y="136">只跳出 switch，</text>
+        <text class="sm" x="260" y="156">迴圈繼續下一圈</text>
+        <text class="small mono t-acc" x="72" y="182">break loop</text>
+        <path class="wire acc-ln" d="M164 177 H452"/>
+        <path class="tip acc-tip" d="M464 177 L451 170 L451 184 Z"/>
+        <text class="small t-acc" x="428" y="164" text-anchor="middle">跳出 for</text>
+      </svg>
+      <figcaption>break 只離開最內層的 for、switch 或 select；要離開外層，請加標籤。</figcaption>
+    </figure>
+    <p><code>break</code> 會離開最內層的 for、switch 或 select；<code>continue</code> 會跳到最內層 for 的下一圈。如果想在內層找到答案後直接離開外層，或在 switch 裡想離開外面的 for，就要用<strong>標籤</strong>（label）：在迴圈前面寫 <code>名稱:</code>，再用 <code>break 名稱</code> 或 <code>continue 名稱</code> 指定作用的對象。</p>
+
+    <h3>4.1 break 加標籤：一次跳出兩層</h3>
+    <pre class="code" data-src="chapters/03-control-flow/branch.go#labeledBreak"><code>func labeledBreak() {
+	prices := []int{45, 55, 35, 65}
+	budget := 100
+search:
+	for i := range prices {
+		for j := i + 1; j &lt; len(prices); j++ {
+			if prices[i]+prices[j] == budget {
+				fmt.Println("第", i, "和第", j, "個加起來剛好", budget, "元")
+				break search
+			}
+		}
+	}
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/03-control-flow#Example_labeledBreak"><code>第 0 和第 1 個加起來剛好 100 元</code></pre>
+    <p>這裡有兩組加起來剛好 100（45+55 和 35+65），找到第一組就 <code>break search</code>，所以只印一行。如果只寫 <code>break</code>，跳出的只有內層的 j 迴圈，外層會繼續找，第二組也會被印出來。</p>
+
+    <h3>4.2 continue 加標籤：直接換下一組</h3>
+    <pre class="code" data-src="chapters/03-control-flow/branch.go#labeledContinue"><code>func labeledContinue() {
+	classes := [][]int{{88, 92, 75}, {90, 55, 80}, {60, 70, 65}}
+nextClass:
+	for c, scores := range classes {
+		for _, s := range scores {
+			if s &lt; 60 {
+				fmt.Println("第", c+1, "班有人不及格：", s)
+				continue nextClass
+			}
+		}
+		fmt.Println("第", c+1, "班全部及格")
+	}
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/03-control-flow#Example_labeledContinue"><code>第 1 班全部及格
+第 2 班有人不及格： 55
+第 3 班全部及格</code></pre>
+    <p>第 2 班一看到 55 分，就 <code>continue nextClass</code>：跳過這一班剩下的分數，也跳過「全部及格」那一行，直接檢查第 3 班。</p>
+
+    <h3 id="break-switch">4.3 switch 裡的 break 只跳出 switch</h3>
+    <p>這是從其他語言轉過來最常踩的坑。在 C 或 Java 的傳統 switch 裡，case 結尾要寫 break 才不會往下掉，所以手很習慣在 case 裡寫 break。Go 的 switch 本來就不會往下掉，case 裡的 break 只會結束這個 switch，外面的 for 照樣跑下一圈：</p>
+    <div class="compare">
+      <p class="label bad">錯誤寫法：以為 break 會離開迴圈</p>
+      <pre class="code bad" data-src="chapters/03-control-flow/branch.go#countUntilStopBuggy"><code>func countUntilStopBuggy(cmds []string) int {
+	handled := 0
+	for _, c := range cmds {
+		switch c {
+		case "stop":
+			break
+		default:
+			handled++
+		}
+	}
+	return handled
+}</code></pre>
+      <p class="label good">正確寫法：幫迴圈加上標籤</p>
+      <pre class="code good" data-src="chapters/03-control-flow/branch.go#countUntilStop"><code>func countUntilStop(cmds []string) int {
+	handled := 0
+loop:
+	for _, c := range cmds {
+		switch c {
+		case "stop":
+			break loop
+		default:
+			handled++
+		}
+	}
+	return handled
+}</code></pre>
+    </div>
+    <pre class="code" data-src="chapters/03-control-flow/branch.go#breakInSwitch"><code>func breakInSwitch() {
+	cmds := []string{"開燈", "開冷氣", "stop", "關門"}
+	fmt.Println("沒有標籤：", countUntilStopBuggy(cmds))
+	fmt.Println("有標籤：", countUntilStop(cmds))
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/03-control-flow#Example_breakInSwitch"><code>沒有標籤： 3
+有標籤： 2</code></pre>
+    <p>沒有標籤的版本遇到 "stop" 只是離開 switch，接著處理了 "關門"，所以算出 3。修法有兩種：像 <code>countUntilStop</code> 一樣幫迴圈加標籤，或者把迴圈抽成函式，在 case 裡直接 return。select（第 <a href="16-select.html">16 章</a>）裡的 break 也是同樣的規則。</p>
+
+    <section class="deep" aria-labelledby="goto">
+      <p class="tag">深入：第一次讀可以先跳過</p>
+      <h3 id="goto">4.4 goto</h3>
+      <p>Go 也有 <code>goto</code>，可以跳到同一個函式裡的標籤。它有兩條限制：不能跳過變數宣告，也不能從區塊外面跳進區塊裡面。違反時編譯器會直接拒絕：</p>
+      <pre class="code bad" data-compile-error><code>package main
+
+import "fmt"
+
+func main() {
+	goto done
+	n := 1
+done:
+	fmt.Println(n)
+}</code></pre>
+      <p class="label">編譯錯誤</p>
+      <pre class="out err"><code>./main.go:6:7: goto done jumps over declaration of n at ./main.go:7:4</code></pre>
+      <p>這兩條限制保證了跳過去之後，用到的變數一定已經宣告過。一般的應用程式碼幾乎用不到 goto，用 for、break、return 能表達的，就不要用它。</p>
+    </section>
+  </section>
+
+  <section aria-labelledby="switch">
+    <h2 id="switch">5. switch：多選一</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 236" role="img" aria-label="switch 拿六去比對，符合第一個 case 就執行完結束，不會往下掉；只有寫了 fallthrough 才會進入下一個 case">
+        <title>switch 找到就停</title>
+        <circle class="acc" cx="40" cy="60" r="24"/>
+        <text class="bold t-acc" x="40" y="66" text-anchor="middle">六</text>
+        <path class="wire" d="M64 60 H90"/>
+        <path class="tip" d="M100 60 L88 54 L88 66 Z"/>
+        <rect class="acc" x="100" y="38" width="200" height="44" rx="6"/>
+        <rect class="soft" x="100" y="108" width="200" height="44" rx="6"/>
+        <rect class="soft" x="100" y="178" width="200" height="44" rx="6"/>
+        <text class="mono" x="116" y="66">case "六", "日":</text>
+        <text class="mono" x="116" y="136">case "一":</text>
+        <text class="mono" x="116" y="206">default:</text>
+        <path class="wire" d="M300 56 H404"/>
+        <path class="tip" d="M416 56 L403 49 L403 63 Z"/>
+        <text class="sm" x="352" y="44" text-anchor="middle">自動結束</text>
+        <text class="bold" x="446" y="62" text-anchor="middle">結束</text>
+        <path class="wire hot-ln dash" d="M300 72 H330 V130 H312"/>
+        <path class="tip hot-tip" d="M300 130 L312 124 L312 136 Z"/>
+        <text class="small mono t-hot" x="338" y="106">fallthrough</text>
+      </svg>
+      <figcaption><code>switch</code> 找到符合的 case 就結束，不會往下掉；真的要往下掉，才寫 <code>fallthrough</code>。</figcaption>
+    </figure>
+    <p><code>switch</code> 拿一個值，依序和每個 case 比對，執行第一個相符的 case，然後整個 switch 就結束。它和 C、Java 傳統 switch 最大的不同是<strong>不會往下掉</strong>（fall through）：不需要、也不應該在每個 case 結尾寫 break。</p>
+
+    <h3>5.1 比對一個值</h3>
+    <pre class="code" data-src="chapters/03-control-flow/switch.go#switchValue"><code>func switchValue() {
+	for _, day := range []string{"六", "二", "日"} {
+		switch day {
+		case "六", "日":
+			fmt.Printf("星期%s：假日\n", day)
+		default:
+			fmt.Printf("星期%s：上班\n", day)
+		}
+	}
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/03-control-flow#Example_switchValue"><code>星期六：假日
+星期二：上班
+星期日：假日</code></pre>
+    <ul class="notes">
+      <li>一個 case 可以列多個值，用逗號隔開，符合任何一個就執行。</li>
+      <li><code>default</code> 是「都不符合」時的去處，可以放在任何位置，但放在最後最好讀。沒有 default、也沒有任何 case 相符時，switch 什麼都不做。</li>
+      <li>case 的值不一定要是常數，可以是任何運算式，只要能和比對的值用 <code>==</code> 比較。</li>
+    </ul>
+
+    <h3>5.2 switch 前面也能先做一件事</h3>
+    <pre class="code" data-src="chapters/03-control-flow/switch.go#switchInit"><code>func switchInit() {
+	for _, name := range []string{"王明", "陳小美", "歐陽靖文", "李"} {
+		switch n := utf8.RuneCountInString(name); n {
+		case 2, 3:
+			fmt.Printf("%s：一般長度\n", name)
+		case 4:
+			fmt.Printf("%s：可能是複姓\n", name)
+		default:
+			fmt.Printf("%s：%d 個字，請再確認\n", name, n)
+		}
+	}
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/03-control-flow#Example_switchInit"><code>王明：一般長度
+陳小美：一般長度
+歐陽靖文：可能是複姓
+李：1 個字，請再確認</code></pre>
+    <p>和 if 一樣，switch 可以有一個初始化敘述，宣告的 <code>n</code> 只活在這個 switch 裡。<code>utf8.RuneCountInString</code> 計算的是字串有幾個字元，不是幾個 byte；用 <code>len(name)</code> 的話，「王明」會得到 6。</p>
+
+    <h3>5.3 沒有比對值的 switch</h3>
+    <pre class="code" data-src="chapters/03-control-flow/switch.go#aqiLevel,switchTrue"><code>func aqiLevel(aqi int) string {
+	switch {
+	case aqi &lt;= 50:
+		return "良好"
+	case aqi &lt;= 100:
+		return "普通"
+	case aqi &lt;= 150:
+		return "對敏感族群不健康"
+	case aqi &lt;= 200:
+		return "對所有族群不健康"
+	case aqi &lt;= 300:
+		return "非常不健康"
+	default:
+		return "危害"
+	}
+}
+
+func switchTrue() {
+	for _, v := range []int{35, 120, 320} {
+		fmt.Printf("AQI %d：%s\n", v, aqiLevel(v))
+	}
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/03-control-flow#Example_switchTrue"><code>AQI 35：良好
+AQI 120：對敏感族群不健康
+AQI 320：危害</code></pre>
+    <p>switch 後面不寫值，就等於 <code>switch true</code>：每個 case 都是一個 bool 運算式，第一個成立的會被執行。一長串 <code>if … else if … else if</code> 改寫成這個形式，排版整齊，每個區間也一目了然。因為 case 是由上往下判斷的，<code>aqi &lt;= 100</code> 不需要再寫 <code>aqi &gt; 50</code>：能走到這個 case，就代表上面的條件都不成立。</p>
+
+    <h3>5.4 case 的求值順序</h3>
+    <pre class="code" data-src="chapters/03-control-flow/switch.go#check,switchOrder"><code>func check(label string, ok bool) bool {
+	fmt.Println("檢查", label)
+	return ok
+}
+
+func switchOrder() {
+	n := 7
+	switch {
+	case check("n &gt; 10", n &gt; 10):
+		fmt.Println("大於 10")
+	case check("n &gt; 5", n &gt; 5):
+		fmt.Println("大於 5")
+	case check("n &gt; 0", n &gt; 0):
+		fmt.Println("大於 0")
+	}
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/03-control-flow#Example_switchOrder"><code>檢查 n &gt; 10
+檢查 n &gt; 5
+大於 5</code></pre>
+    <p>case 會依照書寫的順序一個一個求值，找到成立的就停。n 是 7：<code>n &gt; 10</code> 不成立，<code>n &gt; 5</code> 成立，所以第三個 case 的 check 根本沒被呼叫。如果某個 case 的判斷比較耗時（例如要查資料庫），就把便宜又常見的情況放前面。</p>
+
+    <h3>5.5 fallthrough：真的要往下掉</h3>
+    <pre class="code" data-src="chapters/03-control-flow/switch.go#perks,switchFallthrough"><code>func perks(level string) []string {
+	var got []string
+	switch level {
+	case "金卡":
+		got = append(got, "機場接送")
+		fallthrough
+	case "銀卡":
+		got = append(got, "免運")
+		fallthrough
+	case "一般":
+		got = append(got, "生日禮")
+	}
+	return got
+}
+
+func switchFallthrough() {
+	for _, lv := range []string{"金卡", "銀卡", "一般", "訪客"} {
+		fmt.Println(lv, perks(lv))
+	}
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/03-control-flow#Example_switchFallthrough"><code>金卡 [機場接送 免運 生日禮]
+銀卡 [免運 生日禮]
+一般 [生日禮]
+訪客 []</code></pre>
+    <p><code>fallthrough</code> 寫在 case 的最後一行，會<strong>不檢查</strong>下一個 case 的條件，直接執行下一個 case 的程式。會員等級是少數適合它的場景：金卡有銀卡的所有優惠，銀卡又有一般會員的所有優惠。使用時有三條規則：</p>
+    <ul class="notes">
+      <li>fallthrough 必須是 case 裡的最後一個敘述，也不能出現在最後一個 case。</li>
+      <li>type switch（5.6）裡不能用 fallthrough。</li>
+      <li>它不檢查下一個 case 的條件，即使下一個是 <code>case x &gt; 100:</code> 也照樣執行，很容易被誤解。大部分情況下，把共同的程式抽成函式會更清楚。</li>
+    </ul>
+
+    <h3>5.6 預告：依照型別分支</h3>
+    <pre class="code" data-src="chapters/03-control-flow/switch.go#describe,typeSwitch"><code>func describe(x any) string {
+	switch v := x.(type) {
+	case nil:
+		return "nil"
+	case int:
+		return fmt.Sprintf("整數 %d，兩倍是 %d", v, v*2)
+	case string:
+		return fmt.Sprintf("字串 %q，長度 %d", v, len(v))
+	default:
+		return fmt.Sprintf("其他型別 %T", v)
+	}
+}
+
+func typeSwitch() {
+	for _, x := range []any{42, "便當", 3.5, nil} {
+		fmt.Println(describe(x))
+	}
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/03-control-flow#Example_typeSwitch"><code>整數 42，兩倍是 84
+字串 "便當"，長度 6
+其他型別 float64
+nil</code></pre>
+    <p><code>x.(type)</code> 只能寫在 switch 裡。它依照 interface 值實際存放的型別選擇 case，並且在每個 case 裡把 <code>v</code> 變成對應的型別：在 <code>case int</code> 裡 v 就是 int，所以能算 <code>v*2</code>。<code>any</code> 和 interface 在第 <a href="10-interfaces.html">10 章</a>介紹。</p>
+
+    <h3>5.7 不能有重複的常數 case</h3>
+    <pre class="code bad" data-compile-error><code>package main
+
+import "fmt"
+
+func main() {
+	day := "六"
+	switch day {
+	case "六", "日":
+		fmt.Println("假日")
+	case "日":
+		fmt.Println("星期日")
+	}
+}</code></pre>
+    <p class="label">編譯錯誤</p>
+    <pre class="out err"><code>./main.go:10:7: duplicate case "日" (constant of type string) in expression switch
+	./main.go:8:14: previous case</code></pre>
+    <p>case 的值是常數時，編譯器會檢查有沒有重複。列表很長的時候，這個檢查能抓到複製貼上造成的錯誤：上面的 "日" 永遠只會走第一個 case，第二個 case 是死碼。</p>
+  </section>
+
+  <section aria-labelledby="pitfalls">
+    <h2 id="pitfalls">常見錯誤</h2>
+
+    <h3 id="pit-brace">1. 把 { 換到下一行</h3>
+    <pre class="code bad" data-compile-error><code>package main
+
+import "fmt"
+
+func main() {
+	n := 3
+	if n &gt; 0
+	{
+		fmt.Println("正數")
+	}
+}</code></pre>
+    <p class="label">編譯錯誤</p>
+    <pre class="out err"><code>./main.go:7:10: syntax error: unexpected newline, expected { after if clause</code></pre>
+    <p>Go 的語法其實需要分號，只是你不用自己寫：編譯器讀程式時，會在某些 token 結尾的行尾自動補上分號，例如識別字、數字、字串，以及 <code>)</code>、<code>]</code>、<code>}</code>。<code>if n &gt; 0</code> 這一行以數字 <code>0</code> 結尾，於是被補成 <code>if n &gt; 0;</code>，下一行的 <code>{</code> 就變成沒有歸屬的區塊。所以 Go 的大括號只有一種擺法，這也是 gofmt 能讓所有人的程式長得一樣的原因之一。</p>
+
+    <h3 id="pit-shadow">2. 在 if 裡用 := 蓋掉外層的變數</h3>
+    <p><code>readSetting</code> 會回傳設定值和錯誤。兩個版本都想把讀到的主題存進 <code>theme</code>：</p>
+    <div class="compare">
+      <p class="label bad">錯誤寫法</p>
+      <pre class="code bad" data-src="chapters/03-control-flow/if.go#loadTheme"><code>func loadTheme(fromSettings bool) string {
+	theme := "light"
+	if fromSettings {
+		theme, err := readSetting("theme")
+		if err != nil {
+			return "讀取失敗"
+		}
+		fmt.Println("if 裡讀到：", theme)
+	}
+	return theme
+}</code></pre>
+      <p class="label good">正確寫法</p>
+      <pre class="code good" data-src="chapters/03-control-flow/if.go#loadThemeFixed"><code>func loadThemeFixed(fromSettings bool) string {
+	theme := "light"
+	if fromSettings {
+		var err error
+		theme, err = readSetting("theme")
+		if err != nil {
+			return "讀取失敗"
+		}
+	}
+	return theme
+}</code></pre>
+    </div>
+    <pre class="code" data-src="chapters/03-control-flow/if.go#shadowPitfall"><code>func shadowPitfall() {
+	fmt.Println("錯誤寫法回傳：", loadTheme(true))
+	fmt.Println("正確寫法回傳：", loadThemeFixed(true))
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/03-control-flow#Example_shadowPitfall"><code>if 裡讀到： dark
+錯誤寫法回傳： light
+正確寫法回傳： dark</code></pre>
+    <p>loadTheme 在 if 裡寫了 <code>theme, err :=</code>。在內層區塊裡，<code>:=</code> 左邊的名字都是這個區塊的新變數，於是 if 裡多了一個新的 theme。讀到的 "dark" 存進了新變數，離開 if 就消失了，函式回傳的還是外層的 "light"。修法是先 <code>var err error</code>，再用 <code>=</code> 賦值。<code>go vet</code> 預設不檢查 shadowing（有另外一個可以安裝的 shadow 分析器），最可靠的方法還是：看到 if 或 for 裡面的 <code>:=</code> 時多看一眼。</p>
+
+    <h3>3. 以為 switch 裡的 break 會離開迴圈</h3>
+    <p>在 for 裡面的 switch 寫 break，只會離開 switch，迴圈照跑。要離開迴圈，請用標籤或 return，完整的例子見 <a href="#break-switch">4.3</a>。</p>
+
+    <h3>4. 用無號整數倒著數</h3>
+    <div class="compare">
+      <p class="label bad">錯誤寫法</p>
+      <pre class="code bad" data-src="chapters/03-control-flow/branch.go#reverseBuggy"><code>func reverseBuggy(s []string) []string {
+	var out []string
+	for i := uint(len(s)) - 1; i &gt;= 0; i-- {
+		out = append(out, s[i])
+	}
+	return out
+}</code></pre>
+      <p class="label bad">執行結果（用 recover 接住 panic 後印出）</p>
+      <pre class="out err" data-example="chapters/03-control-flow#Example_reverseBuggy"><code>panic: runtime error: index out of range [18446744073709551615] with length 2</code></pre>
+      <p class="label good">正確寫法</p>
+      <pre class="code good" data-src="chapters/03-control-flow/branch.go#reverse"><code>func reverse(s []string) []string {
+	var out []string
+	for i := len(s) - 1; i &gt;= 0; i-- {
+		out = append(out, s[i])
+	}
+	return out
+}</code></pre>
+    </div>
+    <p><code>uint</code> 不會小於 0，所以 <code>i &gt;= 0</code> 永遠成立。i 從 1 減到 0，再減 1 就繞回 uint 的最大值 18446744073709551615（64 位元平台），接著 <code>s[i]</code> 索引越界而 panic。編譯器和 go vet 都不會提醒你。倒著走請用 int；Go 1.23 起也可以寫 <code>for i, v := range slices.Backward(s)</code>，連邊界都不用算。</p>
+
+    <h3>5. 以為改迴圈變數就會改到 slice</h3>
+    <p><code>for _, d := range menu</code> 裡的 d 是複本，改它不會影響 menu。要修改元素請用索引 <code>menu[i]</code>，見 <a href="#range">3.1</a>。</p>
+
+    <h3>6. 依賴 map 的走訪順序</h3>
+    <p>直接 range map 時，順序每次都可能不同。這在測試裡特別危險：在你的電腦上剛好通過，在 CI 上偶爾失敗。需要固定順序就先排序 key，見 3.4。</p>
   </section>
 
   <section aria-labelledby="java">
@@ -171,21 +1073,144 @@
         <thead><tr><th scope="col">主題</th><th scope="col">Java</th><th scope="col">Go</th></tr></thead>
         <tbody>
           <tr><th scope="row">迴圈</th><td class="java"><code>for</code>、<code>while</code>、<code>do-while</code>、for-each</td><td>只有 <code>for</code></td></tr>
-          <tr><th scope="row">走訪集合</th><td class="java"><code>for (var x : list)</code></td><td><code>for i, x := range list</code></td></tr>
-          <tr><th scope="row">switch 往下掉</th><td class="java">傳統 switch 預設會往下掉，要寫 <code>break</code></td><td>預設不會，要往下掉才寫 <code>fallthrough</code></td></tr>
+          <tr><th scope="row">走訪集合</th><td class="java"><code>for (var x : list)</code></td><td><code>for i, x := range list</code>，另外給你索引</td></tr>
+          <tr><th scope="row">走訪 Map</th><td class="java"><code>for (var e : map.entrySet())</code>；HashMap 不保證順序，TreeMap 依 key 排序</td><td><code>for k, v := range m</code>；不保證順序，要排序就先排 key</td></tr>
+          <tr><th scope="row">switch 往下掉</th><td class="java">傳統的冒號寫法會往下掉，要寫 <code>break</code>；Java 14 的 <code>case X -&gt;</code> 不會</td><td>預設不會，要往下掉才寫 <code>fallthrough</code></td></tr>
+          <tr><th scope="row">switch 當運算式</th><td class="java">Java 14 起可以用 <code>yield</code> 回傳值</td><td>switch 是敘述，不能當值用；常見做法是寫成函式並在 case 裡 return</td></tr>
           <tr><th scope="row">三元運算子</th><td class="java"><code>cond ? a : b</code></td><td>沒有，寫 if/else</td></tr>
+          <tr><th scope="row">迴圈變數與 lambda</th><td class="java">lambda 只能抓 effectively final 的變數</td><td>closure 可以抓任何變數；Go 1.22 起每一圈都是新的迴圈變數</td></tr>
+          <tr><th scope="row">依型別分支</th><td class="java"><code>instanceof</code> 與 switch 的模式比對（Java 21）</td><td>type switch：<code>switch v := x.(type)</code></td></tr>
           <tr><th scope="row">跳出外層迴圈</th><td class="java">標籤加 <code>break label</code></td><td>一樣：標籤加 <code>break label</code></td></tr>
+          <tr><th scope="row">goto</th><td class="java">保留字，不能使用</td><td>可以用，但有限制，也很少用</td></tr>
         </tbody>
       </table>
     </div>
   </section>
 
+  <section aria-labelledby="exercises">
+    <h2 id="exercises">練習</h2>
+    <p>題目都在 <code>exercises/03-control-flow/exercises.go</code>。每題都有測試；一開始全部是紅燈，寫完一題就會綠一題。標著「找錯」的題目已經有程式，但有 bug，請找出來修好。</p>
+    <pre class="shell"><code>go test ./exercises/03-control-flow/                       <span class="c"># 跑全部練習</span>
+go test ./exercises/03-control-flow/ -run TestTicketPrice  <span class="c"># 只跑一題</span>
+go test -tags solution ./exercises/03-control-flow/        <span class="c"># 跑參考解答</span></code></pre>
+    <ol class="exercises">
+      <li>
+        <h3><span class="level l1">入門</span>練習 1：里程票價</h3>
+        <p>依搭乘的公里數回傳票價：1–5 公里 20 元，6–10 公里 25 元，11–20 公里 35 元，21–40 公里 50 元，超過 40 公里 65 元。0 或負數不是合法的距離，回傳 0。</p>
+        <pre class="code" data-src="exercises/03-control-flow/exercises.go#TicketPrice"><code>func TicketPrice(km int) int {
+	// TODO: 實作
+	return 0
+}</code></pre>
+        <p>例如 <code>TicketPrice(5)</code> 是 20，<code>TicketPrice(6)</code> 是 25。測試：<code>TestTicketPrice</code>。</p>
+        <details><summary>提示</summary><p>用 5.3 的「沒有比對值的 switch」。先處理不合法的距離，後面每個 case 只要寫上限就好。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l1">入門</span><span class="level fix">找錯</span>練習 2：補貨</h3>
+        <p><code>Item</code> 有 <code>Name</code> 和 <code>Stock</code> 兩個欄位。<code>Restock</code> 要幫每一項庫存補 n 個，但跑完之後庫存完全沒變。</p>
+        <pre class="code" data-src="exercises/03-control-flow/exercises.go#Restock"><code>func Restock(items []Item, n int) {
+	for _, it := range items {
+		it.Stock += n
+	}
+}</code></pre>
+        <p>測試：<code>TestRestock</code>。</p>
+        <details><summary>提示</summary><p>it 是誰的複本？回去看 3.1。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l1">入門</span>練習 3：乘法表</h3>
+        <p>回傳 n×n 的乘法表字串。第 i 列依序是 i×1、i×2…i×n，每格寫成 <code>i×j=積</code>，同一列用 tab（<code>\t</code>）分隔，列和列之間用換行分隔，最後一列後面沒有換行。n 小於 1 時回傳空字串。</p>
+        <pre class="code" data-src="exercises/03-control-flow/exercises.go#Table"><code>func Table(n int) string {
+	// TODO: 實作
+	return ""
+}</code></pre>
+        <p>例如 <code>Table(2)</code> 是 <code>"1×1=1\t1×2=2\n2×1=2\t2×2=4"</code>。測試：<code>TestTable</code>。</p>
+        <details><summary>提示</summary><p>兩層 for。用 <code>strings.Builder</code> 累積結果，<code>fmt.Fprintf(&amp;b, "%d×%d=%d", i, j, i*j)</code> 可以直接把格式化的文字寫進去。分隔符號只放在「不是第一個」的格子或列前面，就不會多出結尾的 tab 或換行。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l2">進階</span>練習 4：發票對獎</h3>
+        <p>用簡化的規則對獎：winning 和 ticket 都是 8 位數字的字串。從末 8 碼開始往下比，看末幾碼完全相同，回傳最高的獎金：末 8 碼 200000、末 7 碼 40000、末 6 碼 10000、末 5 碼 4000、末 4 碼 1000、末 3 碼 200。連末 3 碼都不同就回傳 0。</p>
+        <pre class="code" data-src="exercises/03-control-flow/exercises.go#InvoicePrize"><code>func InvoicePrize(winning, ticket string) int {
+	// TODO: 實作
+	return 0
+}</code></pre>
+        <p>例如中獎號碼是 <code>"12345678"</code>，<code>"99945678"</code> 末 5 碼相同，得 4000。測試：<code>TestInvoicePrize</code>。</p>
+        <details><summary>提示</summary><p>字串可以切片：<code>s[8-k:]</code> 是末 k 碼。從 k = 8 往下試到 3，第一個相同的就是答案；把六種獎金放在一個 slice 裡，可以讓迴圈和獎金一一對應。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l2">進階</span>練習 5：數一數字元</h3>
+        <p>統計字串裡四種字元各有幾個：漢字、ASCII 英文字母（a–z、A–Z）、ASCII 數字（0–9），其餘全部算「其他」，包含空白、標點和全形英數。</p>
+        <pre class="code" data-src="exercises/03-control-flow/exercises.go#CountKinds"><code>func CountKinds(s string) (han, letter, digit, other int) {
+	// TODO: 實作
+	return 0, 0, 0, 0
+}</code></pre>
+        <p>例如 <code>"Go 語言 1.27 版！"</code> 有 3 個漢字、2 個字母、3 個數字、5 個其他字元。測試：<code>TestCountKinds</code>。</p>
+        <details><summary>提示</summary><p>用 range 字串一次拿一個 rune（3.3），再用沒有比對值的 switch 分類。<code>unicode.Is(unicode.Han, r)</code> 可以判斷是不是漢字；rune 可以直接和 <code>'a'</code>、<code>'z'</code> 這樣的字元常數比大小。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l2">進階</span><span class="level fix">找錯</span>練習 6：加到負數為止</h3>
+        <p>從頭加總 nums，遇到第一個負數就停（負數本身不加）。現在的版本遇到負數之後還是一直加下去。</p>
+        <pre class="code" data-src="exercises/03-control-flow/exercises.go#TotalUntilNegative"><code>func TotalUntilNegative(nums []int) int {
+	total := 0
+	for _, n := range nums {
+		switch {
+		case n &lt; 0:
+			break
+		default:
+			total += n
+		}
+	}
+	return total
+}</code></pre>
+        <p>例如 <code>[]int{3, 4, -1, 10}</code> 應該得到 7，現在卻得到 17。測試：<code>TestTotalUntilNegative</code>。</p>
+        <details><summary>提示</summary><p>這個 break 離開的是哪一層？回去看 4.3。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l3">挑戰</span>練習 7：螺旋矩陣</h3>
+        <p>回傳 n×n 的螺旋矩陣：從左上角的 1 開始，順時針往內繞，填到 n×n 為止。n 小於 1 時回傳長度為 0 的 slice。</p>
+        <pre class="code" data-src="exercises/03-control-flow/exercises.go#Spiral"><code>func Spiral(n int) [][]int {
+	// TODO: 實作
+	return nil
+}</code></pre>
+        <p>例如 <code>Spiral(3)</code> 是 <code>[[1 2 3] [8 9 4] [7 6 5]]</code>。測試：<code>TestSpiral</code>。</p>
+        <details><summary>提示</summary><p>用四個變數記住還沒填的範圍：上、下、左、右。每一輪依序填「上排往右、右欄往下、下排往左、左欄往上」，每填完一邊就把那一邊往內縮一格。n 是奇數時，最後只剩一格，要小心不要重複填。</p></details>
+      </li>
+    </ol>
+    <p><a href="https://github.com/xinqilin/GO-Playground/blob/main/exercises/03-control-flow/solution.go">參考解答</a>：先自己寫完再看。解答只是其中一種寫法，測試通過的寫法都是對的。</p>
+  </section>
+
+  <section aria-labelledby="recap">
+    <h2 id="recap">重點回顧</h2>
+    <ul class="recap">
+      <li>條件不加括號，大括號一定要寫，<code>{</code> 不能換行；條件必須是 bool。</li>
+      <li><code>if v, err := f(); err != nil</code> 讓暫時的變數只活在 if/else 裡。</li>
+      <li>用 guard clause 先處理例外並 return，主流程靠左。</li>
+      <li>在內層區塊用 <code>:=</code> 會產生新變數，小心蓋掉外層的同名變數。</li>
+      <li><code>for</code> 一個關鍵字涵蓋三段式、while、無窮迴圈和 range。</li>
+      <li>range 給的是複本；要修改 slice 的元素請用索引。</li>
+      <li>range 字串一次給一個 rune，位置是 byte 位置。</li>
+      <li>range map 沒有固定順序，需要時先排序 key。</li>
+      <li>range 的對象只求值一次；Go 1.22 起每一圈都是新的迴圈變數。</li>
+      <li>switch 不會往下掉；switch 裡的 break 只離開 switch，要離開迴圈請用標籤。</li>
+      <li>沒有比對值的 switch 是一長串 if-else 的整齊寫法，case 由上往下求值，找到就停。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="further">
+    <h2 id="further">延伸閱讀</h2>
+    <ul class="notes">
+      <li>Go 語言規格：<a href="https://go.dev/ref/spec#If_statements">If statements</a>、<a href="https://go.dev/ref/spec#For_statements">For statements</a>、<a href="https://go.dev/ref/spec#For_range">range 子句</a>、<a href="https://go.dev/ref/spec#Switch_statements">Switch statements</a>、<a href="https://go.dev/ref/spec#Break_statements">Break</a>、<a href="https://go.dev/ref/spec#Continue_statements">Continue</a>、<a href="https://go.dev/ref/spec#Goto_statements">Goto</a>。</li>
+      <li>自動補分號的規則：Go 語言規格的 <a href="https://go.dev/ref/spec#Semicolons">Semicolons</a>。</li>
+      <li>迴圈變數的新語意：<a href="https://go.dev/doc/go1.22#language">Go 1.22 版本說明</a>，以及 Go Blog 的 <a href="https://go.dev/blog/loopvar-preview">Fixing For Loops in Go 1.22</a>。</li>
+      <li>標準庫文件：<a href="https://pkg.go.dev/slices">slices</a>（<code>Sorted</code>、<code>Backward</code>）、<a href="https://pkg.go.dev/maps">maps</a>（<code>Keys</code>）。</li>
+    </ul>
+  </section>
+
   <section aria-labelledby="run">
     <h2 id="run">動手跑</h2>
     <p class="label">在 repo 根目錄</p>
-    <pre class="shell"><code>go run ./chapters/03-control-flow
-go test ./chapters/03-control-flow</code></pre>
-    <p><a href="https://github.com/xinqilin/GO-Playground/tree/main/chapters/03-control-flow">在 GitHub 看完整程式碼</a></p>
+    <pre class="shell"><code>go run ./chapters/03-control-flow                  <span class="c"># 執行本章所有示範</span>
+go test ./chapters/03-control-flow                 <span class="c"># 驗證頁面上的每一段輸出</span>
+go test ./exercises/03-control-flow/               <span class="c"># 做練習</span></code></pre>
+    <p><a href="https://github.com/xinqilin/GO-Playground/tree/main/chapters/03-control-flow">在 GitHub 看本章完整程式碼</a>，或看<a href="https://github.com/xinqilin/GO-Playground/tree/main/exercises/03-control-flow">練習題</a>。</p>
   </section>
 </main>
 

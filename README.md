@@ -13,12 +13,17 @@
 ```sh
 git clone https://github.com/xinqilin/GO-Playground.git
 cd GO-Playground
-go run ./chapters/00-hello   # 執行某一章
-go test ./...                # 跑全部測試
-go test -race ./...          # 加上 race detector
+go run ./chapters/00-hello                  # 執行某一章
+go test ./chapters/... ./projects/...       # 跑章節和專題的測試
+go test ./exercises/03-control-flow/        # 做某一章的練習（寫完之前會失敗）
+go test -race -tags solution ./...          # 全部測試，練習題改用參考解答
 ```
 
 每一章都是獨立的程式：`chapters/NN-主題/` 放程式碼和測試，`docs/NN-主題.html` 是對應的圖解頁。測試會比對每一章印出來的內容，所以頁面上的輸出和程式碼不會脫節。
+
+`exercises/NN-主題/` 是練習題：`exercises.go` 是題目，`solution.go` 是參考解答（加上 `-tags solution` 才會編譯）。題目還沒寫完時測試本來就會失敗，所以直接在根目錄跑 `go test ./...` 會看到練習題的紅燈。
+
+頁面上的程式碼和輸出由 `go run ./tools/docsync` 從 repo 裡的程式同步過去，CI 會用 `-check` 確認兩邊一致。
 
 ## 目錄
 

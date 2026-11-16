@@ -133,8 +133,9 @@
     <p>需要 Go 1.21 以上；<code>go.mod</code> 宣告的是 <code>go 1.27</code>，比較舊的 Go 會自動下載需要的版本。</p>
     <pre class="shell"><code>git clone https://github.com/xinqilin/GO-Playground.git
 cd GO-Playground
-go run ./chapters/00-hello   <span class="c"># 執行某一章</span>
-go test -race ./...          <span class="c"># 跑全部測試</span></code></pre>
+go run ./chapters/00-hello                  <span class="c"># 執行某一章</span>
+go test ./chapters/... ./projects/...       <span class="c"># 跑章節和專題的測試</span>
+go test ./exercises/03-control-flow/        <span class="c"># 做練習（寫完之前會失敗）</span></code></pre>
   </section>
 </main>
 
