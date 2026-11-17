@@ -545,7 +545,7 @@ func iotaWeekday() {
     <pre class="out" data-example="chapters/01-variables#Example_iotaWeekday"><code>0 1 6
 true</code></pre>
     <p><code>iota</code> 在每個 <code>const</code> 區塊裡從 0 開始，每多一行就加 1。區塊裡沒寫等號的行，會沿用上一行的寫法（型別和運算式），只是 <code>iota</code> 換成新的值，所以只要第一行寫 <code>Weekday = iota</code>，後面的常數就自動變成 1、2、3……，型別也都是 <code>Weekday</code>。</p>
-    <p><code>type Weekday int</code> 定義了一個新型別，它的底層是 <code>int</code>，但它和 <code>int</code> 是<strong>不同的型別</strong>：一個 <code>Weekday</code> 變數和一個 <code>int</code> 變數不能直接相加。和沒有型別的常數 <code>1</code> 運算則沒問題，所以 <code>today+1</code> 可以編譯。自訂型別讓編譯器幫你擋住「把數量當成星期幾」這類錯誤。第 <a href="02-input-output.html">02 章</a>會教你讓 <code>Weekday</code> 印出「星期五」而不是 5。</p>
+    <p><code>type Weekday int</code> 定義了一個新型別，它的底層是 <code>int</code>，但它和 <code>int</code> 是<strong>不同的型別</strong>：一個 <code>Weekday</code> 變數和一個 <code>int</code> 變數不能直接相加。和沒有型別的常數 <code>1</code> 運算則沒問題，所以 <code>today+1</code> 可以編譯。自訂型別讓編譯器幫你擋住「把數量當成星期幾」這類錯誤。第 <a href="02-input-output.html#stringer">02 章</a>會介紹 Stringer，讓自訂型別印出有意義的文字，而不是一個數字。</p>
 
     <h3>iota 的兩種常見寫法</h3>
     <pre class="code" data-src="chapters/01-variables/constants.go#Priority,Low,Note,Spicy,iotaPatterns"><code>type Priority int
