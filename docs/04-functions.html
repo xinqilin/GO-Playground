@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>函式｜Go 圖解手冊</title>
-<meta name="description" content="Go 函式的多個回傳值、可變參數、函式當成值傳遞、closure，以及 defer 的執行順序。">
+<meta name="description" content="Go 的函式：傳值、多個回傳值與 error、具名回傳、可變參數、函式型別、closure、遞迴、defer 的執行順序與陷阱，以及 panic 與 recover，附可執行的練習題。">
 <link rel="stylesheet" href="assets/style.css">
 </head>
 <body>
@@ -13,125 +13,777 @@
   <span class="count">04 / 24</span>
 </header>
 
-<main class="page">
+<main class="page long">
   <header class="hero">
     <div class="num" aria-hidden="true">04</div>
     <p class="eyebrow">Part 1 · 基礎 · 第 04 章</p>
     <h1>函式</h1>
-    <p class="analogy">函式是一台機器：放進參數，拿出結果；機器本身也能拿來傳來傳去。</p>
+    <p class="analogy">函式是一台機器：放進參數、拿出結果。在 Go 裡，機器本身也可以裝箱運送：存進變數、當成參數交給別人，甚至由另一台機器生產出來。</p>
   </header>
 
-  <section aria-labelledby="look">
-    <h2 id="look">看圖</h2>
-    <div class="figs">
-      <figure class="fig">
-        <svg viewBox="0 0 480 190" role="img" aria-label="把 17 和 5 放進 divmod，同時拿到商 3 和餘數 2 兩個結果">
-          <title>一次回傳好幾個值</title>
-          <text class="sm mono" x="55" y="30" text-anchor="middle">a</text>
-          <text class="sm mono" x="55" y="116" text-anchor="middle">b</text>
-          <rect class="soft" x="20" y="40" width="70" height="48" rx="6"/>
-          <rect class="soft" x="20" y="124" width="70" height="48" rx="6"/>
-          <text class="lg" x="55" y="75" text-anchor="middle">17</text>
-          <text class="lg" x="55" y="159" text-anchor="middle">5</text>
-          <path class="wire" d="M90 64 H150 M90 148 H150"/>
-          <path class="tip" d="M162 64 L149 57 L149 71 Z"/>
-          <path class="tip" d="M162 148 L149 141 L149 155 Z"/>
-          <rect class="acc" x="166" y="40" width="148" height="132" rx="12"/>
-          <text class="mono bold" x="240" y="112" text-anchor="middle">divmod</text>
-          <path class="wire" d="M314 64 H374 M314 148 H374"/>
-          <path class="tip" d="M386 64 L373 57 L373 71 Z"/>
-          <path class="tip" d="M386 148 L373 141 L373 155 Z"/>
-          <text class="sm" x="425" y="30" text-anchor="middle">商</text>
-          <text class="sm" x="425" y="116" text-anchor="middle">餘數</text>
-          <rect class="hot" x="390" y="40" width="70" height="48" rx="6"/>
-          <rect class="hot" x="390" y="124" width="70" height="48" rx="6"/>
-          <text class="lg t-hot" x="425" y="75" text-anchor="middle">3</text>
-          <text class="lg t-hot" x="425" y="159" text-anchor="middle">2</text>
-        </svg>
-        <figcaption>Go 的函式可以一次回傳好幾個值，最常見的組合是「結果 + error」。</figcaption>
-      </figure>
+  <nav class="toc-inline" aria-labelledby="toc-title">
+    <p class="label" id="toc-title">本章內容</p>
+    <ol>
+      <li><a href="#goals">本章你會學到</a></li>
+      <li><a href="#basics">宣告與呼叫</a></li>
+      <li><a href="#returns">多個回傳值</a></li>
+      <li><a href="#variadic">可變參數</a></li>
+      <li><a href="#values">函式是值</a></li>
+      <li><a href="#closures">closure</a></li>
+      <li><a href="#recursion">遞迴</a></li>
+      <li><a href="#defer">defer</a></li>
+      <li><a href="#panic">panic 與 recover</a></li>
+      <li><a href="#pitfalls">常見錯誤</a></li>
+      <li><a href="#java">從 Java 來的你</a></li>
+      <li><a href="#exercises">練習</a></li>
+      <li><a href="#recap">重點回顧</a></li>
+      <li><a href="#further">延伸閱讀</a></li>
+    </ol>
+  </nav>
 
-      <figure class="fig">
-        <svg viewBox="0 0 480 220" role="img" aria-label="counter 產生兩個 closure：next 的背包裡 n 累加到 3，other 有自己的背包，n 是 1">
-          <title>closure 帶著背包</title>
-          <rect class="soft" x="20" y="80" width="110" height="70" rx="10"/>
-          <text class="mono" x="75" y="121" text-anchor="middle">counter()</text>
-          <path class="wire" d="M130 100 H160 V64 H190 M130 130 H160 V176 H190"/>
-          <path class="tip" d="M202 64 L189 57 L189 71 Z"/>
-          <path class="tip" d="M202 176 L189 169 L189 183 Z"/>
-          <text class="sm" x="428" y="24" text-anchor="middle">呼叫結果</text>
-          <rect class="acc" x="206" y="36" width="120" height="56" rx="10"/>
-          <text class="mono bold" x="266" y="70" text-anchor="middle">next</text>
-          <rect class="hot" x="334" y="40" width="56" height="48" rx="12"/>
-          <text class="sm t-hot" x="362" y="58" text-anchor="middle">n</text>
-          <text class="bold" x="362" y="80" text-anchor="middle">3</text>
-          <text class="mono" x="428" y="70" text-anchor="middle">1 2 3</text>
-          <rect class="acc" x="206" y="148" width="120" height="56" rx="10"/>
-          <text class="mono bold" x="266" y="182" text-anchor="middle">other</text>
-          <rect class="hot" x="334" y="152" width="56" height="48" rx="12"/>
-          <text class="sm t-hot" x="362" y="170" text-anchor="middle">n</text>
-          <text class="bold" x="362" y="192" text-anchor="middle">1</text>
-          <text class="mono" x="428" y="182" text-anchor="middle">1</text>
-        </svg>
-        <figcaption>closure 會把用到的變數（n）一起帶走；每個 closure 背自己的背包，互不影響。</figcaption>
-      </figure>
-
-      <figure class="fig">
-        <svg viewBox="0 0 480 256" role="img" aria-label="defer 依序把 defer 0、1、2 疊上去；函式結束時從最上面開始拿，所以 defer 2 最先執行">
-          <title>defer 是一疊盤子</title>
-          <text class="sm" x="150" y="56">依序放上去</text>
-          <path class="wire" d="M140 36 V80"/>
-          <path class="tip" d="M140 90 L133 77 L147 77 Z"/>
-          <rect class="hot" x="60" y="96" width="160" height="36" rx="18"/>
-          <rect class="soft" x="60" y="138" width="160" height="36" rx="18"/>
-          <rect class="soft" x="60" y="180" width="160" height="36" rx="18"/>
-          <text class="mono t-hot" x="140" y="120" text-anchor="middle">defer 2</text>
-          <text class="mono" x="140" y="162" text-anchor="middle">defer 1</text>
-          <text class="mono" x="140" y="204" text-anchor="middle">defer 0</text>
-          <path class="wire" d="M228 114 H298 M228 156 H298 M228 198 H298"/>
-          <path class="tip" d="M310 114 L297 107 L297 121 Z"/>
-          <path class="tip" d="M310 156 L297 149 L297 163 Z"/>
-          <path class="tip" d="M310 198 L297 191 L297 205 Z"/>
-          <text class="bold t-hot" x="318" y="120">第 1 個執行</text>
-          <text x="318" y="162">第 2 個執行</text>
-          <text x="318" y="204">第 3 個執行</text>
-          <text class="sm" x="140" y="244" text-anchor="middle">函式要結束時才開始拿</text>
-        </svg>
-        <figcaption><code>defer</code> 像疊盤子：最後放上去的最先拿下來，而且等函式要結束時才開始拿。</figcaption>
-      </figure>
-    </div>
+  <section aria-labelledby="goals">
+    <h2 id="goals">本章你會學到</h2>
+    <ul class="notes">
+      <li>宣告和呼叫函式，知道 Go 的參數一律傳值，也沒有預設參數和多載。</li>
+      <li>回傳多個值，特別是「結果加 error」的慣用寫法，以及具名回傳值。</li>
+      <li>寫可變參數的函式，並把現成的 slice 展開傳進去。</li>
+      <li>把函式當成值：存進變數、定義函式型別、當參數傳給別的函式。</li>
+      <li>closure 怎麼記住外層的變數，以及用它做出有狀態的函式。</li>
+      <li>遞迴的終止條件，以及 Go 的堆疊上限。</li>
+      <li>defer 的執行順序、參數的求值時機、修改回傳值，以及在迴圈裡的陷阱。</li>
+      <li>panic 和 recover 的用途與界線：什麼時候該 panic，什麼時候該回傳 error。</li>
+    </ul>
+    <p>先備：<a href="01-variables.html">01 變數與型別</a>、<a href="02-input-output.html">02 輸入與輸出</a>。範例會用到 <code>for</code>、<code>if</code> 和 slice，完整介紹在第 <a href="03-control-flow.html">03 章</a>和第 <a href="06-arrays-slices.html">06 章</a>。</p>
   </section>
 
-  <section aria-labelledby="code">
-    <h2 id="code">最小範例</h2>
-    <pre class="code"><code>func divmod(a, b int) (int, int) { return a / b, a % b }
+  <section aria-labelledby="basics">
+    <h2 id="basics">1. 宣告與呼叫</h2>
+    <p>函式用 <code>func</code> 宣告，依序寫出名稱、參數列和回傳型別。參數和變數一樣是「名稱在前、型別在後」，相鄰的參數型別相同時可以合併：</p>
+    <pre class="code" data-src="chapters/04-functions/basics.go#bentoTotal,callBasics"><code>func bentoTotal(qty, price int) int {
+	return qty * price
+}
 
-func counter() func() int {
-	n := 0
-	return func() int { n++; return n }
+func callBasics() {
+	fmt.Println(bentoTotal(3, 85))
+	fmt.Println(bentoTotal(2, 90) + bentoTotal(1, 25))
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/04-functions#Example_callBasics"><code>255
+205</code></pre>
+    <p>函式可以宣告在檔案的任何位置，呼叫的地方寫在前面或後面都沒關係，同一個 package 的其他檔案也能直接呼叫（第 <a href="00-hello.html#files">00 章</a>）。名稱大寫開頭就會匯出給其他 package 使用，小寫則只在自己的 package 裡可見。</p>
+
+    <h3>參數一律傳值</h3>
+    <pre class="code" data-src="chapters/04-functions/basics.go#addOne,passByValue"><code>func addOne(n int) {
+	n++
+	fmt.Println("函式裡：", n)
+}
+
+func passByValue() {
+	stock := 10
+	addOne(stock)
+	fmt.Println("呼叫端：", stock)
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/04-functions#Example_passByValue"><code>函式裡： 11
+呼叫端： 10</code></pre>
+    <p>呼叫函式時，每個參數都會<strong>複製</strong>一份給函式。<code>addOne</code> 改的是自己那一份，呼叫端的 <code>stock</code> 不受影響。想讓函式改到呼叫端的變數，要傳指標（第 <a href="05-pointers.html">05 章</a>）。要注意的是，slice 和 map 被複製的只是一個「指向底層資料的小結構」，所以函式透過它們改內容，呼叫端是看得到的，第 06、07 章會細講。</p>
+
+    <h3>沒有預設參數，也沒有多載</h3>
+    <p>Go 刻意不支援這兩個功能。寫成 Java 或 Python 的樣子會直接編譯失敗：</p>
+    <pre class="code bad" data-compile-error><code>package main
+
+import "fmt"
+
+func total(qty int, price int = 85) int {
+	return qty * price
 }
 
 func main() {
-	defer fmt.Println("最後才執行")
-	q, r := divmod(17, 5)
-	next := counter()
-	fmt.Println(q, r, next(), next(), next())
+	fmt.Println(total(3))
 }</code></pre>
-    <p class="label">輸出</p>
-    <pre class="out"><code>3 2 1 2 3
-最後才執行</code></pre>
+    <p class="label">編譯錯誤</p>
+    <pre class="out err"><code>./main.go:5:31: syntax error: unexpected = in parameter list; possibly missing comma or )</code></pre>
+    <pre class="code bad" data-compile-error><code>package main
+
+import "fmt"
+
+func total(qty int) int {
+	return qty * 85
+}
+
+func total(qty, price int) int {
+	return qty * price
+}
+
+func main() {
+	fmt.Println(total(3), total(3, 90))
+}</code></pre>
+    <p class="label">編譯錯誤</p>
+    <pre class="out err"><code>./main.go:9:6: total redeclared in this block
+	./main.go:5:6: other declaration of total
+./main.go:14:33: too many arguments in call to total
+	have (number, number)
+	want (int)</code></pre>
+    <p>理由是讓呼叫的地方一眼就看得出呼叫了哪個函式、傳了哪些值。替代做法：取不同的名字（<code>total</code> 和 <code>totalWithPrice</code>），或者選項很多時，把參數包成一個 struct 傳進去，沒填的欄位就是零值（第 <a href="09-structs-methods.html">09 章</a>）。</p>
   </section>
 
-  <section aria-labelledby="notes">
-    <h2 id="notes">工程師筆記</h2>
+  <section aria-labelledby="returns">
+    <h2 id="returns">2. 多個回傳值</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 190" role="img" aria-label="把 17 和 5 放進 divmod，同時拿到商 3 和餘數 2 兩個結果">
+        <title>一次回傳好幾個值</title>
+        <text class="sm mono" x="55" y="30" text-anchor="middle">a</text>
+        <text class="sm mono" x="55" y="116" text-anchor="middle">b</text>
+        <rect class="soft" x="20" y="40" width="70" height="48" rx="6"/>
+        <rect class="soft" x="20" y="124" width="70" height="48" rx="6"/>
+        <text class="lg" x="55" y="75" text-anchor="middle">17</text>
+        <text class="lg" x="55" y="159" text-anchor="middle">5</text>
+        <path class="wire" d="M90 64 H150 M90 148 H150"/>
+        <path class="tip" d="M162 64 L149 57 L149 71 Z"/>
+        <path class="tip" d="M162 148 L149 141 L149 155 Z"/>
+        <rect class="acc" x="166" y="40" width="148" height="132" rx="12"/>
+        <text class="mono bold" x="240" y="112" text-anchor="middle">divmod</text>
+        <path class="wire" d="M314 64 H374 M314 148 H374"/>
+        <path class="tip" d="M386 64 L373 57 L373 71 Z"/>
+        <path class="tip" d="M386 148 L373 141 L373 155 Z"/>
+        <text class="sm" x="425" y="30" text-anchor="middle">商</text>
+        <text class="sm" x="425" y="116" text-anchor="middle">餘數</text>
+        <rect class="hot" x="390" y="40" width="70" height="48" rx="6"/>
+        <rect class="hot" x="390" y="124" width="70" height="48" rx="6"/>
+        <text class="lg t-hot" x="425" y="75" text-anchor="middle">3</text>
+        <text class="lg t-hot" x="425" y="159" text-anchor="middle">2</text>
+      </svg>
+      <figcaption>Go 的函式可以一次回傳好幾個值，最常見的組合是「結果加 error」。</figcaption>
+    </figure>
+    <p>回傳型別有好幾個時，用括號包起來；<code>return</code> 後面依序寫出每個值：</p>
+    <pre class="code" data-src="chapters/04-functions/returns.go#divmod,multiReturn"><code>func divmod(a, b int) (int, int) {
+	return a / b, a % b
+}
+
+func multiReturn() {
+	q, r := divmod(17, 5)
+	fmt.Println(q, r)
+	_, rest := divmod(1000, 3)
+	fmt.Println(rest)
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/04-functions#Example_multiReturn"><code>3 2
+1</code></pre>
+    <p>接收時，變數的個數要和回傳值一樣多。不需要的值用 <code>_</code> 丟掉，但不能少寫。只寫一個變數去接兩個回傳值，編譯器會拒絕：</p>
+    <pre class="code bad" data-compile-error><code>package main
+
+import (
+	"fmt"
+	"strconv"
+)
+
+func main() {
+	n := strconv.Atoi("85")
+	fmt.Println(n)
+}</code></pre>
+    <p class="label">編譯錯誤</p>
+    <pre class="out err"><code>./main.go:9:7: assignment mismatch: 1 variable but strconv.Atoi returns 2 values</code></pre>
+    <p>這個限制是故意的：<code>Atoi</code> 的第二個回傳值是錯誤，Go 不讓你在不知不覺中漏掉它。真的不在乎時，也要明寫 <code>n, _ := …</code>，讀程式的人一看就知道這裡忽略了錯誤。</p>
+
+    <h3>結果加 error</h3>
+    <p>Go 沒有例外（exception）。可能失敗的函式，慣例是把 <code>error</code> 放在<strong>最後一個</strong>回傳值，成功時回傳 <code>nil</code>，失敗時回傳一個描述問題的 error，其他回傳值則填零值：</p>
+    <pre class="code" data-src="chapters/04-functions/returns.go#parsePrice,valueAndError"><code>func parsePrice(s string) (int, error) {
+	num, found := strings.CutSuffix(s, " 元")
+	if !found {
+		return 0, fmt.Errorf("%q 沒有「 元」結尾", s)
+	}
+	n, err := strconv.Atoi(num)
+	if err != nil {
+		return 0, fmt.Errorf("%q 的金額不是整數", s)
+	}
+	return n, nil
+}
+
+func valueAndError() {
+	for _, s := range []string{"85 元", "八十五 元", "85"} {
+		price, err := parsePrice(s)
+		if err != nil {
+			fmt.Println("錯誤：", err)
+			continue
+		}
+		fmt.Println("價格：", price)
+	}
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/04-functions#Example_valueAndError"><code>價格： 85
+錯誤： "八十五 元" 的金額不是整數
+錯誤： "85" 沒有「 元」結尾</code></pre>
+    <p>呼叫端的寫法幾乎都長這樣：呼叫完<strong>立刻</strong>檢查 <code>err != nil</code>，有錯就處理（印出來、往上回傳、換個方式），沒錯才繼續用結果。<code>fmt.Errorf</code> 和 <code>Sprintf</code> 用法一樣，只是回傳一個 error。<code>strings.CutSuffix</code> 是另一個「結果加一個布林」的例子：第二個回傳值告訴你字串原本有沒有這個結尾。錯誤處理的完整技巧（包裝、比對、自訂錯誤型別）在第 <a href="11-errors.html">11 章</a>。</p>
+
+    <h3>具名回傳值</h3>
+    <pre class="code" data-src="chapters/04-functions/returns.go#splitBill,namedResults"><code>func splitBill(total, people int) (each, rest int) {
+	if people &lt; 1 {
+		return // 回傳 0, 0
+	}
+	each = total / people
+	rest = total % people
+	return
+}
+
+func namedResults() {
+	fmt.Println(splitBill(1000, 3))
+	fmt.Println(splitBill(1000, 0))
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/04-functions#Example_namedResults"><code>333 1
+0 0</code></pre>
+    <p>回傳值可以取名字。它們就像在函式一開始宣告的變數，初始值是零值；不帶值的 <code>return</code>（naked return）會把它們當下的值回傳出去。名字也是文件的一部分：<code>(each, rest int)</code> 比 <code>(int, int)</code> 清楚得多。</p>
+    <p>但 naked return 在長函式裡會讓人找不到「到底回傳了什麼」，實務上的習慣是：名字可以取，<code>return</code> 還是把值寫出來；naked return 只用在幾行的短函式。具名回傳值真正不可取代的用途，是讓 defer 修改回傳值（第 7 節）。</p>
+  </section>
+
+  <section aria-labelledby="variadic">
+    <h2 id="variadic">3. 可變參數</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 196" role="img" aria-label="sum(85, 90, 15) 會把三個參數包成一個新的 slice nums；sum(prices...) 則直接把現成的 slice 交給 nums，不會複製">
+        <title>可變參數就是一個 slice</title>
+        <rect class="soft" x="16" y="20" width="170" height="44" rx="6"/>
+        <text class="small mono" x="101" y="47" text-anchor="middle">sum(85, 90, 15)</text>
+        <path class="wire" d="M190 42 H226"/>
+        <path class="tip" d="M238 42 L225 35 L225 49 Z"/>
+        <rect class="acc" x="244" y="20" width="56" height="44" rx="4"/>
+        <rect class="acc" x="300" y="20" width="56" height="44" rx="4"/>
+        <rect class="acc" x="356" y="20" width="56" height="44" rx="4"/>
+        <text class="mono" x="272" y="48" text-anchor="middle">85</text>
+        <text class="mono" x="328" y="48" text-anchor="middle">90</text>
+        <text class="mono" x="384" y="48" text-anchor="middle">15</text>
+        <text class="sm" x="328" y="84" text-anchor="middle">自動包成一個新的 slice</text>
+        <rect class="soft" x="16" y="114" width="170" height="44" rx="6"/>
+        <text class="small mono" x="101" y="141" text-anchor="middle">sum(prices...)</text>
+        <path class="wire" d="M190 136 H226"/>
+        <path class="tip" d="M238 136 L225 129 L225 143 Z"/>
+        <rect class="soft" x="244" y="114" width="56" height="44" rx="4"/>
+        <rect class="soft" x="300" y="114" width="56" height="44" rx="4"/>
+        <rect class="soft" x="356" y="114" width="56" height="44" rx="4"/>
+        <text class="mono" x="272" y="142" text-anchor="middle">85</text>
+        <text class="mono" x="328" y="142" text-anchor="middle">90</text>
+        <text class="mono" x="384" y="142" text-anchor="middle">15</text>
+        <text class="sm" x="328" y="178" text-anchor="middle">直接沿用 prices，不複製</text>
+      </svg>
+      <figcaption>在函式裡，<code>nums ...int</code> 就是一個 <code>[]int</code>。呼叫端可以一個一個傳，也可以用 <code>...</code> 把現成的 slice 交出去。</figcaption>
+    </figure>
+    <p>最後一個參數的型別前面加上 <code>...</code>，就能接受任意個值。<code>fmt.Println</code>、<code>append</code> 都是這樣寫的：</p>
+    <pre class="code" data-src="chapters/04-functions/variadic.go#sum,joinWith,variadic"><code>func sum(nums ...int) int {
+	total := 0
+	for _, n := range nums {
+		total += n
+	}
+	return total
+}
+
+func joinWith(sep string, parts ...string) string {
+	return strings.Join(parts, sep)
+}
+
+func variadic() {
+	fmt.Println(sum(), sum(85), sum(85, 90, 15))
+	prices := []int{85, 90, 15}
+	fmt.Println(sum(prices...))
+	fmt.Println(joinWith("、", "排骨", "雞腿", "滷蛋"))
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/04-functions#Example_variadic"><code>0 85 190
+190
+排骨、雞腿、滷蛋</code></pre>
     <ul class="notes">
-      <li>錯誤用回傳值傳遞：慣例是最後一個回傳值放 <code>error</code>，呼叫端馬上檢查（第 11 章）。</li>
-      <li><code>defer</code> 最常用在釋放資源：<code>os.Open</code> 成功後馬上 <code>defer f.Close()</code>，之後不管從哪裡 return 都會關檔。</li>
-      <li><code>defer</code> 的參數在註冊當下就決定；在迴圈裡 defer 要小心，要等整個函式結束才會執行。</li>
-      <li>回傳值可以取名（<code>func f() (n int, err error)</code>）。短函式可以搭配不帶值的 <code>return</code>，長函式這樣寫會很難讀。</li>
-      <li>整數除法往 0 截斷：<code>-7 / 2</code> 是 <code>-3</code>，<code>-7 % 2</code> 是 <code>-1</code>。</li>
-      <li>沒有預設參數，也沒有函式多載；選項多時改用 struct 當參數。</li>
+      <li><strong>不給任何值</strong>：<code>nums</code> 是 nil slice，長度 0，<code>for range</code> 一圈都不跑，所以 <code>sum()</code> 是 0。</li>
+      <li><strong>只能放在最後</strong>：一個函式最多一個可變參數，而且必須是最後一個，前面可以有一般參數，例如 <code>joinWith</code> 的 <code>sep</code>。</li>
+      <li><strong>展開現成的 slice</strong>：在呼叫時寫 <code>prices...</code>。這時不會建立新的 slice，函式拿到的就是 prices 本身，如果函式修改了 <code>nums[0]</code>，呼叫端的 prices 也會跟著變。</li>
+      <li><strong>不能混用</strong>：<code>sum(15, prices...)</code> 是編譯錯誤，展開的 slice 必須是唯一的那個可變參數：</li>
     </ul>
+    <pre class="out err"><code>./main.go:15:22: too many arguments in call to sum
+	have (number, []int...)
+	want (...int)</code></pre>
+    <p>要合併時先用 <code>append([]int{15}, prices...)</code> 組出一個新的 slice 再展開。</p>
+  </section>
+
+  <section aria-labelledby="values">
+    <h2 id="values">4. 函式是值</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 200" role="img" aria-label="500 元先打 9 折變成 450，再用折價券減 50 變成 400；順序反過來，500 先減 50 變成 450，再打 9 折變成 405">
+        <title>一串價格規則</title>
+        <rect class="soft" x="16" y="24" width="60" height="44" rx="6"/>
+        <text class="mono" x="46" y="52" text-anchor="middle">500</text>
+        <path class="wire" d="M78 46 H88"/>
+        <path class="tip" d="M98 46 L87 40 L87 52 Z"/>
+        <rect class="acc" x="100" y="24" width="70" height="44" rx="6"/>
+        <text class="small" x="135" y="51" text-anchor="middle">9 折</text>
+        <path class="wire" d="M172 46 H182"/>
+        <path class="tip" d="M192 46 L181 40 L181 52 Z"/>
+        <rect class="soft" x="194" y="24" width="60" height="44" rx="6"/>
+        <text class="mono" x="224" y="52" text-anchor="middle">450</text>
+        <path class="wire" d="M256 46 H266"/>
+        <path class="tip" d="M276 46 L265 40 L265 52 Z"/>
+        <rect class="acc" x="278" y="24" width="70" height="44" rx="6"/>
+        <text class="small mono" x="313" y="51" text-anchor="middle">-50</text>
+        <path class="wire" d="M350 46 H360"/>
+        <path class="tip" d="M370 46 L359 40 L359 52 Z"/>
+        <rect class="hot" x="372" y="24" width="60" height="44" rx="6"/>
+        <text class="mono bold t-hot" x="402" y="52" text-anchor="middle">400</text>
+        <rect class="soft" x="16" y="110" width="60" height="44" rx="6"/>
+        <text class="mono" x="46" y="138" text-anchor="middle">500</text>
+        <path class="wire" d="M78 132 H88"/>
+        <path class="tip" d="M98 132 L87 126 L87 138 Z"/>
+        <rect class="acc" x="100" y="110" width="70" height="44" rx="6"/>
+        <text class="small mono" x="135" y="137" text-anchor="middle">-50</text>
+        <path class="wire" d="M172 132 H182"/>
+        <path class="tip" d="M192 132 L181 126 L181 138 Z"/>
+        <rect class="soft" x="194" y="110" width="60" height="44" rx="6"/>
+        <text class="mono" x="224" y="138" text-anchor="middle">450</text>
+        <path class="wire" d="M256 132 H266"/>
+        <path class="tip" d="M276 132 L265 126 L265 138 Z"/>
+        <rect class="acc" x="278" y="110" width="70" height="44" rx="6"/>
+        <text class="small" x="313" y="137" text-anchor="middle">9 折</text>
+        <path class="wire" d="M350 132 H360"/>
+        <path class="tip" d="M370 132 L359 126 L359 138 Z"/>
+        <rect class="hot" x="372" y="110" width="60" height="44" rx="6"/>
+        <text class="mono bold t-hot" x="402" y="138" text-anchor="middle">405</text>
+        <text class="sm" x="240" y="188" text-anchor="middle">規則是放在 slice 裡的函式，順序不同，結果就不同</text>
+      </svg>
+      <figcaption>把每條規則寫成一個函式，放進 slice 裡依序套用。換規則、加規則都不用改套用的程式。</figcaption>
+    </figure>
+    <p>在 Go 裡，函式和整數、字串一樣是一種值，有自己的型別，可以存進變數、放進 slice 或 map、當成參數傳遞、當成回傳值：</p>
+    <pre class="code" data-src="chapters/04-functions/funcvalues.go#double,funcValues"><code>func double(n int) int { return n * 2 }
+
+func funcValues() {
+	f := double
+	fmt.Println(f(21))
+
+	square := func(n int) int { return n * n }
+	fmt.Println(square(9))
+
+	fmt.Printf("%T\n", square)
+
+	var g func(int) int
+	fmt.Println(g == nil)
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/04-functions#Example_funcValues"><code>42
+81
+func(int) int
+true</code></pre>
+    <ul class="notes">
+      <li><code>f := double</code>：沒有括號，代表「這個函式本身」，不是呼叫它。</li>
+      <li><code>func(n int) int { … }</code>：沒有名字的<strong>函式字面值</strong>（function literal），也叫匿名函式，可以寫在任何需要值的地方。</li>
+      <li>函式的型別由參數和回傳值決定：<code>func(int) int</code>。名字不是型別的一部分，所以 <code>double</code> 和 <code>square</code> 是同一個型別。</li>
+      <li>函式的零值是 <code>nil</code>，呼叫一個 nil 函式會 panic。函式只能和 <code>nil</code> 比較，兩個函式之間不能用 <code>==</code>（常見錯誤 6）。</li>
+    </ul>
+
+    <h3>函式型別</h3>
+    <pre class="code" data-src="chapters/04-functions/funcvalues.go#PriceRule,applyRules,funcTypes"><code>type PriceRule func(int) int
+
+func applyRules(price int, rules []PriceRule) int {
+	for _, rule := range rules {
+		price = rule(price)
+	}
+	return price
+}
+
+func funcTypes() {
+	memberDiscount := func(p int) int { return p * 9 / 10 }
+	coupon := func(p int) int { return p - 50 }
+	rules := []PriceRule{memberDiscount, coupon}
+	fmt.Println(applyRules(500, rules))
+	fmt.Println(applyRules(500, []PriceRule{coupon, memberDiscount}))
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/04-functions#Example_funcTypes"><code>400
+405</code></pre>
+    <p><code>type PriceRule func(int) int</code> 替函式的型別取了一個名字，讓程式更好讀。任何簽名相符的函式，不管有沒有名字，都可以當成 <code>PriceRule</code> 使用。<code>applyRules</code> 不知道也不在乎規則的內容，只負責依序呼叫；新增一條「滿千送百」的規則，只要多寫一個函式放進 slice。這種「把行為當成參數」的寫法，在 Java 要定義一個介面或用 lambda，在 Go 直接傳函式就好。</p>
+
+    <h3>標準庫裡的例子</h3>
+    <pre class="code" data-src="chapters/04-functions/funcvalues.go#bento,sortWithFunc"><code>type bento struct {
+	name  string
+	price int
+}
+
+func sortWithFunc() {
+	menu := []bento{{"雞腿", 90}, {"素食", 70}, {"排骨", 85}}
+	slices.SortFunc(menu, func(a, b bento) int {
+		return cmp.Compare(a.price, b.price)
+	})
+	fmt.Println(menu)
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/04-functions#Example_sortWithFunc"><code>[{素食 70} {排骨 85} {雞腿 90}]</code></pre>
+    <p><code>slices.SortFunc</code> 負責排序的演算法，「誰應該排前面」則由你傳進去的函式決定：回傳負數表示 a 在前，正數表示 b 在前，0 表示一樣。<code>cmp.Compare</code> 剛好就照這個規則比較兩個值。標準庫還有很多這種設計，例如 <code>strings.FieldsFunc</code>、<code>slices.IndexFunc</code>、<code>http.HandleFunc</code>。</p>
+  </section>
+
+  <section aria-labelledby="closures">
+    <h2 id="closures">5. closure</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 220" role="img" aria-label="counter 產生兩個 closure：next 的背包裡 n 累加到 4，other 有自己的背包，n 是 1">
+        <title>closure 帶著背包</title>
+        <rect class="soft" x="20" y="80" width="110" height="70" rx="10"/>
+        <text class="mono" x="75" y="121" text-anchor="middle">counter()</text>
+        <path class="wire" d="M130 100 H160 V64 H190 M130 130 H160 V176 H190"/>
+        <path class="tip" d="M202 64 L189 57 L189 71 Z"/>
+        <path class="tip" d="M202 176 L189 169 L189 183 Z"/>
+        <text class="sm" x="428" y="24" text-anchor="middle">呼叫結果</text>
+        <rect class="acc" x="206" y="36" width="120" height="56" rx="10"/>
+        <text class="mono bold" x="266" y="70" text-anchor="middle">next</text>
+        <rect class="hot" x="334" y="40" width="56" height="48" rx="12"/>
+        <text class="sm t-hot" x="362" y="58" text-anchor="middle">n</text>
+        <text class="bold" x="362" y="80" text-anchor="middle">4</text>
+        <text class="mono" x="434" y="70" text-anchor="middle">1 2 3 4</text>
+        <rect class="acc" x="206" y="148" width="120" height="56" rx="10"/>
+        <text class="mono bold" x="266" y="182" text-anchor="middle">other</text>
+        <rect class="hot" x="334" y="152" width="56" height="48" rx="12"/>
+        <text class="sm t-hot" x="362" y="170" text-anchor="middle">n</text>
+        <text class="bold" x="362" y="192" text-anchor="middle">1</text>
+        <text class="mono" x="434" y="182" text-anchor="middle">1</text>
+      </svg>
+      <figcaption>closure 會把用到的外層變數（n）一起帶走；每次呼叫 counter 都做出一個新的背包，互不影響。</figcaption>
+    </figure>
+    <p>函式字面值可以使用它外層的變數。函式加上它記住的這些變數，合起來叫做 <strong>closure</strong>。最經典的例子是一台叫號機：</p>
+    <pre class="code" data-src="chapters/04-functions/closures.go#counter,closureCounter"><code>func counter() func() int {
+	n := 0
+	return func() int {
+		n++
+		return n
+	}
+}
+
+func closureCounter() {
+	next := counter()
+	fmt.Println(next(), next(), next())
+	other := counter()
+	fmt.Println(other(), next())
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/04-functions#Example_closureCounter"><code>1 2 3
+1 4</code></pre>
+    <p><code>counter</code> 已經 return 了，照理說它的區域變數 <code>n</code> 應該消失；但回傳出去的函式還在用 <code>n</code>，所以 Go 會讓 <code>n</code> 活下來，直到沒有人用它為止（變數活在哪裡，由編譯器的逃逸分析決定，第 <a href="05-pointers.html">05 章</a>）。每呼叫一次 <code>counter</code>，就會建立一個新的 <code>n</code> 和一個新的 closure，所以 <code>next</code> 和 <code>other</code> 各數各的。</p>
+
+    <h3>抓住的是變數，不是值</h3>
+    <pre class="code" data-src="chapters/04-functions/closures.go#closureShared"><code>func closureShared() {
+	price := 85
+	show := func() { fmt.Println("目前價格：", price) }
+	show()
+	price = 90
+	show()
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/04-functions#Example_closureShared"><code>目前價格： 85
+目前價格： 90</code></pre>
+    <p>closure 和外面的程式碼共用同一個 <code>price</code> 變數，而不是在建立時拍一張快照。所以外面改了，closure 看得到；closure 裡面改了，外面也看得到。這一點和 Java 的 lambda 不同：Java 只允許抓「實質上不會再改」（effectively final）的變數。共用很方便，但要小心多個 closure 同時改同一個變數，尤其是在 goroutine 裡（第 <a href="17-sync.html">17 章</a>）。</p>
+
+    <h3>產生函式的函式</h3>
+    <pre class="code" data-src="chapters/04-functions/closures.go#greeter,closureFactory"><code>func greeter(prefix string) func(string) string {
+	return func(name string) string {
+		return prefix + name
+	}
+}
+
+func closureFactory() {
+	welcome := greeter("歡迎光臨，")
+	call := greeter("請取餐：")
+	fmt.Println(welcome("小明"))
+	fmt.Println(call("A07"))
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/04-functions#Example_closureFactory"><code>歡迎光臨，小明
+請取餐：A07</code></pre>
+    <p><code>greeter</code> 先收下 <code>prefix</code>，回傳一個只需要 <code>name</code> 的函式。這種「先固定一部分參數，之後再補齊」的寫法，可以拿來做設定好的規則（練習 4 的 <code>PercentOff</code>）、HTTP 的 middleware，或者測試用的假資料產生器。</p>
+    <aside class="callout">
+      <span class="title">迴圈裡的 closure</span>
+      <p>在 <code>for</code> 迴圈裡建立 closure，以前是 Go 最有名的陷阱：所有 closure 抓到同一個迴圈變數。Go 1.22 起每一圈都是新的變數，這個問題已經不存在，詳細說明見第 <a href="03-control-flow.html#loopvar">03 章的 3.8 節</a>。</p>
+    </aside>
+  </section>
+
+  <section aria-labelledby="recursion">
+    <h2 id="recursion">6. 遞迴</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 252" role="img" aria-label="binary(13) 呼叫 binary(6)，再呼叫 binary(3)，再呼叫 binary(1)；binary(1) 直接回答 1，結果一路往上組成 11、110、1101">
+        <title>往下呼叫，再一路回傳</title>
+        <text class="sm" x="16" y="22">往下呼叫</text>
+        <text class="sm" x="400" y="22" text-anchor="middle">一路回傳</text>
+        <rect class="soft" x="16" y="36" width="190" height="36" rx="6"/>
+        <rect class="soft" x="46" y="86" width="190" height="36" rx="6"/>
+        <rect class="soft" x="76" y="136" width="190" height="36" rx="6"/>
+        <rect class="acc" x="106" y="186" width="190" height="36" rx="6"/>
+        <text class="small mono" x="111" y="60" text-anchor="middle">binary(13)</text>
+        <text class="small mono" x="141" y="110" text-anchor="middle">binary(6)</text>
+        <text class="small mono" x="171" y="160" text-anchor="middle">binary(3)</text>
+        <text class="small mono bold" x="201" y="210" text-anchor="middle">binary(1)</text>
+        <path class="wire faint" d="M206 54 H360 M236 104 H360 M266 154 H360 M296 204 H360"/>
+        <text class="small mono t-hot" x="400" y="59" text-anchor="middle">"1101"</text>
+        <text class="small mono" x="400" y="109" text-anchor="middle">"110"</text>
+        <text class="small mono" x="400" y="159" text-anchor="middle">"11"</text>
+        <text class="small mono" x="400" y="209" text-anchor="middle">"1"</text>
+        <path class="wire acc-ln" d="M460 214 V60"/>
+        <path class="tip acc-tip" d="M460 46 L453 59 L467 59 Z"/>
+        <text class="sm" x="201" y="244" text-anchor="middle">n 小於 2：直接回答，不再往下</text>
+      </svg>
+      <figcaption>每一層把問題縮小一點再交給下一層，直到小到可以直接回答；答案再一層一層組回來。</figcaption>
+    </figure>
+    <p>函式可以呼叫自己，這叫遞迴。寫遞迴只要想清楚兩件事：<strong>終止條件</strong>（什麼時候可以直接回答），以及<strong>怎麼把問題縮小</strong>：</p>
+    <pre class="code" data-src="chapters/04-functions/recursion.go#binary,recursion"><code>func binary(n int) string {
+	if n &lt; 2 {
+		return strconv.Itoa(n)
+	}
+	return binary(n/2) + strconv.Itoa(n%2)
+}
+
+func recursion() {
+	fmt.Println(binary(13), binary(255), binary(0))
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/04-functions#Example_recursion"><code>1101 11111111 0</code></pre>
+    <p>13 的二進位，等於「13/2 = 6 的二進位」後面接上「13%2 = 1」。6 再交給下一層，直到剩下 0 或 1，這時答案就是它自己。每一層都在等下一層的答案，所以呼叫會一層層疊起來，答案再從最底層一路往上組回去。</p>
+    <p>遞迴特別適合處理本身就是巢狀結構的資料：資料夾裡有資料夾、分類底下有子分類、JSON 裡有 JSON。練習 7 用遞迴計算「湊出一個金額有幾種付法」，把問題拆成「用這種硬幣」和「不用這種硬幣」兩個比較小的問題。</p>
+
+    <section class="deep" aria-labelledby="stack-overflow">
+      <p class="tag">深入：第一次讀可以先跳過</p>
+      <h3 id="stack-overflow">6.1 忘了終止條件會怎樣</h3>
+      <p>每一層呼叫都要在堆疊上佔一點空間。Go 的堆疊一開始很小，不夠時會自動長大，所以正常的遞迴深度不用擔心；但它有上限，64 位元系統上是 1 GB。沒有終止條件的遞迴最後會撞到這個上限，程式直接當掉，而且這不是 panic，<code>recover</code> 也救不了：</p>
+      <p>把 <code>binary</code> 的 <code>if n &lt; 2</code> 那段拿掉，或寫一個永遠不停的 <code>func depth(n int) int { return depth(n+1) + 1 }</code>，執行的結果是（記憶體位址以 … 代替，後面幾千行的堆疊省略）：</p>
+      <pre class="out err"><code>runtime: goroutine stack exceeds 1000000000-byte limit
+runtime: sp=… stack=[…]
+fatal error: stack overflow</code></pre>
+      <p>另外，Go 編譯器不做尾端呼叫最佳化（tail call optimization），把遞迴改寫成尾端呼叫的形式也不會省下堆疊。遞迴深度可能很深（例如走訪一條上百萬個節點的鏈），就改用迴圈。</p>
+    </section>
+  </section>
+
+  <section aria-labelledby="defer">
+    <h2 id="defer">7. defer</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 256" role="img" aria-label="依序 defer 關店、關燈、收銀機結帳，疊成一疊；函式結束時從最上面開始拿，所以收銀機結帳最先執行，關店最後">
+        <title>defer 是一疊盤子</title>
+        <text class="sm" x="150" y="56">依序放上去</text>
+        <path class="wire" d="M140 36 V80"/>
+        <path class="tip" d="M140 90 L133 77 L147 77 Z"/>
+        <rect class="hot" x="60" y="96" width="160" height="36" rx="18"/>
+        <rect class="soft" x="60" y="138" width="160" height="36" rx="18"/>
+        <rect class="soft" x="60" y="180" width="160" height="36" rx="18"/>
+        <text class="t-hot" x="140" y="120" text-anchor="middle">收銀機結帳</text>
+        <text x="140" y="162" text-anchor="middle">關燈</text>
+        <text x="140" y="204" text-anchor="middle">關店</text>
+        <path class="wire" d="M228 114 H298 M228 156 H298 M228 198 H298"/>
+        <path class="tip" d="M310 114 L297 107 L297 121 Z"/>
+        <path class="tip" d="M310 156 L297 149 L297 163 Z"/>
+        <path class="tip" d="M310 198 L297 191 L297 205 Z"/>
+        <text class="bold t-hot" x="318" y="120">第 1 個執行</text>
+        <text x="318" y="162">第 2 個執行</text>
+        <text x="318" y="204">第 3 個執行</text>
+        <text class="sm" x="140" y="244" text-anchor="middle">函式要結束時才開始拿</text>
+      </svg>
+      <figcaption><code>defer</code> 像疊盤子：最後放上去的最先拿下來，而且等函式要結束時才開始拿。</figcaption>
+    </figure>
+    <p><code>defer</code> 把一個函式呼叫「登記」起來，等到外層函式結束前才執行。不管函式是正常 return、從中間某個 return 提早離開，還是發生 panic，登記過的 defer 都會執行：</p>
+    <pre class="code" data-src="chapters/04-functions/defer.go#deferOrder"><code>func deferOrder() {
+	defer fmt.Println("關店")
+	defer fmt.Println("關燈")
+	defer fmt.Println("收銀機結帳")
+	fmt.Println("營業中")
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/04-functions#Example_deferOrder"><code>營業中
+收銀機結帳
+關燈
+關店</code></pre>
+    <p>多個 defer 依照「後進先出」的順序執行，跟登記的順序相反。這個順序很合理：越晚取得的資源，通常依賴越早取得的資源，所以應該越早釋放。最常見的用法是「取得資源後馬上 defer 釋放」，例如：</p>
+    <ul class="notes">
+      <li>打開檔案後 <code>defer f.Close()</code>（之後的「檔案與 I/O」那一章）。</li>
+      <li>鎖上 mutex 後 <code>defer mu.Unlock()</code>（第 <a href="17-sync.html">17 章</a>）。</li>
+      <li>建立有逾時的 context 後 <code>defer cancel()</code>（第 <a href="18-context.html">18 章</a>）。</li>
+    </ul>
+    <p>把「打開」和「關閉」寫在相鄰的兩行，不管函式後面有多少個 return，都不會漏掉關閉。</p>
+
+    <h3>參數在登記時就算好</h3>
+    <pre class="code" data-src="chapters/04-functions/defer.go#deferArgs"><code>func deferArgs() {
+	x := 10
+	defer fmt.Println("參數：", x)
+	defer func() { fmt.Println("closure：", x) }()
+	x = 20
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/04-functions#Example_deferArgs"><code>closure： 20
+參數： 10</code></pre>
+    <p>這是 defer 最容易誤會的地方。<code>defer fmt.Println("參數：", x)</code> 在<strong>登記的那一刻</strong>就把參數算好了，當時 x 是 10，所以之後 x 改成 20 也沒影響。如果要讀「執行時」的值，就 defer 一個 closure，讓它在真正執行時才去讀變數。兩個 defer 的輸出順序也再次說明了後進先出。</p>
+
+    <h3>修改回傳值</h3>
+    <pre class="code" data-src="chapters/04-functions/defer.go#deferResult"><code>func deferResult() (total int) {
+	defer func() {
+		total += 10 // 外送費
+	}()
+	return 85
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/04-functions#Example_deferResult"><code>95</code></pre>
+    <p><code>return 85</code> 其實分成兩步：先把 85 放進回傳值 <code>total</code>，然後執行 defer，最後才真正離開函式。因為回傳值有名字，defer 裡的 closure 可以讀到並修改它，所以最後回傳 95。這個技巧最常用在錯誤處理：在 defer 裡替回傳的 error 加上更多資訊，或者像第 8 節那樣，把 panic 轉成 error。回傳值沒有名字時，defer 改不到它，練習 6 就是這個 bug。</p>
+
+    <h3>迴圈裡的 defer</h3>
+    <div class="compare">
+      <p class="label bad">錯誤寫法：資源要等整個函式結束才關閉</p>
+      <pre class="code bad" data-src="chapters/04-functions/defer.go#deferInLoop"><code>func deferInLoop() {
+	for _, name := range []string{"a.txt", "b.txt"} {
+		f := open(name)
+		defer closeRes(f)
+		fmt.Println("處理", f)
+	}
+	fmt.Println("迴圈結束")
+}</code></pre>
+      <p class="label">輸出</p>
+      <pre class="out" data-example="chapters/04-functions#Example_deferInLoop"><code>開啟 a.txt
+處理 a.txt
+開啟 b.txt
+處理 b.txt
+迴圈結束
+關閉 b.txt
+關閉 a.txt</code></pre>
+      <p class="label good">正確寫法：每一圈包成一個函式</p>
+      <pre class="code good" data-src="chapters/04-functions/defer.go#deferInLoopFixed"><code>func deferInLoopFixed() {
+	for _, name := range []string{"a.txt", "b.txt"} {
+		func() {
+			f := open(name)
+			defer closeRes(f)
+			fmt.Println("處理", f)
+		}()
+	}
+	fmt.Println("迴圈結束")
+}</code></pre>
+      <p class="label">輸出</p>
+      <pre class="out" data-example="chapters/04-functions#Example_deferInLoopFixed"><code>開啟 a.txt
+處理 a.txt
+關閉 a.txt
+開啟 b.txt
+處理 b.txt
+關閉 b.txt
+迴圈結束</code></pre>
+    </div>
+    <p>defer 屬於<strong>函式</strong>，不屬於迴圈的某一圈。在迴圈裡 defer，所有資源都要等函式結束才釋放：處理一萬個檔案，就會同時開著一萬個檔案，很快就撞到作業系統的上限。解法是把每一圈的工作包成一個函式（可以是上面的匿名函式，也可以抽成一個有名字的函式），defer 就會在每一圈結束時執行。練習 5 會讓你修這個 bug。</p>
+  </section>
+
+  <section aria-labelledby="panic">
+    <h2 id="panic">8. panic 與 recover</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 232" role="img" aria-label="take 發生 panic，往上傳到 safeTake；safeTake 的 defer 呼叫 recover 接住它，改成 error 回傳給 panicRecover。沒有 recover 的話，會一路傳到 main，整個程式當掉">
+        <title>panic 沿著呼叫往上傳</title>
+        <rect class="soft" x="16" y="20" width="200" height="44" rx="6"/>
+        <text class="small mono bold" x="116" y="47" text-anchor="middle">panicRecover</text>
+        <rect class="acc" x="16" y="84" width="200" height="50" rx="6"/>
+        <text class="small mono bold" x="116" y="104" text-anchor="middle">safeTake</text>
+        <text class="sm mono" x="116" y="124" text-anchor="middle">defer recover()</text>
+        <rect class="hot" x="16" y="154" width="200" height="50" rx="6"/>
+        <text class="small mono bold" x="116" y="174" text-anchor="middle">take</text>
+        <text class="sm mono t-hot" x="116" y="194" text-anchor="middle">panic(…)</text>
+        <path class="wire hot-ln" d="M216 179 H256 V116 H230"/>
+        <path class="tip hot-tip" d="M218 116 L231 109 L231 123 Z"/>
+        <text class="sm t-hot" x="266" y="154">panic 往上傳</text>
+        <path class="wire acc-ln" d="M216 100 H316 V42 H230"/>
+        <path class="tip acc-tip" d="M218 42 L231 35 L231 49 Z"/>
+        <text class="sm t-acc" x="326" y="76">接住，變成 error</text>
+        <text class="sm" x="16" y="226">沒有 recover 的話，會一路傳到 main，整個程式當掉</text>
+      </svg>
+      <figcaption>panic 會中斷目前的函式，沿著呼叫的路徑一層層往上，每一層的 defer 都會執行；遇到 recover 才停下來。</figcaption>
+    </figure>
+    <p><code>panic</code> 代表「程式遇到了不該發生的狀況，沒辦法繼續」。發生 panic 時，目前的函式立刻停止，開始一層層往上退出，途中執行每一層登記的 defer；退到最上層都沒有人處理，程式就印出錯誤和呼叫路徑，然後結束。第 01 章的整數除以 0、之後會看到的索引超出範圍、對 nil map 寫入，都是執行時自動產生的 panic；你也可以自己呼叫 <code>panic(值)</code>。</p>
+    <p>下面這支程式（<code>chapters/04-functions/crash</code>）第二次拿貨時拿太多，<code>take</code> 主動 panic：</p>
+    <pre class="code" data-src="chapters/04-functions/crash/main.go#take,main"><code>func take(stock, n int) int {
+	if n &gt; stock {
+		panic(fmt.Sprintf("庫存不足：剩 %d 個，要拿 %d 個", stock, n))
+	}
+	return stock - n
+}
+
+func main() {
+	defer fmt.Println("main 的 defer 還是會執行")
+	fmt.Println(take(5, 2))
+	fmt.Println(take(3, 10))
+	fmt.Println("這一行不會執行")
+}</code></pre>
+    <pre class="shell"><code>go run ./chapters/04-functions/crash</code></pre>
+    <p class="label">輸出（repo 所在的路徑以 … 代替）</p>
+    <pre class="out err"><code>3
+main 的 defer 還是會執行
+panic: 庫存不足：剩 3 個，要拿 10 個
+
+goroutine 1 [running]:
+main.take(...)
+	…/chapters/04-functions/crash/main.go:11
+main.main()
+	…/chapters/04-functions/crash/main.go:19 +0xf4
+exit status 2</code></pre>
+    <p>讀法：第一行是 panic 的訊息；下面是 panic 發生時的呼叫路徑（stack trace），由內往外列出每一層的函式和行號：<code>take</code> 在第 11 行 panic，它是被 <code>main</code> 在第 19 行呼叫的。<code>+0xf4</code> 這類數字是機器碼裡的位置，每台電腦可能不同，可以忽略。注意 main 的 defer 在程式當掉之前執行了。最後一行是 <code>go run</code> 告訴你程式的結束碼是 2。這支程式故意會當掉，所以它沒有測試。</p>
+
+    <h3>recover：在邊界把 panic 接住</h3>
+    <pre class="code" data-src="chapters/04-functions/panic.go#take,safeTake,panicRecover"><code>func take(stock, n int) int {
+	if n &gt; stock {
+		panic(fmt.Sprintf("庫存不足：剩 %d 個，要拿 %d 個", stock, n))
+	}
+	return stock - n
+}
+
+func safeTake(stock, n int) (left int, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("拿貨失敗：%v", r)
+		}
+	}()
+	return take(stock, n), nil
+}
+
+func panicRecover() {
+	fmt.Println(safeTake(5, 2))
+	fmt.Println(safeTake(3, 10))
+	fmt.Println("程式繼續執行")
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/04-functions#Example_panicRecover"><code>3 &lt;nil&gt;
+0 拿貨失敗：庫存不足：剩 3 個，要拿 10 個
+程式繼續執行</code></pre>
+    <p><code>recover()</code> 會停止正在進行的 panic，並回傳當初傳給 panic 的值；沒有 panic 時它回傳 nil。它有一個嚴格的限制：<strong>只有在 defer 的函式裡直接呼叫才有效</strong>。在一般的程式碼裡呼叫，或在 defer 函式呼叫的另一個函式裡呼叫，都只會得到 nil。所以 recover 幾乎都長成上面這個樣子：defer 一個 closure，裡面呼叫 recover，有值的話就修改具名的 error 回傳值（第 7 節的技巧）。</p>
+
+    <h3>什麼時候該 panic</h3>
+    <p>Go 的原則很清楚：<strong>可以預期的失敗用 error，程式寫錯了才 panic</strong>。</p>
+    <ul class="notes">
+      <li><strong>用 error</strong>：使用者輸入錯誤、檔案不存在、網路斷線、資料庫查不到資料。這些都是正常程式會遇到的狀況，呼叫端應該決定怎麼處理。</li>
+      <li><strong>可以 panic</strong>：違反了函式的前提，表示呼叫端的程式有 bug，例如傳入了不可能的參數、走到了「不可能走到」的分支。還有初始化時的設定錯誤：程式一啟動就發現設定不對，與其帶著錯誤繼續跑，不如立刻停下來。標準庫的 <code>regexp.MustCompile</code> 就是這種設計，<code>Must</code> 開頭的函式失敗時會 panic，適合用在套件層級、內容寫死的正規表示式。</li>
+      <li><strong>用 recover</strong>：只用在「邊界」，例如 HTTP 伺服器在每個請求外面包一層 recover，一個請求的 bug 不會拖垮整台伺服器（標準庫的 <code>net/http</code> 就這樣做）。不要用 panic 和 recover 模擬 Java 的 try-catch 來處理一般錯誤。</li>
+    </ul>
+    <p>還有一點：recover 只能接住<strong>同一個 goroutine</strong> 裡的 panic。別的 goroutine panic 了，整個程式一樣會當掉（第 <a href="14-goroutines.html">14 章</a>）。</p>
+  </section>
+
+  <section aria-labelledby="pitfalls">
+    <h2 id="pitfalls">常見錯誤</h2>
+    <h3 id="pit-ignore-err">1. 拿到 error 卻不檢查</h3>
+    <p>寫了 <code>n, _ := strconv.Atoi(s)</code> 或 <code>n, err := …</code> 之後沒有檢查 err，輸入錯誤時 n 是 0，程式會帶著錯誤的值繼續跑，問題在很遠的地方才浮現。每個 err 都要嘛處理、要嘛往上回傳。</p>
+
+    <h3 id="pit-defer-loop">2. 在迴圈裡 defer</h3>
+    <p>資源要等整個函式結束才釋放，見第 7 節的對照。把每一圈包成一個函式。</p>
+
+    <h3 id="pit-defer-args">3. 以為 defer 的參數最後才算</h3>
+    <p><code>defer fmt.Println(x)</code> 印出的是登記當下的 x。要讀最後的值，defer 一個 closure（第 7 節）。</p>
+
+    <h3 id="pit-unnamed">4. 想在 defer 裡改回傳值，但回傳值沒有名字</h3>
+    <p>defer 裡修改的只是一個區域變數，真正回傳的值不會變。要讓 defer 改得到，回傳值必須有名字（練習 6）。</p>
+
+    <h3 id="pit-recover">5. recover 沒有放在 defer 的函式裡</h3>
+    <p>在一般的程式碼裡呼叫 recover，或者在 defer 函式呼叫的另一個函式裡呼叫，都接不到 panic。recover 一定要在 defer 的函式裡<strong>直接</strong>呼叫。</p>
+
+    <h3 id="pit-func-eq">6. 比較兩個函式</h3>
+    <pre class="code bad" data-compile-error><code>package main
+
+import "fmt"
+
+func double(n int) int { return n * 2 }
+
+func main() {
+	f := double
+	g := double
+	fmt.Println(f == g)
+}</code></pre>
+    <p class="label">編譯錯誤</p>
+    <pre class="out err"><code>./main.go:10:14: invalid operation: f == g (func can only be compared to nil)</code></pre>
+    <p>函式只能和 nil 比較。需要分辨「是哪一條規則」時，替規則取名字或編號，比較名字，而不是比較函式本身。</p>
+
+    <h3 id="pit-panic-error">7. 用 panic 處理一般錯誤</h3>
+    <p>找不到資料就 panic、輸入格式錯了就 panic，呼叫端只能用 recover 接，程式很快就變得難以理解。可以預期的失敗回傳 error（第 8 節）。</p>
   </section>
 
   <section aria-labelledby="java">
@@ -140,23 +792,153 @@ func main() {
       <table class="vs">
         <thead><tr><th scope="col">主題</th><th scope="col">Java</th><th scope="col">Go</th></tr></thead>
         <tbody>
+          <tr><th scope="row">宣告</th><td class="java">一定屬於某個類別，<code>static int total(int qty)</code></td><td>可以獨立存在，<code>func total(qty int) int</code></td></tr>
           <tr><th scope="row">多個回傳值</th><td class="java">包成物件或 record</td><td>直接 <code>return a, b</code></td></tr>
-          <tr><th scope="row">錯誤</th><td class="java">丟例外</td><td>回傳 <code>error</code> 值</td></tr>
-          <tr><th scope="row">lambda</th><td class="java"><code>x -&gt; x * 2</code>，只能用 effectively final 的變數</td><td><code>func(x int) int { return x * 2 }</code>，可以修改抓到的變數</td></tr>
-          <tr><th scope="row">清理資源</th><td class="java">try-with-resources / <code>finally</code></td><td><code>defer</code></td></tr>
+          <tr><th scope="row">錯誤</th><td class="java">丟例外，用 try-catch 接</td><td>回傳 <code>error</code> 值，呼叫端用 <code>if err != nil</code> 檢查</td></tr>
           <tr><th scope="row">多載、預設參數</th><td class="java">有多載，沒有預設參數</td><td>兩個都沒有</td></tr>
-          <tr><th scope="row">可變參數</th><td class="java"><code>int... nums</code></td><td><code>nums ...int</code></td></tr>
+          <tr><th scope="row">可變參數</th><td class="java"><code>int... nums</code></td><td><code>nums ...int</code>，傳 slice 時要寫 <code>s...</code></td></tr>
+          <tr><th scope="row">函式當參數</th><td class="java">函式介面（<code>Function&lt;T,R&gt;</code>）加 lambda</td><td>函式本身就是值，型別寫成 <code>func(int) int</code></td></tr>
+          <tr><th scope="row">lambda 抓變數</th><td class="java">只能抓 effectively final 的變數</td><td>抓的是變數本身，可以讀也可以改</td></tr>
+          <tr><th scope="row">清理資源</th><td class="java">try-with-resources、<code>finally</code></td><td><code>defer</code>，在函式結束時執行</td></tr>
+          <tr><th scope="row">無法復原的錯誤</th><td class="java"><code>RuntimeException</code>、<code>Error</code></td><td><code>panic</code>，在邊界用 <code>recover</code> 接住</td></tr>
+          <tr><th scope="row">遞迴深度</th><td class="java">固定大小的執行緒堆疊，容易 <code>StackOverflowError</code></td><td>堆疊會自動長大，上限 1 GB（64 位元）</td></tr>
         </tbody>
       </table>
     </div>
   </section>
 
+  <section aria-labelledby="exercises">
+    <h2 id="exercises">練習</h2>
+    <p>題目在 <code>exercises/04-functions/exercises.go</code>。</p>
+    <pre class="shell"><code>go test ./exercises/04-functions/                    <span class="c"># 跑全部練習</span>
+go test ./exercises/04-functions/ -run TestMinMax    <span class="c"># 只跑一題</span>
+go test -tags solution ./exercises/04-functions/     <span class="c"># 跑參考解答</span></code></pre>
+    <ol class="exercises">
+      <li>
+        <h3><span class="level l1">入門</span>練習 1：最小與最大</h3>
+        <p>接受任意個整數，回傳最小值、最大值，以及有沒有拿到數字。沒有傳任何數字時回傳 <code>0, 0, false</code>。</p>
+        <pre class="code" data-src="exercises/04-functions/exercises.go#MinMax"><code>func MinMax(nums ...int) (lo, hi int, ok bool) {
+	// TODO: 實作
+	return 0, 0, false
+}</code></pre>
+        <p>例如 <code>MinMax(85, 90, 15)</code> 是 <code>15, 90, true</code>。測試：<code>TestMinMax</code>。</p>
+        <details><summary>提示</summary><p>先處理 <code>len(nums) == 0</code>。接著把 lo、hi 都設成第一個數字，再走過其他數字。Go 1.21 起有內建的 <code>min</code>、<code>max</code> 函式。回傳值故意取名 lo、hi 而不是 min、max，因為那樣會遮蔽內建函式（第 01 章常見錯誤 7）。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l1">入門</span>練習 2：數一數符合條件的</h3>
+        <p>回傳 nums 裡有幾個數字讓 <code>keep</code> 回傳 true。條件由呼叫端用函式傳進來。</p>
+        <pre class="code" data-src="exercises/04-functions/exercises.go#CountIf"><code>func CountIf(nums []int, keep func(int) bool) int {
+	// TODO: 實作
+	return 0
+}</code></pre>
+        <p>例如 <code>CountIf([]int{85, 90, 15}, func(p int) bool { return p &gt;= 85 })</code> 是 2。測試：<code>TestCountIf</code>。</p>
+        <details><summary>提示</summary><p><code>keep</code> 是一個函式，呼叫它就像呼叫一般函式：<code>keep(n)</code>。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l2">進階</span>練習 3：號碼牌機</h3>
+        <p>回傳兩個函式：<code>next</code> 每次發出下一張號碼牌（<code>"A001"</code>、<code>"A002"</code>……），<code>reset</code> 讓號碼重新從 001 開始。每台機器各自獨立。</p>
+        <pre class="code" data-src="exercises/04-functions/exercises.go#NewDispenser"><code>func NewDispenser(prefix string) (next func() string, reset func()) {
+	// TODO: 實作
+	return func() string { return "" }, func() {}
+}</code></pre>
+        <p>測試會建立兩台機器交錯使用，並確認 reset 只影響自己那一台。測試：<code>TestNewDispenser</code>。</p>
+        <details><summary>提示</summary><p>在 NewDispenser 裡宣告一個計數變數，讓兩個 closure 都使用它：next 加一後組字串，reset 把它設回 0。兩個 closure 抓到的是同一個變數（第 5 節）。格式用 <code>fmt.Sprintf("%s%03d", prefix, n)</code>。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l2">進階</span>練習 4：價格規則</h3>
+        <p><code>doc.go</code> 定義了函式型別 <code>type Rule func(price int) int</code>。寫兩個「產生規則」的函式和一個套用規則的函式：</p>
+        <pre class="code" data-src="exercises/04-functions/exercises.go#PercentOff,MinusOver,ApplyRules"><code>func PercentOff(pct int) Rule {
+	// TODO: 實作
+	return func(price int) int { return price }
+}
+
+func MinusOver(threshold, off int) Rule {
+	// TODO: 實作
+	return func(price int) int { return price }
+}
+
+func ApplyRules(price int, rules ...Rule) int {
+	// TODO: 實作
+	return 0
+}</code></pre>
+        <p><code>PercentOff(10)</code> 會把 1000 變成 900；<code>MinusOver(800, 100)</code> 會把 1000 變成 900，但 799 不變；<code>ApplyRules</code> 依序套用，結果小於 0 時回傳 0。測試：<code>TestPercentOff</code>、<code>TestMinusOver</code>、<code>TestApplyRules</code>。</p>
+        <details><summary>提示</summary><p>PercentOff 回傳一個 closure，記住 pct：<code>return func(price int) int { return price * (100 - pct) / 100 }</code>，先乘再除才不會被整數除法吃掉。ApplyRules 的 <code>rules</code> 是 <code>[]Rule</code>，和第 4 節的 applyRules 一樣用迴圈套用。</p></details>
+      </li>
+      <li>
+        <h3><span class="level fix">找錯</span>練習 5：依序處理資源</h3>
+        <p>每個資源應該「開啟、使用、關閉」做完一輪，才開下一個。測試卻發現所有資源都等到最後才關閉，順序還是反的。</p>
+        <pre class="code" data-src="exercises/04-functions/exercises.go#ProcessAll"><code>func ProcessAll(t *Tracker, names []string) {
+	for _, name := range names {
+		t.Open(name)
+		defer t.Close(name)
+		t.Use(name)
+	}
+}</code></pre>
+        <p><code>Tracker</code> 定義在 <code>doc.go</code>，它只負責把每個動作記下來。測試：<code>TestProcessAll</code>。</p>
+        <details><summary>提示</summary><p>defer 屬於哪個函式？第 7 節的最後一段。</p></details>
+      </li>
+      <li>
+        <h3><span class="level fix">找錯</span>練習 6：安全的除法</h3>
+        <p>b 是 0 時應該回傳 0 和錯誤，而且程式不能當掉。它確實沒有當掉，但回傳的錯誤是 nil。</p>
+        <pre class="code" data-src="exercises/04-functions/exercises.go#SafeDiv"><code>func SafeDiv(a, b int) (int, error) {
+	var err error
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("除法失敗：%v", r)
+		}
+	}()
+	return a / b, err
+}</code></pre>
+        <p>錯誤訊息要是 <code>除法失敗：runtime error: integer divide by zero</code>。測試：<code>TestSafeDiv</code>。</p>
+        <details><summary>提示</summary><p>panic 發生時，<code>return a / b, err</code> 根本沒有執行完，函式回傳的是兩個回傳值的零值。defer 改了區域變數 err，但那不是回傳值。怎麼讓 defer 改得到回傳值？第 7 節「修改回傳值」。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l3">挑戰</span>練習 7：有幾種付法</h3>
+        <p>用 coins 裡的面額湊出 amount 元，每種面額可以用任意多個，不計順序，有幾種方法？</p>
+        <pre class="code" data-src="exercises/04-functions/exercises.go#PayWays"><code>func PayWays(amount int, coins []int) int {
+	// TODO: 實作
+	return 0
+}</code></pre>
+        <p>例如用 1、5、10 元湊 10 元有 4 種：一個 10、兩個 5、一個 5 加五個 1、十個 1。用 1、5、10、50 元湊 100 元有 158 種。測試：<code>TestPayWays</code>。</p>
+        <details><summary>提示</summary><p>先寫終止條件：amount 是 0 時有 1 種；amount 小於 0 或沒有面額可用時是 0 種。其他情況，所有付法可以分成兩群：至少用了一個 <code>coins[0]</code> 的（等於「湊 amount - coins[0]，面額不變」），和完全不用 <code>coins[0]</code> 的（等於「湊 amount，面額只剩 <code>coins[1:]</code>」）。答案是兩群相加。</p></details>
+      </li>
+    </ol>
+    <p><a href="https://github.com/xinqilin/GO-Playground/blob/main/exercises/04-functions/solution.go">參考解答</a>：先自己寫完再看。測試通過的寫法都是對的。</p>
+  </section>
+
+  <section aria-labelledby="recap">
+    <h2 id="recap">重點回顧</h2>
+    <ul class="recap">
+      <li>參數一律傳值，函式改參數不會影響呼叫端；沒有預設參數，也沒有多載。</li>
+      <li>可能失敗的函式把 error 放在最後一個回傳值，呼叫完立刻檢查 <code>err != nil</code>。</li>
+      <li>接收回傳值時個數要對上，不要的值用 <code>_</code>。</li>
+      <li>具名回傳值是零值起跳；naked return 只用在短函式。</li>
+      <li>可變參數在函式裡是 slice，只能放最後；呼叫時用 <code>s...</code> 展開現成的 slice。</li>
+      <li>函式是值，型別由參數和回傳值決定；只能和 nil 比較。</li>
+      <li>closure 抓住的是變數本身，每次呼叫外層函式都會產生一份新的狀態。</li>
+      <li>遞迴要有終止條件；Go 的堆疊會長大，但上限是 1 GB，而且沒有尾端呼叫最佳化。</li>
+      <li>defer 在函式結束前執行，後進先出，參數在登記時就算好；在迴圈裡 defer 要包成函式。</li>
+      <li>defer 搭配具名回傳值，可以在函式結束前修改回傳值。</li>
+      <li>panic 用在程式寫錯和無法繼續的狀況，可預期的失敗回傳 error；recover 只在 defer 的函式裡直接呼叫才有效，只用在邊界。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="further">
+    <h2 id="further">延伸閱讀</h2>
+    <ul class="notes">
+      <li>Go 語言規格：<a href="https://go.dev/ref/spec#Function_declarations">Function declarations</a>、<a href="https://go.dev/ref/spec#Function_types">Function types</a>、<a href="https://go.dev/ref/spec#Function_literals">Function literals</a>、<a href="https://go.dev/ref/spec#Calls">Calls</a>、<a href="https://go.dev/ref/spec#Passing_arguments_to_..._parameters">Passing arguments to ... parameters</a>、<a href="https://go.dev/ref/spec#Return_statements">Return statements</a>。</li>
+      <li>defer 與 panic：規格的 <a href="https://go.dev/ref/spec#Defer_statements">Defer statements</a>、<a href="https://go.dev/ref/spec#Handling_panics">Handling panics</a>，以及 Go Blog 的 <a href="https://go.dev/blog/defer-panic-and-recover">Defer, Panic, and Recover</a>。</li>
+      <li>內建函式：<a href="https://pkg.go.dev/builtin#panic">panic</a>、<a href="https://pkg.go.dev/builtin#recover">recover</a>。</li>
+    </ul>
+  </section>
+
   <section aria-labelledby="run">
     <h2 id="run">動手跑</h2>
     <p class="label">在 repo 根目錄</p>
-    <pre class="shell"><code>go run ./chapters/04-functions
-go test ./chapters/04-functions</code></pre>
-    <p><a href="https://github.com/xinqilin/GO-Playground/tree/main/chapters/04-functions">在 GitHub 看完整程式碼</a></p>
+    <pre class="shell"><code>go run ./chapters/04-functions                  <span class="c"># 執行本章所有示範</span>
+go test ./chapters/04-functions                 <span class="c"># 驗證頁面上的每一段輸出</span>
+go test ./exercises/04-functions/               <span class="c"># 做練習</span></code></pre>
+    <p><a href="https://github.com/xinqilin/GO-Playground/tree/main/chapters/04-functions">在 GitHub 看本章完整程式碼</a>，或看<a href="https://github.com/xinqilin/GO-Playground/tree/main/exercises/04-functions">練習題</a>。</p>
   </section>
 </main>
 
