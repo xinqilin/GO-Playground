@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>字串與 rune｜Go 圖解手冊</title>
-<meta name="description" content="Go 字串是 UTF-8 的 byte 序列：len 與字數的差別、索引與 range 的差別，以及用 strings.Builder 組字串。">
+<meta name="description" content="Go 的字串：唯讀的 byte 序列、UTF-8 與 rune、range 字串、string 與 []byte、[]rune 的轉換成本、strings 套件、strings.Builder、strconv、unicode，以及中文的顯示寬度與對齊，附可執行的練習題。">
 <link rel="stylesheet" href="assets/style.css">
 </head>
 <body>
@@ -13,153 +13,707 @@
   <span class="count">08 / 24</span>
 </header>
 
-<main class="page">
+<main class="page long">
   <header class="hero">
     <div class="num" aria-hidden="true">08</div>
     <p class="eyebrow">Part 1 · 基礎 · 第 08 章</p>
     <h1>字串與 rune</h1>
-    <p class="analogy">字串是一排唯讀的 byte；一個中文字要 3 個 byte 才裝得下。</p>
+    <p class="analogy">字串是一排封好的 byte，不能拆開改。英文字一個 byte 就裝得下，中文字要用三個 byte 才裝得下一個字。</p>
   </header>
 
-  <section aria-labelledby="look">
-    <h2 id="look">看圖</h2>
-    <div class="figs">
-      <figure class="fig">
-        <svg viewBox="0 0 480 214" role="img" aria-label="Go語言 在記憶體裡是 8 個 byte：G 和 o 各 1 個，語和言各 3 個，所以 len 是 8，但只有 4 個字">
-          <title>Go語言 有幾個 byte</title>
-          <text class="mono" x="26" y="34">len(s) == 8</text>
-          <text class="mono t-acc" x="26" y="62">utf8.RuneCountInString(s) == 4</text>
-          <rect class="soft" x="26" y="96" width="50" height="46" rx="4"/>
-          <rect class="soft" x="80" y="96" width="50" height="46" rx="4"/>
-          <rect class="acc" x="134" y="96" width="50" height="46" rx="4"/>
-          <rect class="acc" x="188" y="96" width="50" height="46" rx="4"/>
-          <rect class="acc" x="242" y="96" width="50" height="46" rx="4"/>
-          <rect class="acc" x="296" y="96" width="50" height="46" rx="4"/>
-          <rect class="acc" x="350" y="96" width="50" height="46" rx="4"/>
-          <rect class="acc" x="404" y="96" width="50" height="46" rx="4"/>
-          <text class="small mono" x="51" y="124" text-anchor="middle">47</text>
-          <text class="small mono" x="105" y="124" text-anchor="middle">6F</text>
-          <text class="small mono" x="159" y="124" text-anchor="middle">E8</text>
-          <text class="small mono" x="213" y="124" text-anchor="middle">AA</text>
-          <text class="small mono" x="267" y="124" text-anchor="middle">9E</text>
-          <text class="small mono" x="321" y="124" text-anchor="middle">E8</text>
-          <text class="small mono" x="375" y="124" text-anchor="middle">A8</text>
-          <text class="small mono" x="429" y="124" text-anchor="middle">80</text>
-          <text class="sm mono" x="51" y="88" text-anchor="middle">0</text>
-          <text class="sm mono" x="105" y="88" text-anchor="middle">1</text>
-          <text class="sm mono" x="159" y="88" text-anchor="middle">2</text>
-          <text class="sm mono" x="213" y="88" text-anchor="middle">3</text>
-          <text class="sm mono" x="267" y="88" text-anchor="middle">4</text>
-          <text class="sm mono" x="321" y="88" text-anchor="middle">5</text>
-          <text class="sm mono" x="375" y="88" text-anchor="middle">6</text>
-          <text class="sm mono" x="429" y="88" text-anchor="middle">7</text>
-          <path class="wire" d="M28 150 V158 H74 V150 M82 150 V158 H128 V150"/>
-          <path class="wire acc-ln" d="M136 150 V158 H290 V150 M298 150 V158 H452 V150"/>
-          <text class="lg" x="51" y="198" text-anchor="middle">G</text>
-          <text class="lg" x="105" y="198" text-anchor="middle">o</text>
-          <text class="lg t-acc" x="213" y="198" text-anchor="middle">語</text>
-          <text class="lg t-acc" x="375" y="198" text-anchor="middle">言</text>
-        </svg>
-        <figcaption>字串存的是 UTF-8 的 byte：英文字 1 個 byte，中文字 3 個。所以 <code>len</code> 是 8，但只有 4 個字。</figcaption>
-      </figure>
+  <nav class="toc-inline" aria-labelledby="toc-title">
+    <p class="label" id="toc-title">本章內容</p>
+    <ol>
+      <li><a href="#goals">本章你會學到</a></li>
+      <li><a href="#basics">字串的基本操作</a></li>
+      <li><a href="#utf8">UTF-8：byte 與 rune</a></li>
+      <li><a href="#range">range 字串</a></li>
+      <li><a href="#convert">轉換</a></li>
+      <li><a href="#strings">strings 套件</a></li>
+      <li><a href="#builder">strings.Builder</a></li>
+      <li><a href="#strconv">strconv 與 unicode</a></li>
+      <li><a href="#width">中文的顯示寬度</a></li>
+      <li><a href="#pitfalls">常見錯誤</a></li>
+      <li><a href="#java">從 Java 來的你</a></li>
+      <li><a href="#exercises">練習</a></li>
+      <li><a href="#recap">重點回顧</a></li>
+      <li><a href="#further">延伸閱讀</a></li>
+    </ol>
+  </nav>
 
-      <figure class="fig">
-        <svg viewBox="0 0 480 212" role="img" aria-label="s[2] 只拿到語的第一個 byte 232；range 一次拿一整個字，i 是 2 時 r 是語，i 是 5 時 r 是言">
-          <title>索引拿 byte，range 拿整個字</title>
-          <text class="mono bold t-hot" x="159" y="30" text-anchor="middle">s[2]</text>
-          <text class="small t-hot" x="190" y="30">= 232，只是半個字</text>
-          <path class="wire hot-ln" d="M159 38 V70"/>
-          <path class="tip hot-tip" d="M159 80 L152 67 L166 67 Z"/>
-          <rect class="soft" x="26" y="86" width="50" height="42" rx="4"/>
-          <rect class="soft" x="80" y="86" width="50" height="42" rx="4"/>
-          <rect class="hot" x="134" y="86" width="50" height="42" rx="4"/>
-          <rect class="soft" x="188" y="86" width="50" height="42" rx="4"/>
-          <rect class="soft" x="242" y="86" width="50" height="42" rx="4"/>
-          <rect class="soft" x="296" y="86" width="50" height="42" rx="4"/>
-          <rect class="soft" x="350" y="86" width="50" height="42" rx="4"/>
-          <rect class="soft" x="404" y="86" width="50" height="42" rx="4"/>
-          <text class="small mono" x="51" y="112" text-anchor="middle">47</text>
-          <text class="small mono" x="105" y="112" text-anchor="middle">6F</text>
-          <text class="small mono" x="159" y="112" text-anchor="middle">E8</text>
-          <text class="small mono" x="213" y="112" text-anchor="middle">AA</text>
-          <text class="small mono" x="267" y="112" text-anchor="middle">9E</text>
-          <text class="small mono" x="321" y="112" text-anchor="middle">E8</text>
-          <text class="small mono" x="375" y="112" text-anchor="middle">A8</text>
-          <text class="small mono" x="429" y="112" text-anchor="middle">80</text>
-          <path class="wire acc-ln" d="M136 136 V144 H290 V136 M298 136 V144 H452 V136"/>
-          <text class="small mono t-acc" x="213" y="166" text-anchor="middle">i=2  r='語'</text>
-          <text class="small mono t-acc" x="375" y="166" text-anchor="middle">i=5  r='言'</text>
-          <text class="small" x="240" y="200" text-anchor="middle">range 一次拿一個完整的字（rune）</text>
-        </svg>
-        <figcaption><code>s[i]</code> 拿到的是一個 byte，可能只是半個字；<code>range</code> 一次拿一整個字，<code>i</code> 是它的 byte 位置。</figcaption>
-      </figure>
-
-      <figure class="fig">
-        <svg viewBox="0 0 480 252" role="img" aria-label="用加號串接，每一步都產生新的字串並複製；strings.Builder 在同一塊空間往後寫，最後才變成字串">
-          <title>組字串：加號與 Builder</title>
-          <path class="wire faint" d="M240 12 V240"/>
-          <text class="small mono" x="120" y="30" text-anchor="middle">s += "Go"</text>
-          <rect class="soft dash" x="40" y="50" width="48" height="40" rx="4"/>
-          <rect class="soft dash" x="40" y="104" width="84" height="40" rx="4"/>
-          <rect class="soft" x="40" y="158" width="120" height="40" rx="4"/>
-          <text class="mono" x="64" y="76" text-anchor="middle">Go</text>
-          <text class="mono" x="82" y="130" text-anchor="middle">GoGo</text>
-          <text class="mono" x="100" y="184" text-anchor="middle">GoGoGo</text>
-          <text class="sm t-hot" x="120" y="236" text-anchor="middle">每一步都配置新字串並複製</text>
-
-          <text class="small mono" x="360" y="30" text-anchor="middle">strings.Builder</text>
-          <text class="sm mono" x="360" y="64" text-anchor="middle">b.WriteString("Go")</text>
-          <rect class="acc" x="262" y="80" width="196" height="56" rx="6"/>
-          <path class="wire faint" d="M327 84 V132 M392 84 V132"/>
-          <text class="mono" x="294" y="114" text-anchor="middle">Go</text>
-          <text class="mono" x="360" y="114" text-anchor="middle">Go</text>
-          <text class="mono" x="425" y="114" text-anchor="middle">Go</text>
-          <path class="wire" d="M360 140 V172"/>
-          <path class="tip" d="M360 184 L353 171 L367 171 Z"/>
-          <text class="sm mono" x="370" y="164">b.String()</text>
-          <text class="mono bold" x="360" y="208" text-anchor="middle">GoGoGo</text>
-          <text class="sm t-acc" x="360" y="236" text-anchor="middle">同一塊空間往後寫</text>
-        </svg>
-        <figcaption>字串不能修改，用 <code>+</code> 串接每次都要複製一份新的；在迴圈裡組字串，用 <code>strings.Builder</code>。</figcaption>
-      </figure>
-    </div>
+  <section aria-labelledby="goals">
+    <h2 id="goals">本章你會學到</h2>
+    <ul class="notes">
+      <li>字串是唯讀的 byte 序列：len、索引、切片、比較，以及兩種字串字面值。</li>
+      <li>UTF-8 怎麼存中文，byte 和 rune 的差別，以及切字串時可能把字切壞。</li>
+      <li>用 range 一次拿一個完整的字，以及遇到不合法的 byte 時會怎樣。</li>
+      <li>字串和 <code>[]byte</code>、<code>[]rune</code> 互轉的成本，以及 <code>string(n)</code> 的陷阱。</li>
+      <li>strings 套件的常用函式，以及用 <code>strings.Builder</code> 有效率地組字串。</li>
+      <li>用 strconv 在數字和字串之間轉換，用 unicode 判斷字元的種類。</li>
+      <li>計算中文的顯示寬度，讓表格在終端機上對齊。</li>
+    </ul>
+    <p>先備：<a href="02-input-output.html">02 輸入與輸出</a>（fmt 動詞）、<a href="06-arrays-slices.html">06 陣列與切片</a>（slice header、切片運算式）。</p>
   </section>
 
-  <section aria-labelledby="code">
-    <h2 id="code">最小範例</h2>
-    <pre class="code"><code>func main() {
-	s := "Go語言"
-	fmt.Println(len(s), utf8.RuneCountInString(s))
-	fmt.Println(s[2]) <span class="c">// 一個 byte，不是「語」</span>
-	for i, r := range s {
-		fmt.Println(i, string(r))
-	}
-	var b strings.Builder
-	for range 3 {
-		b.WriteString("Go")
-	}
-	fmt.Println(b.String())
+  <section aria-labelledby="basics">
+    <h2 id="basics">1. 字串的基本操作</h2>
+    <pre class="code" data-src="chapters/08-strings-runes/basics.go#stringBasics"><code>func stringBasics() {
+	s := "Hello, Go"
+	fmt.Println(len(s), s[0], string(s[0])) // 索引拿到的是 byte
+	fmt.Println(s[7:], s[:5])               // 切片的結果還是字串
+	greeting := s[:5] + "，便當店"
+	fmt.Println(greeting)
+	fmt.Println("排骨" == "排骨", "apple" &lt; "banana", "Zoo" &lt; "apple")
 }</code></pre>
     <p class="label">輸出</p>
-    <pre class="out"><code>8 4
-232
-0 G
-1 o
-2 語
-5 言
-GoGoGo</code></pre>
+    <pre class="out" data-example="chapters/08-strings-runes#Example_stringBasics"><code>9 72 H
+Go Hello
+Hello，便當店
+true true true</code></pre>
+    <ul class="notes">
+      <li><code>len(s)</code> 是 byte 的個數，不是字數（第 2 節）。</li>
+      <li><code>s[i]</code> 拿到的是一個 <code>byte</code>（也就是 uint8），所以印出來是 72，不是 H。要看成字元得轉換：<code>string(s[0])</code>。</li>
+      <li><code>s[low:high]</code> 和 slice 一樣，結果還是字串，而且和原本的字串共用同一塊記憶體，不會複製。</li>
+      <li><code>+</code> 串接、<code>==</code> 比較內容、<code>&lt;</code> 依照 byte 逐個比較。大寫字母的編碼比小寫小，所以 <code>"Zoo" &lt; "apple"</code>。</li>
+    </ul>
+
+    <h3>字串不能修改</h3>
+    <pre class="code bad" data-compile-error><code>package main
+
+import "fmt"
+
+func main() {
+	s := "Go語言"
+	s[0] = 'g'
+	fmt.Println(s)
+}</code></pre>
+    <p class="label">編譯錯誤</p>
+    <pre class="out err"><code>./main.go:7:2: cannot assign to s[0] (neither addressable nor a map index expression)</code></pre>
+    <p>字串一旦建立就不能修改（immutable）。<code>s = "go語言"</code> 是讓 s 指向另一個字串，原本的字串沒有變。不能修改的好處是字串可以安全地共用：切片不必複製、傳給函式不必複製、多個 goroutine 同時讀也沒問題。要「修改」字串，就轉成 <code>[]byte</code> 或 <code>[]rune</code> 改完再轉回來（第 4 節），或用 strings 套件產生新的字串（第 5 節）。</p>
+
+    <h3>兩種字串字面值</h3>
+    <pre class="code" data-src="chapters/08-strings-runes/basics.go#literals"><code>func literals() {
+	fmt.Println("第一行\n第二行")
+	fmt.Println("價格\t85")
+	fmt.Println(`C:\menu\new.txt`)
+	query := `SELECT name, price
+FROM menu
+WHERE price &lt; 100`
+	fmt.Println(query)
+	fmt.Println("\u8a9e\u8a00")
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/08-strings-runes#Example_literals"><code>第一行
+第二行
+價格	85
+C:\menu\new.txt
+SELECT name, price
+FROM menu
+WHERE price &lt; 100
+語言</code></pre>
+    <p>雙引號的字串會處理跳脫字元：<code>\n</code> 換行、<code>\t</code> tab、<code>\"</code> 雙引號、<code>\\</code> 反斜線、<code>語</code> 用碼位寫一個字。反引號的字串（raw string）照原樣保留每個字元，反斜線就是反斜線，也可以直接跨行，適合 Windows 路徑、正規表示式、SQL、JSON 範本。反引號字串裡唯一不能出現的是反引號本身。</p>
   </section>
 
-  <section aria-labelledby="notes">
-    <h2 id="notes">工程師筆記</h2>
+  <section aria-labelledby="utf8">
+    <h2 id="utf8">2. UTF-8：byte 與 rune</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 214" role="img" aria-label="Go語言 在記憶體裡是 8 個 byte：G 和 o 各 1 個，語和言各 3 個，所以 len 是 8，但只有 4 個字">
+        <title>Go語言 有幾個 byte</title>
+        <text class="mono" x="26" y="34">len(s) == 8</text>
+        <text class="mono t-acc" x="26" y="62">utf8.RuneCountInString(s) == 4</text>
+        <rect class="soft" x="26" y="96" width="50" height="46" rx="4"/>
+        <rect class="soft" x="80" y="96" width="50" height="46" rx="4"/>
+        <rect class="acc" x="134" y="96" width="50" height="46" rx="4"/>
+        <rect class="acc" x="188" y="96" width="50" height="46" rx="4"/>
+        <rect class="acc" x="242" y="96" width="50" height="46" rx="4"/>
+        <rect class="acc" x="296" y="96" width="50" height="46" rx="4"/>
+        <rect class="acc" x="350" y="96" width="50" height="46" rx="4"/>
+        <rect class="acc" x="404" y="96" width="50" height="46" rx="4"/>
+        <text class="small mono" x="51" y="124" text-anchor="middle">47</text>
+        <text class="small mono" x="105" y="124" text-anchor="middle">6F</text>
+        <text class="small mono" x="159" y="124" text-anchor="middle">E8</text>
+        <text class="small mono" x="213" y="124" text-anchor="middle">AA</text>
+        <text class="small mono" x="267" y="124" text-anchor="middle">9E</text>
+        <text class="small mono" x="321" y="124" text-anchor="middle">E8</text>
+        <text class="small mono" x="375" y="124" text-anchor="middle">A8</text>
+        <text class="small mono" x="429" y="124" text-anchor="middle">80</text>
+        <text class="sm mono" x="51" y="88" text-anchor="middle">0</text>
+        <text class="sm mono" x="105" y="88" text-anchor="middle">1</text>
+        <text class="sm mono" x="159" y="88" text-anchor="middle">2</text>
+        <text class="sm mono" x="213" y="88" text-anchor="middle">3</text>
+        <text class="sm mono" x="267" y="88" text-anchor="middle">4</text>
+        <text class="sm mono" x="321" y="88" text-anchor="middle">5</text>
+        <text class="sm mono" x="375" y="88" text-anchor="middle">6</text>
+        <text class="sm mono" x="429" y="88" text-anchor="middle">7</text>
+        <path class="wire" d="M28 150 V158 H74 V150 M82 150 V158 H128 V150"/>
+        <path class="wire acc-ln" d="M136 150 V158 H290 V150 M298 150 V158 H452 V150"/>
+        <text class="lg" x="51" y="198" text-anchor="middle">G</text>
+        <text class="lg" x="105" y="198" text-anchor="middle">o</text>
+        <text class="lg t-acc" x="213" y="198" text-anchor="middle">語</text>
+        <text class="lg t-acc" x="375" y="198" text-anchor="middle">言</text>
+      </svg>
+      <figcaption>字串存的是 UTF-8 的 byte：英文字 1 個 byte，中文字 3 個。所以 <code>len</code> 是 8，但只有 4 個字。</figcaption>
+    </figure>
+    <p>電腦只認得數字。Unicode 替世界上每個字元編了一個號碼，叫做<strong>碼位</strong>（code point）：G 是 U+0047，「語」是 U+8A9E。<strong>UTF-8</strong> 則規定怎麼把碼位存成 byte：英文字母和數字用 1 個 byte，常用的中文字用 3 個 byte，有些罕用字和符號用 4 個。Go 的原始碼規定用 UTF-8 存，字串字面值自然也是 UTF-8。</p>
+    <pre class="code" data-src="chapters/08-strings-runes/utf8.go#bytesVsRunes"><code>func bytesVsRunes() {
+	s := "Go語言"
+	fmt.Println(len(s), utf8.RuneCountInString(s))
+	fmt.Println(s[0], s[2]) // 71 是 'G'；232 只是「語」的第一個 byte
+	fmt.Printf("% x\n", s)  // 每個 byte 用十六進位印出來
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/08-strings-runes#Example_bytesVsRunes"><code>8 4
+71 232
+47 6f e8 aa 9e e8 a8 80</code></pre>
+    <p><code>% x</code> 把每個 byte 用十六進位印出，中間用空白隔開，對照上圖就是 <code>47 6f</code>（G、o）和兩組 3 個 byte（語、言）。要知道有幾個「字」，用 <code>utf8.RuneCountInString</code>，它要從頭走一遍字串才算得出來，不像 len 是直接讀出來的。</p>
+
+    <h3>rune</h3>
+    <pre class="code" data-src="chapters/08-strings-runes/utf8.go#runeLiteral"><code>func runeLiteral() {
+	r := '語'
+	fmt.Println(r)
+	fmt.Printf("%c %U %T\n", r, r, r)
+	fmt.Println(utf8.RuneLen(r), utf8.RuneLen('G'))
+	fmt.Println(string(r) + "言")
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/08-strings-runes#Example_runeLiteral"><code>35486
+語 U+8A9E int32
+3 1
+語言</code></pre>
+    <p>單引號寫的是 <strong>rune 字面值</strong>，代表一個碼位。<code>rune</code> 是 <code>int32</code> 的別名，所以直接印出來是數字 35486（也就是 0x8A9E），<code>%T</code> 印出 int32。要印成字元用 <code>%c</code>，印成 U+ 的寫法用 <code>%U</code>。<code>utf8.RuneLen</code> 告訴你一個 rune 編成 UTF-8 要幾個 byte。注意單引號和雙引號不同：<code>'語'</code> 是一個 rune，<code>"語"</code> 是一個 3 byte 的字串。</p>
+
+    <h3>把字切壞</h3>
+    <pre class="code" data-src="chapters/08-strings-runes/utf8.go#cutInMiddle"><code>func cutInMiddle() {
+	s := "Go語言"
+	fmt.Printf("%q %v\n", s[:3], utf8.ValidString(s[:3]))
+	fmt.Printf("%q %v\n", s[:5], utf8.ValidString(s[:5]))
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/08-strings-runes#Example_cutInMiddle"><code>"Go\xe8" false
+"Go語" true</code></pre>
+    <p>切片運算式用的是 byte 位置。<code>s[:3]</code> 只拿到「語」3 個 byte 中的第一個，結果是不合法的 UTF-8，<code>%q</code> 把那個 byte 印成 <code>\xe8</code>，印到終端機上就是亂碼。Go 的字串可以裝任何 byte，不保證內容是合法的 UTF-8；從檔案或網路讀進來的資料，需要時用 <code>utf8.ValidString</code> 檢查。依照「字數」截斷字串要先轉成 <code>[]rune</code>，練習 4 就是這個 bug。</p>
+  </section>
+
+  <section aria-labelledby="range">
+    <h2 id="range">3. range 字串</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 212" role="img" aria-label="s[2] 只拿到語的第一個 byte 232；range 一次拿一整個字，i 是 2 時 r 是語，i 是 5 時 r 是言">
+        <title>索引拿 byte，range 拿整個字</title>
+        <text class="mono bold t-hot" x="159" y="30" text-anchor="middle">s[2]</text>
+        <text class="small t-hot" x="190" y="30">= 232，只是半個字</text>
+        <path class="wire hot-ln" d="M159 38 V70"/>
+        <path class="tip hot-tip" d="M159 80 L152 67 L166 67 Z"/>
+        <rect class="soft" x="26" y="86" width="50" height="42" rx="4"/>
+        <rect class="soft" x="80" y="86" width="50" height="42" rx="4"/>
+        <rect class="hot" x="134" y="86" width="50" height="42" rx="4"/>
+        <rect class="soft" x="188" y="86" width="50" height="42" rx="4"/>
+        <rect class="soft" x="242" y="86" width="50" height="42" rx="4"/>
+        <rect class="soft" x="296" y="86" width="50" height="42" rx="4"/>
+        <rect class="soft" x="350" y="86" width="50" height="42" rx="4"/>
+        <rect class="soft" x="404" y="86" width="50" height="42" rx="4"/>
+        <text class="small mono" x="51" y="112" text-anchor="middle">47</text>
+        <text class="small mono" x="105" y="112" text-anchor="middle">6F</text>
+        <text class="small mono" x="159" y="112" text-anchor="middle">E8</text>
+        <text class="small mono" x="213" y="112" text-anchor="middle">AA</text>
+        <text class="small mono" x="267" y="112" text-anchor="middle">9E</text>
+        <text class="small mono" x="321" y="112" text-anchor="middle">E8</text>
+        <text class="small mono" x="375" y="112" text-anchor="middle">A8</text>
+        <text class="small mono" x="429" y="112" text-anchor="middle">80</text>
+        <path class="wire acc-ln" d="M136 136 V144 H290 V136 M298 136 V144 H452 V136"/>
+        <text class="small mono t-acc" x="213" y="166" text-anchor="middle">i=2  r='語'</text>
+        <text class="small mono t-acc" x="375" y="166" text-anchor="middle">i=5  r='言'</text>
+        <text class="small" x="240" y="200" text-anchor="middle">range 一次拿一個完整的字（rune）</text>
+      </svg>
+      <figcaption><code>s[i]</code> 拿到的是一個 byte，可能只是半個字；<code>range</code> 一次拿一整個字，<code>i</code> 是它的 byte 位置。</figcaption>
+    </figure>
+    <pre class="code" data-src="chapters/08-strings-runes/range.go#rangeString"><code>func rangeString() {
+	for i, r := range "Go語言" {
+		fmt.Println(i, string(r), r)
+	}
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/08-strings-runes#Example_rangeString"><code>0 G 71
+1 o 111
+2 語 35486
+5 言 35328</code></pre>
+    <p><code>for i, r := range s</code> 會依照 UTF-8 解碼，每一圈拿到一個完整的 rune。i 是這個字開始的 <strong>byte 位置</strong>，不是第幾個字，所以 i 從 2 跳到 5：「語」佔了 2、3、4 三個 byte。要處理「字」的程式，例如計算中文字數、找出某種字元，都應該用 range，而不是用索引一個 byte 一個 byte 走（第 <a href="03-control-flow.html#range">03 章的 range</a>）。</p>
+
+    <h3>不合法的 byte</h3>
+    <pre class="code" data-src="chapters/08-strings-runes/range.go#rangeInvalid"><code>func rangeInvalid() {
+	for i, r := range "A\xffB" {
+		fmt.Printf("%d %U\n", i, r)
+	}
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/08-strings-runes#Example_rangeInvalid"><code>0 U+0041
+1 U+FFFD
+2 U+0042</code></pre>
+    <p><code>\xff</code> 不是任何字元合法的 UTF-8 開頭。range 遇到這種 byte 不會 panic，而是拿到 <code>U+FFFD</code>（替代字元，通常顯示成一個問號方塊），並且只前進 1 個 byte，接著繼續解碼。所以 range 一定走得完，但結果可能含有 U+FFFD，代表原始資料有問題。</p>
+  </section>
+
+  <section aria-labelledby="convert">
+    <h2 id="convert">4. 轉換</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 222" role="img" aria-label="字串 s 有 8 個 byte；[]byte(s) 複製出 8 個 byte；[]rune(s) 解碼成 4 個 rune，每個 rune 佔 4 個 byte">
+        <title>轉換都會複製一份</title>
+        <text class="small mono bold" x="16" y="53">s</text>
+        <rect class="soft" x="48" y="30" width="40" height="36" rx="4"/>
+        <rect class="soft" x="92" y="30" width="40" height="36" rx="4"/>
+        <rect class="soft" x="136" y="30" width="40" height="36" rx="4"/>
+        <rect class="soft" x="180" y="30" width="40" height="36" rx="4"/>
+        <rect class="soft" x="224" y="30" width="40" height="36" rx="4"/>
+        <rect class="soft" x="268" y="30" width="40" height="36" rx="4"/>
+        <rect class="soft" x="312" y="30" width="40" height="36" rx="4"/>
+        <rect class="soft" x="356" y="30" width="40" height="36" rx="4"/>
+        <text class="sm mono" x="68" y="53" text-anchor="middle">47</text>
+        <text class="sm mono" x="112" y="53" text-anchor="middle">6f</text>
+        <text class="sm mono" x="156" y="53" text-anchor="middle">e8</text>
+        <text class="sm mono" x="200" y="53" text-anchor="middle">aa</text>
+        <text class="sm mono" x="244" y="53" text-anchor="middle">9e</text>
+        <text class="sm mono" x="288" y="53" text-anchor="middle">e8</text>
+        <text class="sm mono" x="332" y="53" text-anchor="middle">a8</text>
+        <text class="sm mono" x="376" y="53" text-anchor="middle">80</text>
+        <text class="sm" x="406" y="53">唯讀</text>
+        <text class="sm" x="48" y="92">[]byte(s)：複製 8 個 byte，可以修改</text>
+        <rect class="acc" x="48" y="100" width="40" height="36" rx="4"/>
+        <rect class="acc" x="92" y="100" width="40" height="36" rx="4"/>
+        <rect class="acc" x="136" y="100" width="40" height="36" rx="4"/>
+        <rect class="acc" x="180" y="100" width="40" height="36" rx="4"/>
+        <rect class="acc" x="224" y="100" width="40" height="36" rx="4"/>
+        <rect class="acc" x="268" y="100" width="40" height="36" rx="4"/>
+        <rect class="acc" x="312" y="100" width="40" height="36" rx="4"/>
+        <rect class="acc" x="356" y="100" width="40" height="36" rx="4"/>
+        <text class="sm mono" x="68" y="123" text-anchor="middle">47</text>
+        <text class="sm mono" x="112" y="123" text-anchor="middle">6f</text>
+        <text class="sm mono" x="156" y="123" text-anchor="middle">e8</text>
+        <text class="sm mono" x="200" y="123" text-anchor="middle">aa</text>
+        <text class="sm mono" x="244" y="123" text-anchor="middle">9e</text>
+        <text class="sm mono" x="288" y="123" text-anchor="middle">e8</text>
+        <text class="sm mono" x="332" y="123" text-anchor="middle">a8</text>
+        <text class="sm mono" x="376" y="123" text-anchor="middle">80</text>
+        <text class="sm" x="48" y="162">[]rune(s)：解碼成 4 個 rune，每個佔 4 byte</text>
+        <rect class="hot" x="48" y="170" width="84" height="36" rx="4"/>
+        <rect class="hot" x="136" y="170" width="84" height="36" rx="4"/>
+        <rect class="hot" x="224" y="170" width="84" height="36" rx="4"/>
+        <rect class="hot" x="312" y="170" width="84" height="36" rx="4"/>
+        <text class="mono" x="90" y="194" text-anchor="middle">'G'</text>
+        <text class="mono" x="178" y="194" text-anchor="middle">'o'</text>
+        <text class="mono" x="266" y="194" text-anchor="middle">'語'</text>
+        <text class="mono" x="354" y="194" text-anchor="middle">'言'</text>
+      </svg>
+      <figcaption><code>[]byte(s)</code> 和 <code>[]rune(s)</code> 都會配置新的記憶體、複製資料；改它們不會影響原本的字串。</figcaption>
+    </figure>
+    <pre class="code" data-src="chapters/08-strings-runes/convert.go#conversions"><code>func conversions() {
+	s := "Go語言"
+	b := []byte(s)
+	r := []rune(s)
+	fmt.Println(len(b), len(r))
+	fmt.Println(b[:2], r[2:])
+	fmt.Println(string(r[2]), string(r[2:]))
+	b[0] = 'g' // 改的是複本
+	fmt.Println(s, string(b))
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/08-strings-runes#Example_conversions"><code>8 4
+[71 111] [35486 35328]
+語 語言
+Go語言 go語言</code></pre>
     <ul class="notes">
-      <li><code>len(s)</code> 是 byte 數，不是字數；算字數用 <code>utf8.RuneCountInString</code>。</li>
-      <li>字串不能修改，<code>s[0] = 'g'</code> 編譯不過；要改就轉成 <code>[]byte</code> 或 <code>[]rune</code>，改完再轉回來。這兩種轉換都會複製資料。</li>
-      <li><code>s[i:j]</code> 用的是 byte 位置，切在中文字中間會得到亂碼。</li>
-      <li><code>string(rune(65))</code> 是 <code>"A"</code> 而不是 <code>"65"</code>；數字轉文字用 <code>strconv.Itoa</code>。直接寫 <code>string(65)</code> 時 <code>go vet</code> 會警告。</li>
-      <li>字串可以直接用 <code>==</code>、<code>&lt;</code> 比較，比的是 byte。</li>
-      <li>反引號字串不處理跳脫字元，還可以跨行，寫正規表示式、JSON、SQL 都很方便。</li>
+      <li><code>[]byte(s)</code>：複製出一份可以修改的 byte。改了 b[0]，s 還是原樣。處理二進位資料、檔案內容、網路封包時常用。</li>
+      <li><code>[]rune(s)</code>：解碼成一個一個字。長度就是字數，可以用索引拿「第幾個字」。代價是每個字佔 4 byte，中文字串轉換後大約變成 1.3 倍大，英文字串則變成 4 倍。</li>
+      <li><code>string(b)</code>、<code>string(r)</code>：轉回字串，同樣會複製。<code>string(r[2])</code> 把單一個 rune 轉成字串。</li>
     </ul>
+    <p>因為字串不能改，修改「第幾個字」的標準寫法就是轉成 <code>[]rune</code>、改、轉回來：</p>
+    <pre class="code" data-src="chapters/08-strings-runes/convert.go#replaceAt,editRunes"><code>func replaceAt(s string, i int, c rune) string {
+	r := []rune(s)
+	r[i] = c
+	return string(r)
+}
+
+func editRunes() {
+	fmt.Println(replaceAt("大杯紅茶", 0, '中'))
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/08-strings-runes#Example_editRunes"><code>中杯紅茶</code></pre>
+
+    <h3>數字轉字串</h3>
+    <pre class="code" data-src="chapters/08-strings-runes/convert.go#numberToString"><code>func numberToString() {
+	n := 65
+	fmt.Println(strconv.Itoa(n), string(rune(n)))
+	fmt.Println(fmt.Sprint(n) + "元")
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/08-strings-runes#Example_numberToString"><code>65 A
+65元</code></pre>
+    <p>把數字 65 變成字串 "65" 要用 <code>strconv.Itoa</code> 或 <code>fmt.Sprint</code>。<code>string(rune(65))</code> 是另一件事：把 65 當成碼位，得到字元 A。直接寫 <code>string(n)</code>（n 是 int）在語法上是合法的，意思也是後者，所以幾乎一定是 bug，<code>go vet</code> 會攔下來：</p>
+    <pre class="code bad" data-vet-error><code>package main
+
+import "fmt"
+
+func main() {
+	n := 85
+	price := string(n) + "元"
+	fmt.Println(price)
+}</code></pre>
+    <p class="label">go vet</p>
+    <pre class="out err"><code>main.go:7:11: conversion from int to string yields a string of one rune, not a string of digits</code></pre>
+    <p>這支程式能編譯，執行結果是字元 U+0055（大寫 U）接上「元」，不是「85元」。</p>
+
+    <section class="deep" aria-labelledby="conv-cost">
+      <p class="tag">深入：第一次讀可以先跳過</p>
+      <h3 id="conv-cost">4.1 轉換的成本與編譯器的最佳化</h3>
+      <p>字串在內部和 slice 很像，是一個只有 ptr 和 len 兩個欄位的 header（沒有 cap，因為不能 append）。<code>[]byte(s)</code> 必須複製，因為 slice 可以修改，而字串不行；如果共用同一塊記憶體，改 slice 就等於改了字串。</p>
+      <p>不過編譯器會在確定安全的地方省掉複製，例如：用 <code>m[string(b)]</code> 查 map、<code>string(b) == "OK"</code> 比較、<code>for i, c := range []byte(s)</code> 走訪。這些情況下轉換出來的值不會被保存或修改，就不需要真的配置。這是實作的最佳化，不是規格保證，寫程式時不必刻意依賴。</p>
+      <p>另外，<code>s[low:high]</code> 和原本的字串共用記憶體，所以從一個很大的字串（例如整個檔案的內容）切出一小段長期保存，會讓整個大字串無法回收，和第 <a href="06-arrays-slices.html#retain">06 章的小 slice 拖住大陣列</a>一樣。需要時用 <code>strings.Clone</code> 複製出來。</p>
+    </section>
+  </section>
+
+  <section aria-labelledby="strings">
+    <h2 id="strings">5. strings 套件</h2>
+    <p>處理字串的函式大多在 strings 套件。它們都不會修改傳進去的字串，而是回傳新的結果。下面依用途分成四組。</p>
+    <h3>搜尋</h3>
+    <pre class="code" data-src="chapters/08-strings-runes/search.go#searchFuncs"><code>func searchFuncs() {
+	addr := "台北市大安區便當路 100 號"
+	fmt.Println(strings.Contains(addr, "大安區"), strings.HasPrefix(addr, "台北市"), strings.HasSuffix(addr, "號"))
+	fmt.Println(strings.Index(addr, "大安"), strings.Index(addr, "信義"))
+	fmt.Println(strings.Count("排骨,雞腿,排骨", "排骨"))
+	fmt.Println(strings.EqualFold("Go", "GO"))
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/08-strings-runes#Example_searchFuncs"><code>true true true
+9 -1
+2
+true</code></pre>
+    <p><code>Index</code> 回傳的是 <strong>byte 位置</strong>：「台北市」是 9 個 byte，所以「大安」從 9 開始；找不到時回傳 -1。拿這個位置去切片 <code>addr[9:]</code> 是安全的，因為它一定落在字的開頭。<code>EqualFold</code> 比較時忽略大小寫，比 <code>ToLower(a) == ToLower(b)</code> 有效率。</p>
+
+    <h3>切開與接起來</h3>
+    <pre class="code" data-src="chapters/08-strings-runes/search.go#splitJoin"><code>func splitJoin() {
+	fmt.Printf("%q\n", strings.Split("排骨,雞腿,,素食", ","))
+	fmt.Printf("%q\n", strings.Fields("  排骨  雞腿\t素食\n"))
+	fmt.Println(strings.Join([]string{"排骨", "雞腿", "素食"}, "、"))
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/08-strings-runes#Example_splitJoin"><code>["排骨" "雞腿" "" "素食"]
+["排骨" "雞腿" "素食"]
+排骨、雞腿、素食</code></pre>
+    <p><code>Split</code> 依照分隔字串切開，兩個逗號之間會得到一個空字串，不會被略過。<code>Fields</code> 依照任意長度的空白（空格、tab、換行）切開，並且忽略頭尾的空白，處理使用者輸入時通常比 Split 好用。<code>Join</code> 把一個字串 slice 用分隔字串接起來，是 Split 的反向操作。</p>
+
+    <h3>去頭尾與切成兩半</h3>
+    <pre class="code" data-src="chapters/08-strings-runes/search.go#trimCut"><code>func trimCut() {
+	fmt.Printf("%q\n", strings.TrimSpace("  排骨飯 \n"))
+	fmt.Println(strings.TrimPrefix("INV-AB12345678", "INV-"), strings.TrimSuffix("menu.txt", ".txt"))
+	fmt.Println(strings.Trim("**特價**", "*"))
+	name, qty, ok := strings.Cut("排骨x2", "x")
+	fmt.Println(name, qty, ok)
+	_, _, ok = strings.Cut("排骨", "x")
+	fmt.Println(ok)
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/08-strings-runes#Example_trimCut"><code>"排骨飯"
+AB12345678 menu
+特價
+排骨 2 true
+false</code></pre>
+    <ul class="notes">
+      <li><code>TrimSpace</code>：去掉頭尾的空白和換行，讀進來的每一行幾乎都要先做這一步。</li>
+      <li><code>TrimPrefix</code>、<code>TrimSuffix</code>：去掉一個<strong>完整的</strong>前綴或後綴，沒有就原樣回傳。</li>
+      <li><code>Trim(s, "*")</code>：第二個參數是一組<strong>字元</strong>，頭尾只要是其中任何一個字元都會被去掉，不是去掉一個子字串。想去掉 <code>"INV-"</code> 這種固定前綴要用 TrimPrefix。</li>
+      <li><code>Cut</code>：在第一個分隔字串的地方切成前後兩半，第三個回傳值表示有沒有找到。解析 <code>key=value</code>、<code>品名x數量</code> 這類格式時，比 Split 再檢查長度簡潔得多（練習 3）。</li>
+    </ul>
+
+    <h3>取代與轉換</h3>
+    <pre class="code" data-src="chapters/08-strings-runes/search.go#replaceFuncs"><code>func replaceFuncs() {
+	fmt.Println(strings.ReplaceAll("0912-345-678", "-", ""))
+	fmt.Println(strings.Replace("a-b-c", "-", "+", 1))
+	fmt.Println(strings.Repeat("=", 10))
+	fmt.Println(strings.ToUpper("go 語言"), strings.ToLower("HELLO"))
+	r := strings.NewReplacer("台", "臺", "-", "")
+	fmt.Println(r.Replace("台北-台中"))
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/08-strings-runes#Example_replaceFuncs"><code>0912345678
+a+b-c
+==========
+GO 語言 hello
+臺北臺中</code></pre>
+    <p><code>Replace</code> 的最後一個參數是最多取代幾次，-1 或用 <code>ReplaceAll</code> 表示全部。要同時做好幾組取代時用 <code>strings.NewReplacer</code>：它只掃描字串一次，而且建立一次之後可以重複使用。<code>ToUpper</code> 只影響有大小寫之分的字元，中文不受影響。</p>
+  </section>
+
+  <section aria-labelledby="builder">
+    <h2 id="builder">6. strings.Builder</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 252" role="img" aria-label="用加號串接，每一步都產生新的字串並複製；strings.Builder 在同一塊空間往後寫，最後才變成字串">
+        <title>組字串：加號與 Builder</title>
+        <path class="wire faint" d="M240 12 V240"/>
+        <text class="small mono" x="120" y="30" text-anchor="middle">s += "Go"</text>
+        <rect class="soft dash" x="40" y="50" width="48" height="40" rx="4"/>
+        <rect class="soft dash" x="40" y="104" width="84" height="40" rx="4"/>
+        <rect class="soft" x="40" y="158" width="120" height="40" rx="4"/>
+        <text class="mono" x="64" y="76" text-anchor="middle">Go</text>
+        <text class="mono" x="82" y="130" text-anchor="middle">GoGo</text>
+        <text class="mono" x="100" y="184" text-anchor="middle">GoGoGo</text>
+        <text class="sm t-hot" x="120" y="236" text-anchor="middle">每一步都配置新字串並複製</text>
+        <text class="small mono" x="360" y="30" text-anchor="middle">strings.Builder</text>
+        <text class="sm mono" x="360" y="64" text-anchor="middle">b.WriteString("Go")</text>
+        <rect class="acc" x="262" y="80" width="196" height="56" rx="6"/>
+        <path class="wire faint" d="M327 84 V132 M392 84 V132"/>
+        <text class="mono" x="294" y="114" text-anchor="middle">Go</text>
+        <text class="mono" x="360" y="114" text-anchor="middle">Go</text>
+        <text class="mono" x="425" y="114" text-anchor="middle">Go</text>
+        <path class="wire" d="M360 140 V172"/>
+        <path class="tip" d="M360 184 L353 171 L367 171 Z"/>
+        <text class="sm mono" x="370" y="164">b.String()</text>
+        <text class="mono bold" x="360" y="208" text-anchor="middle">GoGoGo</text>
+        <text class="sm t-acc" x="360" y="236" text-anchor="middle">同一塊空間往後寫</text>
+      </svg>
+      <figcaption>字串不能修改，用 <code>+</code> 串接每次都要複製一份新的；在迴圈裡組字串，用 <code>strings.Builder</code>。</figcaption>
+    </figure>
+    <pre class="code" data-src="chapters/08-strings-runes/builder.go#receipt,builderDemo"><code>func receipt(items []string, prices []int) string {
+	var b strings.Builder
+	total := 0
+	for i, item := range items {
+		fmt.Fprintf(&amp;b, "%s %d\n", item, prices[i])
+		total += prices[i]
+	}
+	b.WriteString("合計 ")
+	b.WriteString(strconv.Itoa(total))
+	return b.String()
+}
+
+func builderDemo() {
+	fmt.Println(receipt([]string{"排骨", "雞腿"}, []int{85, 90}))
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/08-strings-runes#Example_builderDemo"><code>排骨 85
+雞腿 90
+合計 175</code></pre>
+    <p><code>strings.Builder</code> 內部是一個會自動長大的 <code>[]byte</code>，<code>WriteString</code>、<code>WriteByte</code>、<code>WriteRune</code> 都往後面寫，最後 <code>String()</code> 一次轉成字串，而且不需要再複製。它實作了 <code>io.Writer</code>，所以可以直接當 <code>fmt.Fprintf</code> 的第一個參數（第 <a href="02-input-output.html">02 章</a>的 Fprint 家族），格式化和組字串一次完成。零值就能直接使用，不需要初始化；但不要複製一個已經寫過內容的 Builder，要傳給函式時傳指標。</p>
+
+    <h3>為什麼迴圈裡不要用 +</h3>
+    <pre class="code" data-src="chapters/08-strings-runes/builder.go#concatPlus,concatBuilder"><code>func concatPlus(parts []string) string {
+	s := ""
+	for _, p := range parts {
+		s += p
+	}
+	return s
+}
+
+func concatBuilder(parts []string) string {
+	n := 0
+	for _, p := range parts {
+		n += len(p)
+	}
+	var b strings.Builder
+	b.Grow(n)
+	for _, p := range parts {
+		b.WriteString(p)
+	}
+	return b.String()
+}</code></pre>
+    <p>每次 <code>s += p</code> 都要配置一個新字串，把目前為止的內容整個複製過去，串接 n 次的總複製量會隨 n 的平方成長。本章的測試檔有兩個 benchmark（<a href="21-testing.html">測試</a>那一章會正式介紹），各把 1,000 段「便當」串起來：</p>
+    <pre class="shell"><code>go test -run='^$' -bench=Concat -benchmem ./chapters/08-strings-runes</code></pre>
+    <p class="label">輸出（節錄；數字依機器而不同）</p>
+    <pre class="out"><code>BenchmarkConcatPlus-10       	    3402	    335814 ns/op	 3212610 B/op	     999 allocs/op
+BenchmarkConcatBuilder-10    	  262716	      4530 ns/op	    6144 B/op	       1 allocs/op</code></pre>
+    <p>用 <code>+</code> 配置了 999 次、總共約 3 MB；Builder 先用 <code>Grow</code> 保留好空間，只配置 1 次、6 KB，快了大約 70 倍。只串兩三段時用 <code>+</code> 最清楚，編譯器也會把同一個運算式裡的多個 <code>+</code> 合併成一次配置；在迴圈裡累積才需要 Builder。現成的 slice 要接起來，直接用 <code>strings.Join</code>。</p>
+  </section>
+
+  <section aria-labelledby="strconv">
+    <h2 id="strconv">7. strconv 與 unicode</h2>
+    <h3>字串轉數字</h3>
+    <pre class="code" data-src="chapters/08-strings-runes/numbers.go#parseNumbers"><code>func parseNumbers() {
+	n, err := strconv.Atoi("85")
+	fmt.Println(n+5, err)
+	_, err = strconv.Atoi("85元")
+	fmt.Println(err)
+	f, _ := strconv.ParseFloat("3.5", 64)
+	fmt.Println(f * 2)
+	big, err := strconv.ParseInt("99999999999", 10, 32)
+	fmt.Println(big, err)
+	h, _ := strconv.ParseInt("ff", 16, 64)
+	ok, _ := strconv.ParseBool("true")
+	fmt.Println(h, ok)
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/08-strings-runes#Example_parseNumbers"><code>90 &lt;nil&gt;
+strconv.Atoi: parsing "85元": invalid syntax
+7
+2147483647 strconv.ParseInt: parsing "99999999999": value out of range
+255 true</code></pre>
+    <p>使用者輸入、檔案內容、網址參數都是字串，要計算就得先轉成數字，而且一定要檢查錯誤。錯誤訊息會說明是哪個函式、哪個輸入、什麼問題：<code>invalid syntax</code> 是格式不對，<code>value out of range</code> 是超出指定的位元數。<code>ParseInt(s, base, bitSize)</code> 可以指定進位（16 進位的 ff 是 255）和結果要放得進幾個位元；超出範圍時會回傳該範圍的最大值和錯誤。<code>Atoi</code> 就是 <code>ParseInt(s, 10, 0)</code> 再轉成 int 的簡寫。</p>
+
+    <h3>數字轉字串</h3>
+    <pre class="code" data-src="chapters/08-strings-runes/numbers.go#formatNumbers"><code>func formatNumbers() {
+	fmt.Println(strconv.Itoa(85) + "元")
+	fmt.Println(strconv.FormatInt(255, 2), strconv.FormatInt(255, 16))
+	fmt.Println(strconv.FormatFloat(3.14159, 'f', 2, 64))
+	fmt.Println(strconv.Quote("排骨\n飯"), strconv.QuoteToASCII("排骨"))
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/08-strings-runes#Example_formatNumbers"><code>85元
+11111111 ff
+3.14
+"排骨\n飯" "\u6392\u9aa8"</code></pre>
+    <p><code>FormatInt</code> 可以轉成任何 2 到 36 進位，<code>FormatFloat</code> 的 <code>'f', 2</code> 表示固定小數點、保留兩位。<code>Quote</code> 加上雙引號並跳脫特殊字元，和 <code>%q</code> 的效果一樣；<code>QuoteToASCII</code> 連非 ASCII 的字也跳脫成 <code>\u</code> 的形式。fmt 也做得到這些轉換，但 strconv 不需要解析格式字串，比較快，也不會有格式和參數對不上的問題。</p>
+
+    <h3>判斷字元的種類</h3>
+    <pre class="code" data-src="chapters/08-strings-runes/numbers.go#classify"><code>func classify() {
+	for _, r := range "A9語 ，" {
+		fmt.Printf("%q 字母=%v 數字=%v 漢字=%v 空白=%v 標點=%v\n",
+			r, unicode.IsLetter(r), unicode.IsDigit(r), unicode.Is(unicode.Han, r), unicode.IsSpace(r), unicode.IsPunct(r))
+	}
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/08-strings-runes#Example_classify"><code>'A' 字母=true 數字=false 漢字=false 空白=false 標點=false
+'9' 字母=false 數字=true 漢字=false 空白=false 標點=false
+'語' 字母=true 數字=false 漢字=true 空白=false 標點=false
+' ' 字母=false 數字=false 漢字=false 空白=true 標點=false
+'，' 字母=false 數字=false 漢字=false 空白=false 標點=true</code></pre>
+    <p>unicode 套件依照 Unicode 的分類判斷 rune：中文字是字母（Letter），<code>unicode.Is(unicode.Han, r)</code> 進一步判斷是不是漢字；全形逗號是標點。這些函式接收的是 rune，所以要搭配 range 使用。</p>
+
+    <h3>全形轉半形</h3>
+    <pre class="code" data-src="chapters/08-strings-runes/numbers.go#toHalfwidth,halfwidth"><code>func toHalfwidth(s string) string {
+	return strings.Map(func(r rune) rune {
+		switch {
+		case r &gt;= '！' &amp;&amp; r &lt;= '～':
+			return r - 0xFEE0
+		case r == '　': // 全形空白
+			return ' '
+		}
+		return r
+	}, s)
+}
+
+func halfwidth() {
+	fmt.Println(toHalfwidth("ＡＢ－１２３４５６７８"))
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/08-strings-runes#Example_halfwidth"><code>AB-12345678</code></pre>
+    <p>表單裡常有人用全形輸入英數字，例如發票號碼「ＡＢ－１２３４５６７８」。全形的「！」到「～」和半形的 <code>!</code> 到 <code>~</code> 依序一一對應，碼位剛好差 0xFEE0，所以減掉這個數就能轉回半形。<code>strings.Map</code> 對字串的每個 rune 呼叫你給的函式，用回傳的 rune 組成新字串，適合這種逐字轉換。</p>
+  </section>
+
+  <section aria-labelledby="width">
+    <h2 id="width">8. 中文的顯示寬度</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 206" role="img" aria-label="終端機的格子：Coffee 佔 6 格；排骨飯每個字佔 2 格，共 6 格。%-8s 補了 5 個空白，結果佔 11 格；padRight 補 2 個空白，剛好 8 格">
+        <title>中文字佔兩格</title>
+        <path class="wire faint dash" d="M342 22 V182"/>
+        <text class="sm" x="342" y="198" text-anchor="middle">第 8 格</text>
+        <text class="small mono" x="16" y="60">Coffee</text>
+        <text class="small mono" x="16" y="110">%-8s</text>
+        <text class="small mono" x="16" y="160">padRight</text>
+        <rect class="soft" x="150" y="36" width="24" height="36"/>
+        <rect class="soft" x="174" y="36" width="24" height="36"/>
+        <rect class="soft" x="198" y="36" width="24" height="36"/>
+        <rect class="soft" x="222" y="36" width="24" height="36"/>
+        <rect class="soft" x="246" y="36" width="24" height="36"/>
+        <rect class="soft" x="270" y="36" width="24" height="36"/>
+        <rect class="soft dash" x="294" y="36" width="24" height="36"/>
+        <rect class="soft dash" x="318" y="36" width="24" height="36"/>
+        <text class="mono" x="162" y="60" text-anchor="middle">C</text>
+        <text class="mono" x="186" y="60" text-anchor="middle">o</text>
+        <text class="mono" x="210" y="60" text-anchor="middle">f</text>
+        <text class="mono" x="234" y="60" text-anchor="middle">f</text>
+        <text class="mono" x="258" y="60" text-anchor="middle">e</text>
+        <text class="mono" x="282" y="60" text-anchor="middle">e</text>
+        <path class="wire acc-ln" d="M342 32 V76"/>
+        <rect class="soft" x="150" y="86" width="48" height="36"/>
+        <rect class="soft" x="198" y="86" width="48" height="36"/>
+        <rect class="soft" x="246" y="86" width="48" height="36"/>
+        <rect class="soft dash" x="294" y="86" width="24" height="36"/>
+        <rect class="soft dash" x="318" y="86" width="24" height="36"/>
+        <rect class="soft dash" x="342" y="86" width="24" height="36"/>
+        <rect class="soft dash" x="366" y="86" width="24" height="36"/>
+        <rect class="soft dash" x="390" y="86" width="24" height="36"/>
+        <text x="174" y="110" text-anchor="middle">排</text>
+        <text x="222" y="110" text-anchor="middle">骨</text>
+        <text x="270" y="110" text-anchor="middle">飯</text>
+        <path class="wire hot-ln" d="M414 82 V126"/>
+        <text class="sm t-hot" x="422" y="110">11 格</text>
+        <rect class="soft" x="150" y="136" width="48" height="36"/>
+        <rect class="soft" x="198" y="136" width="48" height="36"/>
+        <rect class="soft" x="246" y="136" width="48" height="36"/>
+        <rect class="soft dash" x="294" y="136" width="24" height="36"/>
+        <rect class="soft dash" x="318" y="136" width="24" height="36"/>
+        <text x="174" y="160" text-anchor="middle">排</text>
+        <text x="222" y="160" text-anchor="middle">骨</text>
+        <text x="270" y="160" text-anchor="middle">飯</text>
+        <path class="wire acc-ln" d="M342 132 V176"/>
+      </svg>
+      <figcaption>終端機用等寬字型，一個中文字佔兩個英文字母的寬度。<code>%-8s</code> 只數字數，補了太多空白；依顯示寬度補空白才會對齊。</figcaption>
+    </figure>
+    <p>第 <a href="02-input-output.html#cjk-width">02 章</a>看過：<code>%-8s</code> 依照「字數」補空白，但中文字在終端機上佔兩格，所以含中文的表格會對不齊。解法是自己算每個字佔幾格，再補上剛好的空白：</p>
+    <pre class="code" data-src="chapters/08-strings-runes/width.go#runeWidth,displayWidth,padRight,alignedMenu"><code>func runeWidth(r rune) int {
+	switch {
+	case unicode.Is(unicode.Han, r),
+		unicode.In(r, unicode.Hiragana, unicode.Katakana, unicode.Hangul),
+		r &gt;= 0x3000 &amp;&amp; r &lt;= 0x303F, // 中日韓的標點，例如「、」「。」「「」
+		r &gt;= 0xFF01 &amp;&amp; r &lt;= 0xFF60, // 全形的英數字和標點，例如「，」「！」
+		r &gt;= 0xFFE0 &amp;&amp; r &lt;= 0xFFE6: // 全形的貨幣符號等
+		return 2
+	}
+	return 1
+}
+
+func displayWidth(s string) int {
+	w := 0
+	for _, r := range s {
+		w += runeWidth(r)
+	}
+	return w
+}
+
+func padRight(s string, width int) string {
+	if gap := width - displayWidth(s); gap &gt; 0 {
+		return s + strings.Repeat(" ", gap)
+	}
+	return s
+}
+
+func alignedMenu() {
+	items := []string{"Coffee", "排骨飯", "雞腿便當"}
+	for _, it := range items {
+		fmt.Printf("|%-8s|\n", it)
+	}
+	for _, it := range items {
+		fmt.Printf("|%s|\n", padRight(it, 8))
+	}
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/08-strings-runes#Example_alignedMenu"><code>|Coffee  |
+|排骨飯     |
+|雞腿便當    |
+|Coffee  |
+|排骨飯  |
+|雞腿便當|</code></pre>
+    <p>（網頁上的字型不一定是嚴格的等寬字型，對齊的效果要在終端機裡執行才看得準。）</p>
+    <ul class="notes">
+      <li><code>runeWidth</code> 把漢字、日文假名、韓文、中日韓標點和全形符號算 2 格，其他算 1 格。<code>unicode.In</code> 一次檢查好幾個 Unicode 區塊。</li>
+      <li><code>displayWidth</code> 用 range 一個字一個字加總，<code>padRight</code> 用 <code>strings.Repeat</code> 補上差額。</li>
+      <li>這是簡化版：Unicode 另外有一份「East Asian Width」的正式規則，還有組合字元（例如注音聲調）、emoji 等寬度是 0 或依終端機而定的情況。需要完整處理時，用標準庫以外的 <code>golang.org/x/text/width</code>。</li>
+    </ul>
+    <p>練習 6 用 RuneWidth 把整張菜單排成兩欄。</p>
+  </section>
+
+  <section aria-labelledby="pitfalls">
+    <h2 id="pitfalls">常見錯誤</h2>
+    <h3 id="pit-len">1. 用 len 算字數</h3>
+    <p><code>len("排骨飯")</code> 是 9，不是 3。限制「最多 10 個字」、顯示「已輸入 3 個字」時，用 <code>utf8.RuneCountInString</code>。</p>
+
+    <h3 id="pit-slice">2. 用 byte 位置截斷中文</h3>
+    <p><code>s[:n]</code> 的 n 是 byte 位置，可能把中文字切成兩半，印出亂碼（第 2 節）。依字數截斷要先轉 <code>[]rune</code>，或用 range 找到第 n 個字的 byte 位置再切。練習 4。</p>
+
+    <h3 id="pit-index-loop">3. 用索引一個 byte 一個 byte 處理文字</h3>
+    <p><code>for i := 0; i &lt; len(s); i++ { s[i] … }</code> 拿到的是 byte，處理中文一定出錯，例如判斷回文時把一個字的三個 byte 倒過來比。處理「字」用 range 或 <code>[]rune</code>。練習 5。</p>
+
+    <h3 id="pit-string-int">4. 用 string(n) 把數字轉成字串</h3>
+    <p>得到的是碼位 n 對應的字元，不是十進位數字。用 <code>strconv.Itoa(n)</code>，<code>go vet</code> 會幫你抓（第 4 節）。</p>
+
+    <h3 id="pit-plus-loop">5. 在迴圈裡用 + 累積字串</h3>
+    <p>每一次都配置並複製整個字串，資料多時明顯變慢。改用 <code>strings.Builder</code> 或 <code>strings.Join</code>（第 6 節）。</p>
+
+    <h3 id="pit-trim">6. 把 Trim 當成去掉子字串</h3>
+    <p><code>strings.Trim("INV-NV1", "INV-")</code> 會一直去掉頭尾屬於 I、N、V、- 這組字元的字，結果是 <code>"1"</code>，不是 <code>"NV1"</code>。去掉固定的前綴或後綴要用 <code>TrimPrefix</code>、<code>TrimSuffix</code>。</p>
   </section>
 
   <section aria-labelledby="java">
@@ -169,22 +723,151 @@ GoGoGo</code></pre>
         <thead><tr><th scope="col">主題</th><th scope="col">Java</th><th scope="col">Go</th></tr></thead>
         <tbody>
           <tr><th scope="row">內部編碼</th><td class="java">UTF-16，<code>char</code> 是 16 bit</td><td>UTF-8；<code>byte</code> 8 bit、<code>rune</code> 32 bit</td></tr>
-          <tr><th scope="row">長度</th><td class="java"><code>"語言".length()</code> 是 2</td><td><code>len("語言")</code> 是 6</td></tr>
+          <tr><th scope="row">長度</th><td class="java"><code>"語言".length()</code> 是 2（UTF-16 的單位數）</td><td><code>len("語言")</code> 是 6（byte 數）</td></tr>
+          <tr><th scope="row">取一個字元</th><td class="java"><code>s.charAt(i)</code></td><td><code>s[i]</code> 是 byte；要字元用 range 或 <code>[]rune(s)[i]</code></td></tr>
           <tr><th scope="row">不可變</th><td class="java">是</td><td>是</td></tr>
+          <tr><th scope="row">比較內容</th><td class="java"><code>equals</code>；<code>==</code> 比的是參考</td><td><code>==</code> 直接比內容</td></tr>
+          <tr><th scope="row">空值</th><td class="java">可能是 <code>null</code></td><td>零值是 <code>""</code>，不會是 nil</td></tr>
           <tr><th scope="row">組字串</th><td class="java"><code>StringBuilder</code></td><td><code>strings.Builder</code></td></tr>
-          <tr><th scope="row">數字與字串</th><td class="java"><code>String.valueOf</code> / <code>Integer.parseInt</code></td><td><code>strconv.Itoa</code> / <code>strconv.Atoi</code></td></tr>
+          <tr><th scope="row">字串方法</th><td class="java"><code>s.contains(x)</code>、<code>s.split(",")</code></td><td>套件函式 <code>strings.Contains(s, x)</code>、<code>strings.Split(s, ",")</code></td></tr>
+          <tr><th scope="row">數字與字串</th><td class="java"><code>String.valueOf</code> / <code>Integer.parseInt</code></td><td><code>strconv.Itoa</code> / <code>strconv.Atoi</code>，失敗回傳 error</td></tr>
           <tr><th scope="row">多行字串</th><td class="java">text block <code>"""</code></td><td>反引號 <code>`…`</code></td></tr>
         </tbody>
       </table>
     </div>
   </section>
 
+  <section aria-labelledby="exercises">
+    <h2 id="exercises">練習</h2>
+    <p>題目在 <code>exercises/08-strings-runes/exercises.go</code>，用到的型別和 <code>RuneWidth</code> 定義在 <code>doc.go</code>。</p>
+    <pre class="shell"><code>go test ./exercises/08-strings-runes/                      <span class="c"># 跑全部練習</span>
+go test ./exercises/08-strings-runes/ -run TestMaskName    <span class="c"># 只跑一題</span>
+go test -tags solution ./exercises/08-strings-runes/       <span class="c"># 跑參考解答</span></code></pre>
+    <ol class="exercises">
+      <li>
+        <h3><span class="level l1">入門</span>練習 1：遮住姓名</h3>
+        <p>個資保護：保留姓名的第一個和最後一個字，中間每個字換成 *。只有兩個字時遮住第二個字。</p>
+        <pre class="code" data-src="exercises/08-strings-runes/exercises.go#MaskName"><code>func MaskName(name string) string {
+	// TODO: 實作
+	return ""
+}</code></pre>
+        <p>「王小明」變成「王*明」，「歐陽小明」變成「歐**明」，「王明」變成「王*」。測試：<code>TestMaskName</code>。</p>
+        <details><summary>提示</summary><p>先轉成 <code>[]rune</code>，依長度分成三種情況。中間的星號用 <code>strings.Repeat("*", len(r)-2)</code>。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l1">入門</span>練習 2：整理手機號碼</h3>
+        <p>去掉空白和 -，開頭的 +886 換成 0，最後確認是 09 開頭的 10 位數字。</p>
+        <pre class="code" data-src="exercises/08-strings-runes/exercises.go#NormalizePhone"><code>func NormalizePhone(s string) (string, bool) {
+	// TODO: 實作
+	return "", false
+}</code></pre>
+        <p><code>"+886 912 345 678"</code> 變成 <code>"0912345678"</code>；<code>"02-1234-5678"</code> 不是手機號碼。測試：<code>TestNormalizePhone</code>。</p>
+        <details><summary>提示</summary><p>用 <code>strings.NewReplacer(" ", "", "-", "")</code> 一次去掉兩種字元；<code>strings.CutPrefix</code> 去掉 +886 並告訴你有沒有去掉。最後檢查長度、前綴，再 range 確認每個字都在 <code>'0'</code> 到 <code>'9'</code> 之間。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l2">進階</span>練習 3：解析訂單</h3>
+        <p>解析「品名x數量」用逗號分隔的訂單，同一個品名的數量要加總。格式不對時回傳錯誤。</p>
+        <pre class="code" data-src="exercises/08-strings-runes/exercises.go#ParseOrder"><code>func ParseOrder(s string) (map[string]int, error) {
+	// TODO: 實作
+	return nil, nil
+}</code></pre>
+        <p><code>"排骨x2, 雞腿x1,排骨x1 "</code> 是排骨 3 份、雞腿 1 份；<code>"排骨xa"</code>、<code>"排骨x0"</code>、<code>"x2"</code>、連續兩個逗號都是錯誤。測試：<code>TestParseOrder</code>。</p>
+        <details><summary>提示</summary><p>先處理空字串。Split 逗號，每一段 TrimSpace，再 <code>strings.Cut(part, "x")</code>；沒找到 x 或品名是空的就回傳錯誤。數量用 <code>strconv.Atoi</code>，記得也要檢查是不是正數。加總用第 <a href="07-maps.html#lookup">07 章</a>的 <code>order[name] += qty</code>。</p></details>
+      </li>
+      <li>
+        <h3><span class="level fix">找錯</span>練習 4：截斷商品名稱</h3>
+        <p>名稱太長時只顯示前 n 個字再加上「…」。英文沒問題，中文卻變成亂碼。</p>
+        <pre class="code" data-src="exercises/08-strings-runes/exercises.go#Truncate"><code>func Truncate(s string, n int) string {
+	if len(s) &lt;= n {
+		return s
+	}
+	return s[:n] + "…"
+}</code></pre>
+        <p>「雞腿便當加滷蛋」取 4 個字是「雞腿便當…」。測試：<code>TestTruncate</code>。</p>
+        <details><summary>提示</summary><p>len 和 <code>s[:n]</code> 都是以 byte 為單位。見常見錯誤 2。</p></details>
+      </li>
+      <li>
+        <h3><span class="level fix">找錯</span>練習 5：回文</h3>
+        <p>正著讀和倒著讀一樣就是回文。「level」判斷正確，「上海自來水來自海上」卻回傳 false。</p>
+        <pre class="code" data-src="exercises/08-strings-runes/exercises.go#IsPalindrome"><code>func IsPalindrome(s string) bool {
+	for i := 0; i &lt; len(s)/2; i++ {
+		if s[i] != s[len(s)-1-i] {
+			return false
+		}
+	}
+	return true
+}</code></pre>
+        <p>測試：<code>TestIsPalindrome</code>。</p>
+        <details><summary>提示</summary><p>「上」的 3 個 byte 是 e4 b8 8a，倒過來的第一個 byte 是 8a，不會等於 e4。比較的單位應該是什麼？</p></details>
+      </li>
+      <li>
+        <h3><span class="level l3">挑戰</span>練習 6：排菜單</h3>
+        <p>把菜單排成兩欄：品名欄的寬度是最寬品名的顯示寬度，不足的補空白；接著兩個空白，再接靠右對齊的價格。</p>
+        <pre class="code" data-src="exercises/08-strings-runes/doc.go#MenuItem,RuneWidth"><code>type MenuItem struct {
+	Name  string
+	Price int
+}
+
+func RuneWidth(r rune) int {
+	switch {
+	case unicode.Is(unicode.Han, r),
+		unicode.In(r, unicode.Hiragana, unicode.Katakana, unicode.Hangul),
+		r &gt;= 0x3000 &amp;&amp; r &lt;= 0x303F,
+		r &gt;= 0xFF01 &amp;&amp; r &lt;= 0xFF60,
+		r &gt;= 0xFFE0 &amp;&amp; r &lt;= 0xFFE6:
+		return 2
+	}
+	return 1
+}</code></pre>
+        <pre class="code" data-src="exercises/08-strings-runes/exercises.go#FormatMenu"><code>func FormatMenu(items []MenuItem) string {
+	// TODO: 實作
+	return ""
+}</code></pre>
+        <p>排骨飯 85、Coffee 120、雞腿便當 100 排出來是：</p>
+        <pre class="out"><code>排骨飯     85
+Coffee    120
+雞腿便當  100</code></pre>
+        <p>測試：<code>TestFormatMenu</code>。</p>
+        <details><summary>提示</summary><p>走兩遍：第一遍找出最寬的品名寬度和最長的價格位數（<code>len(strconv.Itoa(price))</code>）；第二遍組每一行。價格的靠右對齊可以用 <code>fmt.Sprintf("%*d", width, price)</code>，<code>*</code> 表示寬度由參數決定。最後用 <code>strings.Join(lines, "\n")</code>，最後一行就不會多一個換行。</p></details>
+      </li>
+    </ol>
+    <p><a href="https://github.com/xinqilin/GO-Playground/blob/main/exercises/08-strings-runes/solution.go">參考解答</a>：先自己寫完再看。測試通過的寫法都是對的。</p>
+  </section>
+
+  <section aria-labelledby="recap">
+    <h2 id="recap">重點回顧</h2>
+    <ul class="recap">
+      <li>字串是唯讀的 byte 序列，不能修改；切片和原本的字串共用記憶體。</li>
+      <li><code>len</code> 是 byte 數，<code>s[i]</code> 是 byte；字數用 <code>utf8.RuneCountInString</code>。</li>
+      <li>UTF-8 裡英文 1 個 byte、常用中文 3 個 byte；用 byte 位置切字串可能把字切壞。</li>
+      <li><code>rune</code> 是 int32，代表一個碼位；<code>'語'</code> 是 rune，<code>"語"</code> 是字串。</li>
+      <li>range 字串一次拿一個 rune，i 是 byte 位置；不合法的 byte 會變成 U+FFFD。</li>
+      <li><code>[]byte(s)</code>、<code>[]rune(s)</code>、<code>string(…)</code> 都會複製；改字串就是轉換、修改、再轉回來。</li>
+      <li>數字轉字串用 <code>strconv.Itoa</code>，不要用 <code>string(n)</code>。</li>
+      <li>strings 套件：Contains、Index、Split、Fields、Join、TrimSpace、TrimPrefix、Cut、ReplaceAll、NewReplacer。</li>
+      <li>迴圈裡累積字串用 <code>strings.Builder</code>，知道大小就先 Grow。</li>
+      <li>strconv 的 Parse 系列一定要檢查 error；unicode 判斷字元種類要搭配 range。</li>
+      <li>中文在終端機佔兩格，對齊要依顯示寬度補空白，不能靠 <code>%-Ns</code>。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="further">
+    <h2 id="further">延伸閱讀</h2>
+    <ul class="notes">
+      <li>Go 語言規格：<a href="https://go.dev/ref/spec#String_types">String types</a>、<a href="https://go.dev/ref/spec#String_literals">String literals</a>、<a href="https://go.dev/ref/spec#Rune_literals">Rune literals</a>、<a href="https://go.dev/ref/spec#Conversions_to_and_from_a_string_type">Conversions to and from a string type</a>、<a href="https://go.dev/ref/spec#For_range">For statements with range clause</a>。</li>
+      <li>套件文件：<a href="https://pkg.go.dev/strings">strings</a>、<a href="https://pkg.go.dev/strconv">strconv</a>、<a href="https://pkg.go.dev/unicode">unicode</a>、<a href="https://pkg.go.dev/unicode/utf8">unicode/utf8</a>。</li>
+      <li>Go Blog：<a href="https://go.dev/blog/strings">Strings, bytes, runes and characters in Go</a>。</li>
+    </ul>
+  </section>
+
   <section aria-labelledby="run">
     <h2 id="run">動手跑</h2>
     <p class="label">在 repo 根目錄</p>
-    <pre class="shell"><code>go run ./chapters/08-strings-runes
-go test ./chapters/08-strings-runes</code></pre>
-    <p><a href="https://github.com/xinqilin/GO-Playground/tree/main/chapters/08-strings-runes">在 GitHub 看完整程式碼</a></p>
+    <pre class="shell"><code>go run ./chapters/08-strings-runes                                  <span class="c"># 執行本章所有示範</span>
+go test ./chapters/08-strings-runes                                 <span class="c"># 驗證頁面上的每一段輸出</span>
+go test -run='^$' -bench=. -benchmem ./chapters/08-strings-runes    <span class="c"># 比較 + 和 Builder</span>
+go test ./exercises/08-strings-runes/                               <span class="c"># 做練習</span></code></pre>
+    <p><a href="https://github.com/xinqilin/GO-Playground/tree/main/chapters/08-strings-runes">在 GitHub 看本章完整程式碼</a>，或看<a href="https://github.com/xinqilin/GO-Playground/tree/main/exercises/08-strings-runes">練習題</a>。</p>
   </section>
 </main>
 
