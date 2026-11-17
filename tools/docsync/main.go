@@ -11,7 +11,7 @@
 //	<pre class="out" data-example="chapters/03-control-flow#Example_guardClause"><code></code></pre>
 //
 // data-src 是「檔案#名稱」。名稱可以是函式、型別、常數或變數，方法寫成 Type.Method，
-// 多個名稱用逗號分開；取出的是宣告本身，不含上方的 doc comment。
+// 多個名稱用逗號分開；取出的是宣告本身，不含上方的 doc comment。只寫「檔案」時取出整個檔案。
 // data-example 是「目錄#Example 函式名」，取出該 Example 的 // Output: 內容。
 // 另外會檢查每個相對連結指到的檔案和 #anchor 都存在。
 package main
@@ -151,15 +151,18 @@ func newSources(root string) *sources {
 	}
 }
 
-// code 依 data-src（檔案#名稱1,名稱2）取出宣告的原始碼，多個宣告之間空一行。
+// code 依 data-src 取出原始碼：「檔案#名稱1,名稱2」取出這些宣告，之間空一行；只寫「檔案」就是整個檔案。
 func (s *sources) code(ref string) (string, error) {
 	path, names, ok := strings.Cut(ref, "#")
-	if !ok || names == "" {
-		return "", fmt.Errorf("data-src %q 要寫成「檔案#名稱」", ref)
+	if ok && names == "" {
+		return "", fmt.Errorf("data-src %q 的 # 後面要寫名稱", ref)
 	}
 	pf, err := s.parse(path)
 	if err != nil {
 		return "", err
+	}
+	if !ok {
+		return strings.TrimRight(string(pf.src), "\n"), nil
 	}
 	var parts []string
 	for _, name := range strings.Split(names, ",") {

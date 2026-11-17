@@ -40,6 +40,7 @@ const pageHTML = `<h2 id="top">示範</h2>
 <pre class="out" data-example="chapters/demo#Example_greet"><code>舊的輸出</code></pre>
 <pre class="code" data-src="chapters/demo/demo.go#pair,pair.sum,large"><code></code></pre>
 <pre class="code"><code>沒有標記的區塊不會被動到</code></pre>
+<pre class="code" data-src="chapters/demo/demo_test.go"><code></code></pre>
 <a href="#top">本頁</a> <a href="other.html#sec">別頁</a> <a href="https://go.dev/">外部</a>
 `
 
@@ -102,6 +103,7 @@ func TestSyncFillsMarkedBlocks(t *testing.T) {
 		`data-example="chapters/demo#Example_greet"><code>哈囉 &lt;世界&gt; &amp; 大家</code></pre>`,
 		`data-src="chapters/demo/demo.go#pair,pair.sum,large"><code>` + wantPair + `</code></pre>`,
 		`<pre class="code"><code>沒有標記的區塊不會被動到</code></pre>`,
+		`data-src="chapters/demo/demo_test.go"><code>` + escapeHTML(strings.TrimRight(demoTestGo, "\n")) + `</code></pre>`,
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("page is missing:\n%s\n\npage:\n%s", want, got)
