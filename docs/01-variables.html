@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>變數與型別｜Go 圖解手冊</title>
-<meta name="description" content="Go 的變數宣告、零值、常數與 iota，以及為什麼型別轉換一定要明寫。">
+<meta name="description" content="Go 的變數宣告、零值、整數與浮點數、溢位與誤差、型別轉換、常數與 iota、作用域與遮蔽、運算子優先順序與位元運算，附可執行的練習題。">
 <link rel="stylesheet" href="assets/style.css">
 </head>
 <body>
@@ -13,143 +13,897 @@
   <span class="count">01 / 24</span>
 </header>
 
-<main class="page">
+<main class="page long">
   <header class="hero">
     <div class="num" aria-hidden="true">01</div>
     <p class="eyebrow">Part 1 · 基礎 · 第 01 章</p>
     <h1>變數與型別</h1>
-    <p class="analogy">變數是貼了名字的盒子，而且每個盒子只收一種東西。</p>
+    <p class="analogy">變數是貼了名字的盒子，而且每個盒子只收一種東西。型別決定盒子裡能放什麼、放得下多大，以及能拿來做哪些運算。</p>
   </header>
 
-  <section aria-labelledby="look">
-    <h2 id="look">看圖</h2>
-    <div class="figs">
-      <figure class="fig">
-        <svg viewBox="0 0 480 212" role="img" aria-label="三個盒子：a 是 int 放 10，s 是 string 放 Go，ok 是 bool 放 true">
-          <title>盒子有名字、有型別</title>
-          <text class="bold t-acc" x="85" y="56" text-anchor="middle">a</text>
-          <text class="bold t-acc" x="240" y="56" text-anchor="middle">s</text>
-          <text class="bold t-acc" x="395" y="56" text-anchor="middle">ok</text>
-          <rect class="acc" x="20" y="70" width="130" height="100" rx="6"/>
-          <rect class="acc" x="175" y="70" width="130" height="100" rx="6"/>
-          <rect class="acc" x="330" y="70" width="130" height="100" rx="6"/>
-          <text class="lg" x="85" y="132" text-anchor="middle">10</text>
-          <text class="lg mono" x="240" y="132" text-anchor="middle">"Go"</text>
-          <text class="lg" x="395" y="132" text-anchor="middle">true</text>
-          <text class="sm mono" x="85" y="196" text-anchor="middle">int</text>
-          <text class="sm mono" x="240" y="196" text-anchor="middle">string</text>
-          <text class="sm mono" x="395" y="196" text-anchor="middle">bool</text>
-        </svg>
-        <figcaption>每個盒子有名字、有型別，只能放那種型別的值。</figcaption>
-      </figure>
+  <nav class="toc-inline" aria-labelledby="toc-title">
+    <p class="label" id="toc-title">本章內容</p>
+    <ol>
+      <li><a href="#goals">本章你會學到</a></li>
+      <li><a href="#declare">宣告變數</a></li>
+      <li><a href="#zero">零值</a></li>
+      <li><a href="#integers">整數</a></li>
+      <li><a href="#floats">浮點數</a></li>
+      <li><a href="#convert">型別轉換</a></li>
+      <li><a href="#consts">常數與 iota</a></li>
+      <li><a href="#scope">作用域與遮蔽</a></li>
+      <li><a href="#operators">運算子</a></li>
+      <li><a href="#pitfalls">常見錯誤</a></li>
+      <li><a href="#java">從 Java 來的你</a></li>
+      <li><a href="#exercises">練習</a></li>
+      <li><a href="#recap">重點回顧</a></li>
+      <li><a href="#further">延伸閱讀</a></li>
+    </ol>
+  </nav>
 
-      <figure class="fig">
-        <svg viewBox="0 0 480 160" role="img" aria-label="沒有給初始值的變數會是零值：int 是 0、float64 是 0、bool 是 false、string 是空字串、指標是 nil">
-          <title>零值：空盒子不是空的</title>
-          <text class="mono" x="240" y="26" text-anchor="middle">var x T</text>
-          <text class="sm mono" x="54" y="56" text-anchor="middle">int</text>
-          <text class="sm mono" x="147" y="56" text-anchor="middle">float64</text>
-          <text class="sm mono" x="240" y="56" text-anchor="middle">bool</text>
-          <text class="sm mono" x="333" y="56" text-anchor="middle">string</text>
-          <text class="sm mono" x="426" y="56" text-anchor="middle">*int</text>
-          <rect class="soft" x="12" y="66" width="84" height="80" rx="6"/>
-          <rect class="soft" x="105" y="66" width="84" height="80" rx="6"/>
-          <rect class="soft" x="198" y="66" width="84" height="80" rx="6"/>
-          <rect class="soft" x="291" y="66" width="84" height="80" rx="6"/>
-          <rect class="soft" x="384" y="66" width="84" height="80" rx="6"/>
-          <text class="mono bold" x="54" y="112" text-anchor="middle">0</text>
-          <text class="mono bold" x="147" y="112" text-anchor="middle">0</text>
-          <text class="mono bold" x="240" y="112" text-anchor="middle">false</text>
-          <text class="mono bold" x="333" y="112" text-anchor="middle">""</text>
-          <text class="mono bold" x="426" y="112" text-anchor="middle">nil</text>
-        </svg>
-        <figcaption>宣告了沒給值，盒子裡就是零值。Go 沒有「未初始化」這回事。</figcaption>
-      </figure>
-
-      <figure class="fig">
-        <svg viewBox="0 0 480 230" role="img" aria-label="int 和 float64 直接相加會編譯錯誤；先用 float64(i) 轉成同一種型別才能算">
-          <title>型別轉換要明說</title>
-          <rect class="acc" x="20" y="30" width="90" height="60" rx="6"/>
-          <text class="bold" x="65" y="67" text-anchor="middle">65</text>
-          <text class="sm mono" x="65" y="108" text-anchor="middle">int</text>
-          <text class="lg" x="132" y="71" text-anchor="middle">+</text>
-          <rect class="acc" x="154" y="30" width="90" height="60" rx="6"/>
-          <text class="bold" x="199" y="67" text-anchor="middle">2.5</text>
-          <text class="sm mono" x="199" y="108" text-anchor="middle">float64</text>
-          <path class="wire hot-ln" d="M252 60 H302"/>
-          <path class="tip hot-tip" d="M314 60 L301 53 L301 67 Z"/>
-          <rect class="hot" x="318" y="30" width="142" height="60" rx="6"/>
-          <text class="bold t-hot" x="389" y="67" text-anchor="middle">編譯錯誤</text>
-
-          <rect class="acc" x="20" y="140" width="90" height="60" rx="6"/>
-          <text class="bold" x="65" y="177" text-anchor="middle">65</text>
-          <text class="sm mono" x="65" y="218" text-anchor="middle">int</text>
-          <path class="wire" d="M118 170 H302"/>
-          <path class="tip" d="M314 170 L301 163 L301 177 Z"/>
-          <text class="small mono" x="210" y="158" text-anchor="middle">float64(i)</text>
-          <rect class="acc" x="318" y="140" width="142" height="60" rx="6"/>
-          <text class="bold" x="389" y="177" text-anchor="middle">65.0</text>
-          <text class="sm mono" x="389" y="218" text-anchor="middle">float64</text>
-        </svg>
-        <figcaption><code>int</code> 和 <code>float64</code> 不能直接相加；先用 <code>float64(i)</code> 換成同一種型別。</figcaption>
-      </figure>
-
-      <figure class="fig">
-        <svg viewBox="0 0 480 202" role="img" aria-label="const 區塊裡的 iota 從 0 開始，每多一行加 1：Sunday 是 0、Monday 是 1、Tuesday 是 2">
-          <title>iota 自動編號</title>
-          <rect class="soft" x="16" y="16" width="250" height="170" rx="8"/>
-          <text class="mono" x="32" y="48">const (</text>
-          <text class="mono" x="56" y="82">Sunday = iota</text>
-          <text class="mono" x="56" y="116">Monday</text>
-          <text class="mono" x="56" y="150">Tuesday</text>
-          <text class="mono" x="32" y="176">)</text>
-          <path class="wire faint" d="M272 76 H344 M272 110 H344 M272 144 H344"/>
-          <path class="tip" d="M356 76 L343 69 L343 83 Z"/>
-          <path class="tip" d="M356 110 L343 103 L343 117 Z"/>
-          <path class="tip" d="M356 144 L343 137 L343 151 Z"/>
-          <circle class="acc" cx="384" cy="76" r="16"/>
-          <circle class="acc" cx="384" cy="110" r="16"/>
-          <circle class="acc" cx="384" cy="144" r="16"/>
-          <text class="bold t-acc" x="384" y="82" text-anchor="middle">0</text>
-          <text class="bold t-acc" x="384" y="116" text-anchor="middle">1</text>
-          <text class="bold t-acc" x="384" y="150" text-anchor="middle">2</text>
-        </svg>
-        <figcaption><code>iota</code> 在 <code>const</code> 區塊裡從 0 開始，每多一行就加 1，常拿來做列舉。</figcaption>
-      </figure>
-    </div>
+  <section aria-labelledby="goals">
+    <h2 id="goals">本章你會學到</h2>
+    <ul class="notes">
+      <li>用 <code>var</code> 和 <code>:=</code> 宣告變數，知道各自能用在哪裡。</li>
+      <li>零值是什麼，為什麼 Go 沒有「未初始化」的變數。</li>
+      <li>整數型別的範圍、溢位、整數除法和餘數的規則。</li>
+      <li>浮點數為什麼會有誤差，金額該怎麼存。</li>
+      <li>型別轉換一定要明寫，以及數字和字串互轉的正確方法。</li>
+      <li>常數、沒有型別的常數，以及用 <code>iota</code> 做列舉和位元旗標。</li>
+      <li>作用域和遮蔽（shadowing），運算子的優先順序和位元運算。</li>
+    </ul>
+    <p>先備：<a href="00-hello.html">00 第一支程式</a>（會執行程式、看得懂編譯錯誤）。</p>
   </section>
 
-  <section aria-labelledby="code">
-    <h2 id="code">最小範例</h2>
-    <pre class="code"><code>func main() {
-	var a int = 10 <span class="c">// 完整寫法</span>
-	var b = 20     <span class="c">// 由右邊的值推斷型別</span>
-	c := 30        <span class="c">// 簡短宣告，只能在函式裡用</span>
-	a, b = b, a    <span class="c">// 交換</span>
-
-	var zero string <span class="c">// 沒給值：零值 ""</span>
-	const (
-		Small  = iota <span class="c">// 0</span>
-		Medium        <span class="c">// 1</span>
-		Large         <span class="c">// 2</span>
-	)
-	f := float64(c) / 4 <span class="c">// 型別轉換要明說</span>
-	fmt.Println(a, b, c, zero == "", Large, f)
+  <section aria-labelledby="declare">
+    <h2 id="declare">1. 宣告變數</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 212" role="img" aria-label="三個盒子：a 是 int 放 10，s 是 string 放 Go，ok 是 bool 放 true">
+        <title>盒子有名字、有型別</title>
+        <text class="bold t-acc" x="85" y="56" text-anchor="middle">a</text>
+        <text class="bold t-acc" x="240" y="56" text-anchor="middle">s</text>
+        <text class="bold t-acc" x="395" y="56" text-anchor="middle">ok</text>
+        <rect class="acc" x="20" y="70" width="130" height="100" rx="6"/>
+        <rect class="acc" x="175" y="70" width="130" height="100" rx="6"/>
+        <rect class="acc" x="330" y="70" width="130" height="100" rx="6"/>
+        <text class="lg" x="85" y="132" text-anchor="middle">10</text>
+        <text class="lg mono" x="240" y="132" text-anchor="middle">"Go"</text>
+        <text class="lg" x="395" y="132" text-anchor="middle">true</text>
+        <text class="sm mono" x="85" y="196" text-anchor="middle">int</text>
+        <text class="sm mono" x="240" y="196" text-anchor="middle">string</text>
+        <text class="sm mono" x="395" y="196" text-anchor="middle">bool</text>
+      </svg>
+      <figcaption>每個盒子有名字、有型別，只能放那種型別的值。型別在宣告時決定，之後不會變。</figcaption>
+    </figure>
+    <p>Go 是靜態型別語言：每個變數在編譯時就有固定的型別，放錯型別的值會直接編譯失敗。宣告變數有兩種寫法，第一種是 <code>var</code>：</p>
+    <pre class="code" data-src="chapters/01-variables/declare.go#declareVar"><code>func declareVar() {
+	var price int = 85 // 名稱、型別、初始值都寫出來
+	var qty = 3        // 省略型別，由右邊的值推斷成 int
+	var paid bool      // 省略初始值，得到零值 false
+	fmt.Println(price, qty, paid)
 }</code></pre>
     <p class="label">輸出</p>
-    <pre class="out"><code>20 10 30 true 2 7.5</code></pre>
+    <pre class="out" data-example="chapters/01-variables#Example_declareVar"><code>85 3 false</code></pre>
+    <p>三種寫法差在寫出多少資訊。型別寫在名稱<strong>後面</strong>，和 C、Java 相反，讀起來就是「變數 price，型別 int，值是 85」。有給初始值時可以省略型別，編譯器會從右邊的值推斷；沒給初始值時，變數會是那個型別的零值（第 2 節）。</p>
+    <p>第二種是在函式裡最常用的簡短宣告 <code>:=</code>，它同時做「宣告」和「指定」，型別一律推斷：</p>
+    <pre class="code" data-src="chapters/01-variables/declare.go#declareShort"><code>func declareShort() {
+	item := "排骨便當"
+	price := 85
+	price = 90 // 之後要改值用 =，不是 :=
+	fmt.Println(item, price)
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/01-variables#Example_declareShort"><code>排骨便當 90</code></pre>
+    <p>記住一個分工：<strong><code>:=</code> 是建立新變數，<code>=</code> 是修改已經存在的變數</strong>。第三行要改價錢，用的是 <code>=</code>。</p>
+
+    <h3>一次宣告好幾個</h3>
+    <pre class="code" data-src="chapters/01-variables/declare.go#declareMulti"><code>func declareMulti() {
+	var (
+		opens  = 10
+		closes = 20
+	)
+	name, qty := "雞腿便當", 2
+	fmt.Println(opens, closes, name, qty)
+
+	first, second := "A01", "A02"
+	first, second = second, first // 右邊先全部算好，再一起指定，不需要暫存變數
+	fmt.Println(first, second)
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/01-variables#Example_declareMulti"><code>10 20 雞腿便當 2
+A02 A01</code></pre>
+    <p><code>var ( … )</code> 把相關的宣告放成一組，常用在套件層級。<code>first, second = second, first</code> 是 Go 交換兩個變數的慣用寫法：右邊的值會先全部算好，再一起指定給左邊，所以不需要暫存變數。</p>
+
+    <h3>:= 左邊只要有一個新變數</h3>
+    <p>函式常常同時回傳結果和錯誤（第 <a href="04-functions.html">04 章</a>）。連續呼叫好幾個這種函式時，每次都要接一個 <code>err</code>。<code>:=</code> 的規則是：左邊至少要有一個新變數，已經存在的變數就只是被重新指定：</p>
+    <pre class="code" data-src="chapters/01-variables/declare.go#redeclare"><code>func redeclare() {
+	price, err := strconv.Atoi("85")
+	fmt.Println(price, err)
+	qty, err := strconv.Atoi("三") // qty 是新的，err 沿用上面那一個
+	fmt.Println(qty, err)
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/01-variables#Example_redeclare"><code>85 &lt;nil&gt;
+0 strconv.Atoi: parsing "三": invalid syntax</code></pre>
+    <p>第二個 <code>:=</code> 的 <code>qty</code> 是新的，<code>err</code> 沿用第一行宣告的那一個。<code>strconv.Atoi</code> 把字串轉成整數，第 5 節會再看到它。如果左邊全部都是舊變數，編譯器會報 <code>no new variables on left side of :=</code>（常見錯誤 2）。</p>
+
+    <h3>推斷出來的型別</h3>
+    <pre class="code" data-src="chapters/01-variables/declare.go#typeInference"><code>func typeInference() {
+	a := 85
+	b := 85.0
+	c := 'A'
+	d := "A"
+	e := true
+	fmt.Printf("%T %T %T %T %T\n", a, b, c, d, e)
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/01-variables#Example_typeInference"><code>int float64 int32 string bool</code></pre>
+    <p>整數推斷成 <code>int</code>，有小數點就是 <code>float64</code>，單引號的字元是 <code>int32</code>（也就是 <code>rune</code>，代表一個 Unicode 字元，第 <a href="08-strings-runes.html">08 章</a>細講）。想要其他型別，例如 <code>int64</code> 或 <code>float32</code>，就要用 <code>var x int64 = 85</code> 明寫。</p>
+
+    <h3>套件層級的變數</h3>
+    <p>寫在所有函式外面的變數屬於整個 package，同一個 package 的每個函式都能使用。套件層級只能用 <code>var</code>，不能用 <code>:=</code>：</p>
+    <pre class="code" data-src="chapters/01-variables/declare.go#shopName,packageLevel"><code>var shopName = "阿姨便當"
+
+func packageLevel() {
+	fmt.Println("店名：" + shopName)
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/01-variables#Example_packageLevel"><code>店名：阿姨便當</code></pre>
+    <p>套件層級的變數任何函式都能改，程式一大就很難追是誰改的。實務上它多半用來放設定好就不再改的值，或者乾脆用常數（第 6 節）。</p>
   </section>
 
-  <section aria-labelledby="notes">
-    <h2 id="notes">工程師筆記</h2>
+  <section aria-labelledby="zero">
+    <h2 id="zero">2. 零值</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 160" role="img" aria-label="沒有給初始值的變數會是零值：int 是 0、float64 是 0、bool 是 false、string 是空字串、指標是 nil">
+        <title>零值：空盒子不是空的</title>
+        <text class="mono" x="240" y="26" text-anchor="middle">var x T</text>
+        <text class="sm mono" x="54" y="56" text-anchor="middle">int</text>
+        <text class="sm mono" x="147" y="56" text-anchor="middle">float64</text>
+        <text class="sm mono" x="240" y="56" text-anchor="middle">bool</text>
+        <text class="sm mono" x="333" y="56" text-anchor="middle">string</text>
+        <text class="sm mono" x="426" y="56" text-anchor="middle">*int</text>
+        <rect class="soft" x="12" y="66" width="84" height="80" rx="6"/>
+        <rect class="soft" x="105" y="66" width="84" height="80" rx="6"/>
+        <rect class="soft" x="198" y="66" width="84" height="80" rx="6"/>
+        <rect class="soft" x="291" y="66" width="84" height="80" rx="6"/>
+        <rect class="soft" x="384" y="66" width="84" height="80" rx="6"/>
+        <text class="mono bold" x="54" y="112" text-anchor="middle">0</text>
+        <text class="mono bold" x="147" y="112" text-anchor="middle">0</text>
+        <text class="mono bold" x="240" y="112" text-anchor="middle">false</text>
+        <text class="mono bold" x="333" y="112" text-anchor="middle">""</text>
+        <text class="mono bold" x="426" y="112" text-anchor="middle">nil</text>
+      </svg>
+      <figcaption>宣告了沒給值，盒子裡就是零值。Go 沒有「未初始化」這回事。</figcaption>
+    </figure>
+    <p>Go 的每個變數一宣告就有值。沒有給初始值時，會自動填入那個型別的<strong>零值</strong>（zero value）：</p>
+    <pre class="code" data-src="chapters/01-variables/zero.go#zeroValues"><code>func zeroValues() {
+	var i int
+	var f float64
+	var ok bool
+	var s string
+	var p *int
+	fmt.Printf("int=%d float64=%g bool=%t string=%q pointer=%v\n", i, f, ok, s, p)
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/01-variables#Example_zeroValues"><code>int=0 float64=0 bool=false string="" pointer=&lt;nil&gt;</code></pre>
+    <p>數字是 0，布林是 false，字串是空字串 <code>""</code>，指標是 <code>nil</code>（第 <a href="05-pointers.html">05 章</a>）。之後會學到的 slice、map、channel、函式、interface，零值也都是 <code>nil</code>；struct 的零值則是每個欄位各自的零值。</p>
+    <p>零值的好處是可以直接拿來用。計數器不用先寫 <code>= 0</code>，字串不用先寫 <code>= ""</code>：</p>
+    <pre class="code" data-src="chapters/01-variables/zero.go#zeroUsable"><code>func zeroUsable() {
+	var count int    // 0
+	var order string // ""
+	count++
+	order += "排骨"
+	count++
+	order += "、雞腿"
+	fmt.Printf("%d 個：%s\n", count, order)
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/01-variables#Example_zeroUsable"><code>2 個：排骨、雞腿</code></pre>
+    <aside class="callout">
+      <span class="title">「讓零值有用」是 Go 的設計習慣</span>
+      <p>標準庫的很多型別，宣告完不用呼叫建構函式就能用，例如 <code>strings.Builder</code> 和 <code>sync.Mutex</code>。設計自己的型別時，也盡量讓零值代表一個合理的狀態。第 <a href="09-structs-methods.html">09 章</a>會再談這件事。第 6 節的 <code>Priority</code> 從 1 開始編號，也是為了讓零值 0 有「還沒設定」的意思。</p>
+    </aside>
+  </section>
+
+  <section aria-labelledby="integers">
+    <h2 id="integers">3. 整數</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 240" role="img" aria-label="int8 的範圍是 -128 到 127，127 加 1 會繞回 -128；uint8 的範圍是 0 到 255，0 減 1 會繞回 255">
+        <title>整數溢位會繞一圈</title>
+        <text class="small mono bold" x="16" y="40">int8</text>
+        <rect class="soft" x="70" y="20" width="390" height="30" rx="6"/>
+        <text class="small mono" x="80" y="40">-128</text>
+        <text class="small mono" x="265" y="40" text-anchor="middle">0</text>
+        <text class="small mono" x="450" y="40" text-anchor="end">127</text>
+        <path class="wire hot-ln" d="M440 54 C440 92, 90 92, 90 64"/>
+        <path class="tip hot-tip" d="M90 52 L83 64 L97 64 Z"/>
+        <text class="small t-hot" x="265" y="114" text-anchor="middle">127 + 1 變成 -128</text>
+        <text class="small mono bold" x="16" y="154">uint8</text>
+        <rect class="soft" x="70" y="134" width="390" height="30" rx="6"/>
+        <text class="small mono" x="80" y="154">0</text>
+        <text class="small mono" x="450" y="154" text-anchor="end">255</text>
+        <path class="wire hot-ln" d="M90 168 C90 206, 440 206, 440 178"/>
+        <path class="tip hot-tip" d="M440 166 L433 178 L447 178 Z"/>
+        <text class="small t-hot" x="265" y="230" text-anchor="middle">0 - 1 變成 255</text>
+      </svg>
+      <figcaption>每種整數型別都有固定的位元數和範圍。執行時超出範圍不會報錯，而是從另一端繞回來。</figcaption>
+    </figure>
+    <p>Go 的整數型別依照「有沒有負數」和「佔幾個位元」區分：</p>
     <ul class="notes">
-      <li><code>:=</code> 只能用在函式裡；套件層級的變數要用 <code>var</code>。</li>
-      <li>宣告了卻沒用到的區域變數是編譯錯誤。</li>
-      <li>數字型別不會自動轉換，連 <code>int</code> 和 <code>int64</code> 都不能直接相加。</li>
-      <li>沒有型別的常數（例如 <code>const big = 1 &lt;&lt; 100</code>）精度很高，用到時才決定型別，只要結果放得進去就好。</li>
-      <li>整數溢位會繞回去：<code>int8</code> 的 127 加 1 變成 -128，不會丟出錯誤。</li>
-      <li><code>int</code> 的大小跟著平台走，64 位元系統上是 64 bit；需要固定大小就用 <code>int32</code>、<code>int64</code>。<code>byte</code> 是 <code>uint8</code> 的別名，<code>rune</code> 是 <code>int32</code> 的別名。</li>
+      <li><strong>有號</strong>：<code>int8</code>、<code>int16</code>、<code>int32</code>、<code>int64</code>，以及 <code>int</code>。</li>
+      <li><strong>無號</strong>（沒有負數）：<code>uint8</code>、<code>uint16</code>、<code>uint32</code>、<code>uint64</code>，以及 <code>uint</code>。</li>
+      <li><strong>別名</strong>：<code>byte</code> 就是 <code>uint8</code>，用來表示原始的位元組；<code>rune</code> 就是 <code>int32</code>，用來表示一個 Unicode 字元。</li>
+      <li><strong>大小跟著平台走</strong>：<code>int</code> 和 <code>uint</code> 在 64 位元系統上是 64 位元，在 32 位元系統上是 32 位元。</li>
     </ul>
+    <p><code>math</code> 套件為每一種型別都準備了上下限常數：</p>
+    <pre class="code" data-src="chapters/01-variables/integers.go#intRanges"><code>func intRanges() {
+	fmt.Printf("%-6s %d ~ %d\n", "int8", math.MinInt8, math.MaxInt8)
+	fmt.Printf("%-6s %d ~ %d\n", "uint8", 0, math.MaxUint8)
+	fmt.Printf("%-6s %d ~ %d\n", "int16", math.MinInt16, math.MaxInt16)
+	fmt.Printf("%-6s %d ~ %d\n", "int32", math.MinInt32, math.MaxInt32)
+	fmt.Printf("%-6s %d ~ %d\n", "int64", int64(math.MinInt64), int64(math.MaxInt64))
+	fmt.Printf("%-6s %d ~ %d\n", "uint64", 0, uint64(math.MaxUint64))
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/01-variables#Example_intRanges"><code>int8   -128 ~ 127
+uint8  0 ~ 255
+int16  -32768 ~ 32767
+int32  -2147483648 ~ 2147483647
+int64  -9223372036854775808 ~ 9223372036854775807
+uint64 0 ~ 18446744073709551615</code></pre>
+    <p>沒有特別理由時就用 <code>int</code>：它是 <code>len()</code> 的回傳型別，也是 slice 索引的型別，用 <code>int</code> 可以少寫很多轉換。需要固定大小時才挑其他型別，例如檔案格式規定 4 個 byte、要和外部系統交換資料，或者要放進大量資料、需要省記憶體的時候。</p>
+
+    <h3>溢位會繞回來</h3>
+    <pre class="code" data-src="chapters/01-variables/integers.go#overflowWrap"><code>func overflowWrap() {
+	var level int8 = 127
+	level++
+	fmt.Println(level)
+
+	var stock uint8 = 0
+	stock--
+	fmt.Println(stock)
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/01-variables#Example_overflowWrap"><code>-128
+255</code></pre>
+    <p>執行時的整數運算超出範圍時，Go 不會報錯，也不會 panic，而是像里程表一樣從另一端繞回來：<code>int8</code> 的 127 加 1 變成 -128，<code>uint8</code> 的 0 減 1 變成 255。這個行為在語言規格裡有明確定義，每台機器的結果都一樣，但它幾乎都代表 bug。<code>uint</code> 系列特別要小心：「庫存減一」減到 0 以下會變成一個超大的正數，而不是負數。所以就算數值不可能是負的，一般計數也習慣用 <code>int</code>。練習 6 會讓你寫一個不會繞回來的加法。</p>
+    <p>如果超出範圍的是<strong>常數</strong>，編譯器在編譯時就能算出來，會直接報錯，例如 <code>var level int8 = 128</code>（常見錯誤 4）。</p>
+
+    <h3>整數除法和餘數</h3>
+    <pre class="code" data-src="chapters/01-variables/integers.go#integerDivision"><code>func integerDivision() {
+	fmt.Println(7/2, 7%2)
+	fmt.Println(-7/2, -7%2)
+	fmt.Println(7.0 / 2)
+
+	total, people := 1000, 3
+	fmt.Println("每人", total/people, "元，剩", total%people, "元")
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/01-variables#Example_integerDivision"><code>3 1
+-3 -1
+3.5
+每人 333 元，剩 1 元</code></pre>
+    <p>兩個整數相除，結果還是整數，小數部分直接捨去，方向是往 0（所以 -7/2 是 -3，不是 -4）。<code>%</code> 是餘數，它的正負號跟著<strong>被除數</strong>：<code>-7 % 2</code> 是 -1。這兩條規則保證 <code>(a/b)*b + a%b == a</code> 永遠成立。想要有小數的結果，至少要有一邊是浮點數，例如 <code>7.0 / 2</code>。</p>
+    <p>整數除法加上餘數很適合處理「分組」的問題：1000 元分給 3 個人，每人 333 元，剩 1 元。練習 1、2 都會用到它。</p>
+
+    <h3>除以 0</h3>
+    <pre class="code" data-src="chapters/01-variables/integers.go#divide,divideByZero"><code>func divide(a, b int) int {
+	return a / b
+}
+
+func divideByZero() {
+	defer func() {
+		fmt.Println("panic:", recover())
+	}()
+	fmt.Println(divide(10, 0))
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/01-variables#Example_divideByZero"><code>panic: runtime error: integer divide by zero</code></pre>
+    <p>整數除以 0 會在執行時 panic，程式會停下來並印出錯誤。這裡用 <code>defer</code> 和 <code>recover</code> 把 panic 接住，才能把訊息印出來，這兩個在第 <a href="04-functions.html">04 章</a>介紹。如果除數是常數 0，例如 <code>10 / 0</code>，編譯器會直接拒絕：<code>invalid operation: division by zero</code>。除數來自使用者輸入時，記得先檢查是不是 0。</p>
+
+    <section class="deep" aria-labelledby="int-size">
+      <p class="tag">深入：第一次讀可以先跳過</p>
+      <h3 id="int-size">3.1 int 到底是幾位元</h3>
+      <p><code>int</code> 的大小由編譯目標決定：<code>GOARCH=amd64</code> 或 <code>arm64</code> 是 64 位元，<code>386</code> 或 <code>arm</code> 是 32 位元。程式裡可以用 <code>strconv.IntSize</code> 查。現在的伺服器和個人電腦幾乎都是 64 位元，但如果你的程式可能跑在 32 位元的嵌入式裝置上，或者要存的值可能超過 21 億（例如以毫秒計的時間戳、金額的累計），就直接用 <code>int64</code>，不要賭平台。</p>
+      <p>這也是為什麼上面的 <code>intRanges</code> 寫成 <code>int64(math.MinInt64)</code>：沒有型別的常數傳給 <code>Printf</code> 時會變成 <code>int</code>，在 32 位元平台上放不下，會編譯失敗。先轉成 <code>int64</code> 就不受平台影響。</p>
+    </section>
+  </section>
+
+  <section aria-labelledby="floats">
+    <h2 id="floats">4. 浮點數</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 200" role="img" aria-label="用 float64 計算 0.1 加 0.2 得到 0.30000000000000004；改用整數的角計算，1 角加 2 角剛好是 3 角">
+        <title>浮點數有誤差，整數沒有</title>
+        <text class="sm" x="16" y="34">float64</text>
+        <rect class="acc" x="16" y="44" width="120" height="44" rx="6"/>
+        <text class="small mono" x="76" y="71" text-anchor="middle">0.1 + 0.2</text>
+        <path class="wire" d="M142 66 H184"/>
+        <path class="tip" d="M196 66 L183 59 L183 73 Z"/>
+        <rect class="hot" x="200" y="44" width="264" height="44" rx="6"/>
+        <text class="small mono t-hot" x="332" y="71" text-anchor="middle">0.30000000000000004</text>
+        <text class="sm" x="16" y="124">int（單位：角）</text>
+        <rect class="acc" x="16" y="134" width="120" height="44" rx="6"/>
+        <text class="small mono" x="76" y="161" text-anchor="middle">1 + 2</text>
+        <path class="wire" d="M142 156 H184"/>
+        <path class="tip" d="M196 156 L183 149 L183 163 Z"/>
+        <rect class="acc" x="200" y="134" width="264" height="44" rx="6"/>
+        <text class="small" x="332" y="161" text-anchor="middle">3 角，也就是 0.3 元</text>
+      </svg>
+      <figcaption>二進位無法精確表示 0.1，誤差會累積。金額這種需要精確的數字，改用整數存最小單位。</figcaption>
+    </figure>
+    <p>Go 有兩種浮點數：<code>float64</code> 和 <code>float32</code>。<code>float64</code> 有大約 15–16 位有效數字，是預設的選擇；<code>float32</code> 精度只有 6–7 位，除非要省記憶體或配合外部格式，不然不要用。標準庫的 <code>math</code> 套件也全部以 <code>float64</code> 為準。</p>
+    <p>浮點數最重要的一件事是：<strong>它只是近似值</strong>。</p>
+    <pre class="code" data-src="chapters/01-variables/floats.go#floatError"><code>func floatError() {
+	a, b := 0.1, 0.2
+	fmt.Println(a+b, a+b == 0.3)
+
+	sum := 0.0
+	for range 10 {
+		sum += 0.1
+	}
+	fmt.Println(sum)
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/01-variables#Example_floatError"><code>0.30000000000000004 false
+0.9999999999999999</code></pre>
+    <p>浮點數用二進位存小數，而 0.1 在二進位是無限循環小數，就像 1/3 在十進位寫不完一樣，只能存一個最接近的值。0.1 和 0.2 各有一點點誤差，加起來就不等於 0.3 存起來的那個值。加十次 0.1 也到不了 1。這不是 Go 的問題，Java 的 <code>double</code>、JavaScript 的 number 都一樣。</p>
+
+    <h3>比較時允許一點誤差</h3>
+    <p>因為有誤差，浮點數很少用 <code>==</code> 比較，而是看兩者的差距夠不夠小：</p>
+    <pre class="code" data-src="chapters/01-variables/floats.go#floatCompare"><code>func floatCompare() {
+	a, b := 0.1, 0.2
+	const epsilon = 1e-9
+	fmt.Println(math.Abs(a+b-0.3) &lt; epsilon)
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/01-variables#Example_floatCompare"><code>true</code></pre>
+    <p><code>math.Abs</code> 是絕對值。誤差範圍 <code>epsilon</code> 要多小，取決於你的數字有多大、需要多精確，沒有萬用的值。</p>
+
+    <h3>金額用整數存</h3>
+    <pre class="code" data-src="chapters/01-variables/floats.go#moneyInTenths"><code>func moneyInTenths() {
+	rate := 2.1
+	fmt.Println(3 * rate)
+
+	rateTenths := 21
+	total := 3 * rateTenths
+	fmt.Printf("%d.%d 元\n", total/10, total%10)
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/01-variables#Example_moneyInTenths"><code>6.300000000000001
+6.3 元</code></pre>
+    <p>用浮點數算錢，誤差會跑進帳單。常見的做法是用整數存最小單位：台幣通常整數就夠，有小數時改存「角」或「分」，美金存「cent」。要顯示時再用整數除法和餘數拆成整數部分和小數部分。如果需要任意精度的小數運算，標準庫有 <code>math/big</code>，但大多數情況下整數就夠了。</p>
+
+    <section class="deep" aria-labelledby="inf-nan">
+      <p class="tag">深入：第一次讀可以先跳過</p>
+      <h3 id="inf-nan">4.1 無限大與 NaN</h3>
+      <p>整數除以 0 會 panic，浮點數除以 0 卻不會：</p>
+      <pre class="code" data-src="chapters/01-variables/floats.go#floatSpecial"><code>func floatSpecial() {
+	var zero float64
+	fmt.Println(1/zero, -1/zero)
+	nan := zero / zero
+	fmt.Println(nan, nan == nan, math.IsNaN(nan))
+}</code></pre>
+      <p class="label">輸出</p>
+      <pre class="out" data-example="chapters/01-variables#Example_floatSpecial"><code>+Inf -Inf
+NaN false true</code></pre>
+      <p>依照 IEEE 754 浮點數標準，正數除以 0 得到正無限大，0 除以 0 得到 NaN（Not a Number）。NaN 有一個怪特性：它和任何值都不相等，<strong>包括它自己</strong>，所以 <code>nan == nan</code> 是 false，要判斷 NaN 只能用 <code>math.IsNaN</code>。NaN 會一路傳染下去，任何運算碰到它結果都是 NaN；算出一堆 NaN 時，往回找第一個除以 0 或 <code>math.Sqrt(-1)</code> 的地方。</p>
+    </section>
+  </section>
+
+  <section aria-labelledby="convert">
+    <h2 id="convert">5. 型別轉換</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 230" role="img" aria-label="int 和 float64 直接相加會編譯錯誤；先用 float64(i) 轉成同一種型別才能算">
+        <title>型別轉換要明說</title>
+        <rect class="acc" x="20" y="30" width="90" height="60" rx="6"/>
+        <text class="bold" x="65" y="67" text-anchor="middle">65</text>
+        <text class="sm mono" x="65" y="108" text-anchor="middle">int</text>
+        <text class="lg" x="132" y="71" text-anchor="middle">+</text>
+        <rect class="acc" x="154" y="30" width="90" height="60" rx="6"/>
+        <text class="bold" x="199" y="67" text-anchor="middle">2.5</text>
+        <text class="sm mono" x="199" y="108" text-anchor="middle">float64</text>
+        <path class="wire hot-ln" d="M252 60 H302"/>
+        <path class="tip hot-tip" d="M314 60 L301 53 L301 67 Z"/>
+        <rect class="hot" x="318" y="30" width="142" height="60" rx="6"/>
+        <text class="bold t-hot" x="389" y="67" text-anchor="middle">編譯錯誤</text>
+        <rect class="acc" x="20" y="140" width="90" height="60" rx="6"/>
+        <text class="bold" x="65" y="177" text-anchor="middle">65</text>
+        <text class="sm mono" x="65" y="218" text-anchor="middle">int</text>
+        <path class="wire" d="M118 170 H302"/>
+        <path class="tip" d="M314 170 L301 163 L301 177 Z"/>
+        <text class="small mono" x="210" y="158" text-anchor="middle">float64(i)</text>
+        <rect class="acc" x="318" y="140" width="142" height="60" rx="6"/>
+        <text class="bold" x="389" y="177" text-anchor="middle">65.0</text>
+        <text class="sm mono" x="389" y="218" text-anchor="middle">float64</text>
+      </svg>
+      <figcaption><code>int</code> 和 <code>float64</code> 不能直接相加；先用 <code>float64(i)</code> 換成同一種型別。</figcaption>
+    </figure>
+    <p>Go <strong>從不自動轉換型別</strong>。<code>int</code> 不會自動變成 <code>float64</code>，連 <code>int</code> 和 <code>int64</code> 都不能直接相加，兩邊型別不同就是編譯錯誤（常見錯誤 3）。要轉換時，把型別名稱當成函式來用，寫成 <code>型別(值)</code>：</p>
+    <pre class="code" data-src="chapters/01-variables/convert.go#convertNumbers"><code>func convertNumbers() {
+	bill, people := 200, 3
+	fmt.Println(bill/people, float64(bill)/float64(people))
+
+	price := 85.9
+	fmt.Println(int(price), int(-price)) // 直接截掉小數，往 0 的方向
+
+	big := 300
+	fmt.Println(int8(big)) // 放不下時只留下最低的 8 個位元
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/01-variables#Example_convertNumbers"><code>66 66.66666666666667
+85 -85
+44</code></pre>
+    <p>一行一行看：</p>
+    <ul class="notes">
+      <li><strong>整數轉浮點數</strong>：<code>bill/people</code> 是整數除法，得到 66；兩邊都轉成 <code>float64</code> 再除，才有小數。要注意轉換的時機：<code>float64(bill/people)</code> 是先做整數除法、再把 66 轉成 66.0，小數早就不見了。練習 3 就是這個 bug。</li>
+      <li><strong>浮點數轉整數</strong>：直接截掉小數，往 0 的方向，不是四捨五入。要四捨五入就用 <code>math.Round</code>。</li>
+      <li><strong>大的整數轉小的整數</strong>：放不下時只留下最低的幾個位元。300 的二進位是 1 0010 1100，<code>int8</code> 只留下最後 8 位 0010 1100，也就是 44。編譯器和執行時都不會警告你。</li>
+    </ul>
+    <p>為什麼這麼囉嗦？因為自動轉換是 bug 的溫床：精度在哪裡掉的、數值在哪裡被截斷的，在會自動轉型的語言裡很難看出來。Go 要求每一次轉換都寫出來，讀程式的人一眼就知道這裡可能會失去資訊。</p>
+
+    <h3>數字和字串</h3>
+    <p>數字和字串之間的轉換不是「型別轉換」，而是「解析」和「格式化」，要用 <code>strconv</code> 套件：</p>
+    <pre class="code" data-src="chapters/01-variables/convert.go#convertStrings"><code>func convertStrings() {
+	fmt.Println(strconv.Itoa(85) + " 元")
+
+	n, err := strconv.Atoi("120")
+	fmt.Println(n+1, err)
+
+	_, err = strconv.Atoi("12a")
+	fmt.Println(err)
+
+	fmt.Println(string(rune(65)), strconv.Itoa(65))
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/01-variables#Example_convertStrings"><code>85 元
+121 &lt;nil&gt;
+strconv.Atoi: parsing "12a": invalid syntax
+A 65</code></pre>
+    <ul class="notes">
+      <li><code>strconv.Itoa</code>（integer to ASCII）把整數變成十進位的字串。</li>
+      <li><code>strconv.Atoi</code> 反過來把字串解析成整數。字串不一定是合法的數字，所以它會多回傳一個錯誤，成功時錯誤是 <code>nil</code>。錯誤處理在第 <a href="11-errors.html">11 章</a>詳細介紹，現在只要記得：<strong>一定要檢查 err</strong>。</li>
+      <li><code>string(rune(65))</code> 得到的是 <code>"A"</code>，不是 <code>"65"</code>：把整數轉成字串，Go 會把它當成 Unicode 字元的編號。這個行為太容易誤用，<code>go vet</code> 會在你寫 <code>string(n)</code> 時提出警告（常見錯誤 5）。</li>
+    </ul>
+    <p>需要浮點數或其他進位時，<code>strconv</code> 還有 <code>ParseFloat</code>、<code>FormatFloat</code>、<code>ParseInt</code>、<code>FormatInt</code> 等函式，用 <code>go doc strconv</code> 可以看到完整清單。要把數字嵌進一段文字裡，<code>fmt.Sprintf</code> 通常更方便，第 <a href="02-input-output.html">02 章</a>會介紹。</p>
+  </section>
+
+  <section aria-labelledby="consts">
+    <h2 id="consts">6. 常數與 iota</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 202" role="img" aria-label="const 區塊裡的 iota 從 0 開始，每多一行加 1：Sunday 是 0、Monday 是 1、Tuesday 是 2">
+        <title>iota 自動編號</title>
+        <rect class="soft" x="16" y="16" width="250" height="170" rx="8"/>
+        <text class="mono" x="32" y="48">const (</text>
+        <text class="mono" x="56" y="82">Sunday = iota</text>
+        <text class="mono" x="56" y="116">Monday</text>
+        <text class="mono" x="56" y="150">Tuesday</text>
+        <text class="mono" x="32" y="176">)</text>
+        <path class="wire faint" d="M272 76 H344 M272 110 H344 M272 144 H344"/>
+        <path class="tip" d="M356 76 L343 69 L343 83 Z"/>
+        <path class="tip" d="M356 110 L343 103 L343 117 Z"/>
+        <path class="tip" d="M356 144 L343 137 L343 151 Z"/>
+        <circle class="acc" cx="384" cy="76" r="16"/>
+        <circle class="acc" cx="384" cy="110" r="16"/>
+        <circle class="acc" cx="384" cy="144" r="16"/>
+        <text class="bold t-acc" x="384" y="82" text-anchor="middle">0</text>
+        <text class="bold t-acc" x="384" y="116" text-anchor="middle">1</text>
+        <text class="bold t-acc" x="384" y="150" text-anchor="middle">2</text>
+      </svg>
+      <figcaption><code>iota</code> 在 <code>const</code> 區塊裡從 0 開始，每多一行就加 1，常拿來做列舉。</figcaption>
+    </figure>
+    <p>常數用 <code>const</code> 宣告，值在<strong>編譯時</strong>就決定，執行時不能修改。它只能是數字、字串、布林這類基本的值，不能是函式的回傳結果，也不能是 slice 或 struct：</p>
+    <pre class="code" data-src="chapters/01-variables/constants.go#constBasics"><code>func constBasics() {
+	const shop = "阿姨便當"
+	const bentoPrice = 85
+	const taxRate = 0.05
+	fmt.Println(shop, bentoPrice, bentoPrice*taxRate)
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/01-variables#Example_constBasics"><code>阿姨便當 85 4.25</code></pre>
+    <p>注意最後一個值：整數常數 85 乘上浮點常數 0.05，直接得到 4.25，不需要任何轉換。如果 <code>bentoPrice</code> 是一個 <code>int</code> 變數，這樣寫就會編譯失敗。差別在於這兩個常數<strong>沒有型別</strong>。</p>
+
+    <h3>沒有型別的常數</h3>
+    <pre class="code" data-src="chapters/01-variables/constants.go#untypedConst"><code>func untypedConst() {
+	const n = 3
+	var qty int = n
+	var weight float64 = n
+	var small int8 = n
+	fmt.Println(qty, weight, small)
+
+	const huge = 1 &lt;&lt; 100 // 遠超過 int64，但只要最後用到的結果放得進去就好
+	fmt.Println(huge &gt;&gt; 98)
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/01-variables#Example_untypedConst"><code>3 3 3
+4</code></pre>
+    <p><code>const n = 3</code> 沒寫型別，它只是一個「整數 3」，要等到被用到的時候才決定型別：指定給 <code>int</code> 就是 <code>int</code>，指定給 <code>float64</code> 就是 <code>float64</code>，指定給 <code>int8</code> 也可以，只要放得下。所以同一個常數可以用在很多種型別的地方，不用一直轉換。沒有型別的常數用在不需要特定型別的地方，例如 <code>x := n</code>，就會用它的預設型別：整數是 <code>int</code>，小數是 <code>float64</code>。</p>
+    <p>沒有型別的常數在編譯時用很高的精度計算。<code>1 &lt;&lt; 100</code> 遠超過 <code>int64</code> 能放的範圍，但只要最後真正用到的值放得下（<code>huge &gt;&gt; 98</code> 是 4），就沒問題。直接印 <code>huge</code> 的話，它要變成 <code>int</code> 才能傳給 <code>Println</code>，就會編譯失敗：</p>
+    <pre class="out err"><code>./main.go:8:14: cannot use huge (untyped int constant 1267650600228229401496703205376) as int value in argument to fmt.Println (overflows)</code></pre>
+    <p>也可以寫成<strong>有型別的常數</strong>：<code>const limit int8 = 100</code>。這時它就和 <code>int8</code> 變數一樣，不能和其他型別混用。大部分時候不寫型別比較方便；需要配合自訂型別時才寫，例如下面的 <code>Weekday</code>。</p>
+
+    <h3>iota：自動編號</h3>
+    <p>Go 沒有 <code>enum</code> 關鍵字。要表示「星期幾」這種一組固定的選項，慣例是先定義一個自訂型別，再用 <code>const</code> 區塊搭配 <code>iota</code> 編號：</p>
+    <pre class="code" data-src="chapters/01-variables/constants.go#Weekday,Sunday,iotaWeekday"><code>type Weekday int
+
+const (
+	Sunday  Weekday = iota // 0
+	Monday                 // 1：沒寫的話沿用上一行的寫法，iota 自動加 1
+	Tuesday                // 2
+	Wednesday
+	Thursday
+	Friday
+	Saturday
+)
+
+func iotaWeekday() {
+	fmt.Println(Sunday, Monday, Saturday)
+	today := Friday
+	fmt.Println(today+1 == Saturday) // 可以和沒有型別的常數 1 運算
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/01-variables#Example_iotaWeekday"><code>0 1 6
+true</code></pre>
+    <p><code>iota</code> 在每個 <code>const</code> 區塊裡從 0 開始，每多一行就加 1。區塊裡沒寫等號的行，會沿用上一行的寫法（型別和運算式），只是 <code>iota</code> 換成新的值，所以只要第一行寫 <code>Weekday = iota</code>，後面的常數就自動變成 1、2、3……，型別也都是 <code>Weekday</code>。</p>
+    <p><code>type Weekday int</code> 定義了一個新型別，它的底層是 <code>int</code>，但它和 <code>int</code> 是<strong>不同的型別</strong>：一個 <code>Weekday</code> 變數和一個 <code>int</code> 變數不能直接相加。和沒有型別的常數 <code>1</code> 運算則沒問題，所以 <code>today+1</code> 可以編譯。自訂型別讓編譯器幫你擋住「把數量當成星期幾」這類錯誤。第 <a href="02-input-output.html">02 章</a>會教你讓 <code>Weekday</code> 印出「星期五」而不是 5。</p>
+
+    <h3>iota 的兩種常見寫法</h3>
+    <pre class="code" data-src="chapters/01-variables/constants.go#Priority,Low,Note,Spicy,iotaPatterns"><code>type Priority int
+
+const (
+	Low Priority = iota + 1
+	Normal
+	High
+)
+
+type Note uint8
+
+const (
+	Spicy     Note = 1 &lt;&lt; iota // 0001
+	NoOnion                    // 0010
+	ExtraRice                  // 0100
+	Takeout                    // 1000
+)
+
+func iotaPatterns() {
+	var p Priority
+	fmt.Println(p, Low, Normal, High)
+	fmt.Println(Spicy, NoOnion, ExtraRice, Takeout)
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/01-variables#Example_iotaPatterns"><code>0 1 2 3
+1 2 4 8</code></pre>
+    <ul class="notes">
+      <li><strong>從 1 開始</strong>：<code>iota + 1</code>。這樣零值 0 不會是任何一個合法的選項，看到 0 就知道「還沒設定」。</li>
+      <li><strong>位元旗標</strong>：<code>1 &lt;&lt; iota</code> 得到 1、2、4、8，每個常數只佔一個位元，可以用 <code>|</code> 組合起來，一個變數就能記住好幾個備註。第 8 節會用位元運算操作它們。</li>
+      <li><strong>跳過某個值</strong>：在區塊裡寫 <code>_ = iota</code>，那一行的編號就被丟掉。練習 4 會用到這個技巧，搭配 <code>1 &lt;&lt; (10 * iota)</code> 做出 KB、MB、GB。</li>
+    </ul>
+
+    <section class="deep" aria-labelledby="const-why">
+      <p class="tag">深入：第一次讀可以先跳過</p>
+      <h3 id="const-why">6.1 為什麼常數要分有沒有型別</h3>
+      <p>Go 一方面嚴格禁止自動轉型，另一方面又希望 <code>x * 2</code>、<code>price * 0.05</code>、<code>time.Second * 3</code> 這種寫法不用到處加轉換。沒有型別的常數就是兩者之間的折衷：常數的值在編譯時就知道，編譯器可以確認它放進目標型別時不會失真；放不下（例如把 128 放進 <code>int8</code>，或把 3.5 放進 <code>int</code>）就直接報錯。所以常數的「自動轉換」是安全的，變數的則不是。</p>
+      <p>規格要求編譯器至少用 256 位元表示整數常數，浮點常數的精度也很高，所以常數之間的運算是精確的：<code>0.1 + 0.2</code> 這兩個常數相加剛好等於 0.3，只有存進 <code>float64</code> 變數之後才會出現第 4 節看到的誤差。</p>
+    </section>
+  </section>
+
+  <section aria-labelledby="scope">
+    <h2 id="scope">7. 作用域與遮蔽</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 252" role="img" aria-label="四層作用域由外到內：全域有 int、len、true；套件有 shopName；函式有 qty；區塊有 price。內層看得到外層的名字，外層看不到內層">
+        <title>作用域一層包一層</title>
+        <rect class="soft dash" x="8" y="8" width="464" height="236" rx="12"/>
+        <text class="sm" x="24" y="32">全域：int、len、true、nil…</text>
+        <rect class="box" x="24" y="44" width="432" height="192" rx="10"/>
+        <text class="small" x="40" y="68">套件：shopName</text>
+        <rect class="soft" x="40" y="80" width="400" height="146" rx="8"/>
+        <text class="small" x="56" y="104">函式 scopeLevels：qty</text>
+        <rect class="acc" x="56" y="116" width="368" height="98" rx="6"/>
+        <text class="small bold" x="72" y="142">區塊 { }：price</text>
+        <text class="sm" x="72" y="170">這裡看得到 price、qty、shopName</text>
+        <text class="sm" x="72" y="196">離開 } 之後，price 就不存在了</text>
+      </svg>
+      <figcaption>作用域一層包一層。找一個名字時由內往外找，用到第一個找到的。</figcaption>
+    </figure>
+    <p>一個名字（變數、常數、函式、型別）在哪裡可以使用，叫做它的<strong>作用域</strong>（scope）。Go 的作用域由大括號決定，由外到內是：</p>
+    <ul class="notes">
+      <li><strong>全域</strong>（universe）：Go 內建的名字，例如 <code>int</code>、<code>string</code>、<code>true</code>、<code>nil</code>、<code>len</code>、<code>append</code>，在任何地方都能用。</li>
+      <li><strong>套件</strong>：寫在函式外面的宣告，整個 package 都看得到，不管在哪個檔案。</li>
+      <li><strong>檔案</strong>：<code>import</code> 進來的套件名稱，只在那個檔案有效。所以每個檔案都要自己寫 import。</li>
+      <li><strong>函式與區塊</strong>：函式裡宣告的變數，從宣告那一行開始，到所在的大括號結束為止有效。<code>if</code>、<code>for</code>、<code>switch</code> 的大括號也都是區塊，第 <a href="03-control-flow.html#if">03 章</a>會看到 <code>if</code> 的初始化敘述也有自己的作用域。</li>
+    </ul>
+    <pre class="code" data-src="chapters/01-variables/scope.go#scopeLevels"><code>func scopeLevels() {
+	fmt.Println("套件層級：", shopName)
+	qty := 3 // 函式層級
+	{
+		price := 85 // 區塊層級：只在這對大括號裡有效
+		fmt.Println("區塊裡：", qty*price)
+	}
+	// 這裡已經看不到 price
+	fmt.Println("函式裡：", qty)
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/01-variables#Example_scopeLevels"><code>套件層級： 阿姨便當
+區塊裡： 255
+函式裡： 3</code></pre>
+    <p>一對單獨的大括號也能開一個新的區塊。<code>price</code> 只在裡面有效，在大括號外面使用它會編譯失敗：<code>undefined: price</code>。變數的作用域越小越好，讀程式的人需要記住的東西就越少。</p>
+
+    <h3>遮蔽</h3>
+    <p>內層可以宣告一個和外層同名的變數。這時內層的名字會<strong>遮蔽</strong>（shadow）外層的，在內層的範圍裡，外層那個就看不到了：</p>
+    <pre class="code" data-src="chapters/01-variables/scope.go#shadowPackage,printShopName"><code>func shadowPackage() {
+	shopName := "阿姨便當 二號店"
+	fmt.Println(shopName)
+	printShopName()
+}
+
+func printShopName() {
+	fmt.Println(shopName)
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/01-variables#Example_shadowPackage"><code>阿姨便當 二號店
+阿姨便當</code></pre>
+    <p><code>shadowPackage</code> 裡的 <code>shopName</code> 是一個新的區域變數，它沒有改到套件層級的 <code>shopName</code>，所以 <code>printShopName</code> 印出來的還是原本的店名。遮蔽本身是合法的，問題在於它常常不是故意的：在 <code>if</code> 裡用 <code>:=</code> 想改外面的變數，結果宣告了一個新的，外面的值根本沒變。第 <a href="03-control-flow.html#pit-shadow">03 章的常見錯誤</a>有完整的例子。</p>
+    <p>全域的名字也能被遮蔽。把變數取名為 <code>len</code>、<code>new</code>、<code>string</code> 是合法的，但之後在同一個範圍裡就不能再用那個內建函式或型別了（常見錯誤 7）。</p>
+  </section>
+
+  <section aria-labelledby="operators">
+    <h2 id="operators">8. 運算子</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 226" role="img" aria-label="便當備註用四個位元表示：外帶、加飯、不要蔥、辣。Spicy 或 ExtraRice 是 0101；再加上 Takeout 並拿掉 Spicy 變成 1100">
+        <title>一個位元一個旗標</title>
+        <text class="sm" x="226" y="30" text-anchor="middle">外帶</text>
+        <text class="sm" x="290" y="30" text-anchor="middle">加飯</text>
+        <text class="sm" x="354" y="30" text-anchor="middle">不要蔥</text>
+        <text class="sm" x="418" y="30" text-anchor="middle">辣</text>
+        <text class="small mono" x="16" y="74">Spicy|ExtraRice</text>
+        <rect class="soft" x="198" y="46" width="56" height="44" rx="6"/>
+        <rect class="acc" x="262" y="46" width="56" height="44" rx="6"/>
+        <rect class="soft" x="326" y="46" width="56" height="44" rx="6"/>
+        <rect class="acc" x="390" y="46" width="56" height="44" rx="6"/>
+        <text class="mono bold" x="226" y="74" text-anchor="middle">0</text>
+        <text class="mono bold t-acc" x="290" y="74" text-anchor="middle">1</text>
+        <text class="mono bold" x="354" y="74" text-anchor="middle">0</text>
+        <text class="mono bold t-acc" x="418" y="74" text-anchor="middle">1</text>
+        <text class="small mono" x="16" y="134">|= Takeout</text>
+        <rect class="hot" x="198" y="106" width="56" height="44" rx="6"/>
+        <rect class="acc" x="262" y="106" width="56" height="44" rx="6"/>
+        <rect class="soft" x="326" y="106" width="56" height="44" rx="6"/>
+        <rect class="acc" x="390" y="106" width="56" height="44" rx="6"/>
+        <text class="mono bold t-hot" x="226" y="134" text-anchor="middle">1</text>
+        <text class="mono bold t-acc" x="290" y="134" text-anchor="middle">1</text>
+        <text class="mono bold" x="354" y="134" text-anchor="middle">0</text>
+        <text class="mono bold t-acc" x="418" y="134" text-anchor="middle">1</text>
+        <text class="small mono" x="16" y="194">&amp;^= Spicy</text>
+        <rect class="acc" x="198" y="166" width="56" height="44" rx="6"/>
+        <rect class="acc" x="262" y="166" width="56" height="44" rx="6"/>
+        <rect class="soft" x="326" y="166" width="56" height="44" rx="6"/>
+        <rect class="hot" x="390" y="166" width="56" height="44" rx="6"/>
+        <text class="mono bold t-acc" x="226" y="194" text-anchor="middle">1</text>
+        <text class="mono bold t-acc" x="290" y="194" text-anchor="middle">1</text>
+        <text class="mono bold" x="354" y="194" text-anchor="middle">0</text>
+        <text class="mono bold t-hot" x="418" y="194" text-anchor="middle">0</text>
+      </svg>
+      <figcaption>每個備註佔一個位元。<code>|</code> 打開某個位元，<code>&amp;^</code> 關掉它，<code>&amp;</code> 檢查它有沒有打開。</figcaption>
+    </figure>
+    <p>Go 的運算子和 C、Java 大致相同，這一節整理幾個容易出錯或比較特別的地方。</p>
+    <h3>優先順序只有五級</h3>
+    <div class="table-wrap">
+      <table class="vs">
+        <thead><tr><th scope="col">優先順序</th><th scope="col">運算子</th></tr></thead>
+        <tbody>
+          <tr><th scope="row">5（最先算）</th><td><code>*</code>　<code>/</code>　<code>%</code>　<code>&lt;&lt;</code>　<code>&gt;&gt;</code>　<code>&amp;</code>　<code>&amp;^</code></td></tr>
+          <tr><th scope="row">4</th><td><code>+</code>　<code>-</code>　<code>|</code>　<code>^</code></td></tr>
+          <tr><th scope="row">3</th><td><code>==</code>　<code>!=</code>　<code>&lt;</code>　<code>&lt;=</code>　<code>&gt;</code>　<code>&gt;=</code></td></tr>
+          <tr><th scope="row">2</th><td><code>&amp;&amp;</code></td></tr>
+          <tr><th scope="row">1（最後算）</th><td><code>||</code></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>同一級由左往右算。記法很簡單：乘除類比加減類先算，算完才比較，比較完才做邏輯運算。</p>
+    <pre class="code" data-src="chapters/01-variables/operators.go#precedence"><code>func precedence() {
+	fmt.Println(2+3*4, (2+3)*4)
+	fmt.Println(1 + 2&lt;&lt;1) // &lt;&lt; 和 * 同一級，比 + 先算
+	n := 6
+	fmt.Println(n%2 == 0 &amp;&amp; n &gt; 5)
+	fmt.Println(n&amp;1 == 0) // &amp; 也比 == 先算
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/01-variables#Example_precedence"><code>14 20
+5
+true
+true</code></pre>
+    <p>和 C、Java 不同的是位元運算的位置：<code>&lt;&lt;</code> 和 <code>*</code> 同一級，所以 <code>1 + 2&lt;&lt;1</code> 是 1 + 4 = 5（在 Java 是 (1+2)&lt;&lt;1 = 6）；<code>&amp;</code> 比 <code>==</code> 先算，所以 <code>n&amp;1 == 0</code> 就是「n 是偶數」，不需要括號。gofmt 會用空白提示優先順序：<code>2+3*4</code> 寫成 <code>2 + 3*4</code>，緊貼在一起的先算。不確定的時候加括號，讀的人也會感謝你。</p>
+
+    <h3>&amp;&amp; 和 || 會短路</h3>
+    <pre class="code" data-src="chapters/01-variables/operators.go#expensive,shortCircuit"><code>func expensive(total, qty int) bool {
+	return qty &gt; 0 &amp;&amp; total/qty &gt; 100
+}
+
+func shortCircuit() {
+	fmt.Println(expensive(450, 3), expensive(0, 0))
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/01-variables#Example_shortCircuit"><code>true false</code></pre>
+    <p><code>&amp;&amp;</code> 左邊是 false 時，整個結果一定是 false，右邊根本不會執行；<code>||</code> 左邊是 true 時也一樣。所以把「先決條件」放在左邊，就能保護右邊不出錯：<code>qty &gt; 0</code> 擋住了除以 0。Go 的布林值只能是 <code>bool</code>，不能拿整數或指標當條件，<code>if qty</code> 是編譯錯誤，要寫 <code>if qty != 0</code>。</p>
+
+    <h3>++ 是敘述，不是運算式</h3>
+    <pre class="code" data-src="chapters/01-variables/operators.go#incDec"><code>func incDec() {
+	queue := 5
+	queue++    // 來了一位
+	queue--    // 叫走一位
+	queue += 3 // 一次來三位
+	price := 85
+	price *= 2
+	fmt.Println(queue, price)
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/01-variables#Example_incDec"><code>8 170</code></pre>
+    <p><code>queue++</code> 和 <code>queue--</code> 只能自己寫成一行，不能放進其他運算式，也沒有 <code>++queue</code> 這種前置寫法。這樣就不用再爭論 <code>i++ + ++i</code> 是多少：</p>
+    <pre class="code bad" data-compile-error><code>package main
+
+import "fmt"
+
+func main() {
+	i := 1
+	j := i++
+	fmt.Println(i, j)
+}</code></pre>
+    <p class="label">編譯錯誤</p>
+    <pre class="out err"><code>./main.go:7:8: syntax error: unexpected ++ at end of statement</code></pre>
+    <p><code>+=</code>、<code>-=</code>、<code>*=</code>、<code>/=</code>、<code>%=</code>，以及位元運算的 <code>&amp;=</code>、<code>|=</code>、<code>^=</code>、<code>&amp;^=</code>、<code>&lt;&lt;=</code>、<code>&gt;&gt;=</code> 都有。Go 也沒有三元運算子 <code>a ? b : c</code>，要用 <code>if</code> 寫。</p>
+
+    <h3>位元運算</h3>
+    <pre class="code" data-src="chapters/01-variables/operators.go#bitFlags"><code>func bitFlags() {
+	order := Spicy | ExtraRice
+	fmt.Printf("%04b\n", order)
+	fmt.Println(order&amp;Spicy != 0, order&amp;NoOnion != 0)
+	order |= Takeout
+	order &amp;^= Spicy
+	fmt.Printf("%04b\n", order)
+	order ^= NoOnion
+	fmt.Printf("%04b\n", order)
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/01-variables#Example_bitFlags"><code>0101
+true false
+1100
+1110</code></pre>
+    <div class="table-wrap">
+      <table class="vs">
+        <thead><tr><th scope="col">運算子</th><th scope="col">名稱</th><th scope="col">在旗標上的用途</th></tr></thead>
+        <tbody>
+          <tr><th scope="row"><code>a | b</code></th><td>OR</td><td>打開 b 的位元（加上備註）</td></tr>
+          <tr><th scope="row"><code>a &amp; b</code></th><td>AND</td><td>只留下兩邊都有的位元；<code>a&amp;b != 0</code> 表示 a 有 b 的某個位元</td></tr>
+          <tr><th scope="row"><code>a &amp;^ b</code></th><td>AND NOT（bit clear）</td><td>關掉 b 的位元（拿掉備註），Go 特有</td></tr>
+          <tr><th scope="row"><code>a ^ b</code></th><td>XOR</td><td>切換 b 的位元：開的關掉、關的打開</td></tr>
+          <tr><th scope="row"><code>^a</code></th><td>NOT</td><td>每個位元都反過來（Java 的 <code>~a</code>）</td></tr>
+          <tr><th scope="row"><code>a &lt;&lt; n</code>、<code>a &gt;&gt; n</code></th><td>位移</td><td>往左移 n 位等於乘 2ⁿ，往右移等於除以 2ⁿ</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p><code>%04b</code> 是 <code>Printf</code> 的格式，意思是「以二進位印出，至少 4 位，不足補 0」。Go 沒有 Java 的 <code>&gt;&gt;&gt;</code>：右移時，有號整數補符號位，無號整數補 0，由型別決定。位元旗標在實務上很常見，例如檔案權限 <code>0644</code>、網路協定的標頭欄位。練習 5 會用它做員工權限。</p>
+  </section>
+
+  <section aria-labelledby="pitfalls">
+    <h2 id="pitfalls">常見錯誤</h2>
+    <h3 id="pit-pkg-short">1. 在函式外面用 :=</h3>
+    <pre class="code bad" data-compile-error><code>package main
+
+import "fmt"
+
+count := 0
+
+func main() {
+	fmt.Println(count)
+}</code></pre>
+    <p class="label">編譯錯誤</p>
+    <pre class="out err"><code>./main.go:5:1: syntax error: non-declaration statement outside function body</code></pre>
+    <p>函式外面只能寫宣告，而 <code>:=</code> 在語法上是一個敘述。改成 <code>var count = 0</code>，或者更簡單的 <code>var count int</code>（零值就是 0）。</p>
+
+    <h3 id="pit-no-new">2. := 左邊沒有新變數</h3>
+    <pre class="code bad" data-compile-error><code>package main
+
+import "fmt"
+
+func main() {
+	total := 100
+	total := 200
+	fmt.Println(total)
+}</code></pre>
+    <p class="label">編譯錯誤</p>
+    <pre class="out err"><code>./main.go:7:8: no new variables on left side of :=</code></pre>
+    <p>第二次只是要改值，用 <code>=</code>。反過來的情況更危險：在內層區塊用 <code>:=</code>，編譯器不會報錯，而是悄悄宣告一個新的變數（第 7 節的遮蔽）。</p>
+
+    <h3 id="pit-mixed">3. 不同型別直接運算</h3>
+    <pre class="code bad" data-compile-error><code>package main
+
+import "fmt"
+
+func main() {
+	qty := 3
+	price := 85.5
+	fmt.Println(qty * price)
+}</code></pre>
+    <p class="label">編譯錯誤</p>
+    <pre class="out err"><code>./main.go:8:14: invalid operation: qty * price (mismatched types int and float64)</code></pre>
+    <p>改成 <code>float64(qty) * price</code>。同樣的錯誤在使用自訂型別時也會出現，最常見的是 <code>time.Duration</code>：</p>
+    <pre class="code bad" data-compile-error><code>package main
+
+import (
+	"fmt"
+	"time"
+)
+
+func main() {
+	n := 3
+	fmt.Println(n * time.Second)
+}</code></pre>
+    <p class="label">編譯錯誤</p>
+    <pre class="out err"><code>./main.go:10:14: invalid operation: n * time.Second (mismatched types int and time.Duration)</code></pre>
+    <p><code>3 * time.Second</code> 可以編譯，因為 3 是沒有型別的常數；換成 <code>int</code> 變數就不行了，要寫 <code>time.Duration(n) * time.Second</code>。這正是第 6 節說的「常數可以自動轉換，變數不行」。</p>
+
+    <h3 id="pit-const-overflow">4. 常數放不進型別</h3>
+    <pre class="code bad" data-compile-error><code>package main
+
+import "fmt"
+
+func main() {
+	var level int8 = 128
+	fmt.Println(level)
+}</code></pre>
+    <p class="label">編譯錯誤</p>
+    <pre class="out err"><code>./main.go:6:19: cannot use 128 (untyped int constant) as int8 value in variable declaration (overflows)</code></pre>
+    <p>常數的值在編譯時就知道，放不下會直接報錯；換成浮點常數轉整數，例如 <code>int(3.99)</code>，也會得到 <code>cannot convert 3.99 (untyped float constant) to type int</code>。但同樣的事情發生在<strong>執行時</strong>（變數的運算或轉換），就是第 3 節的「繞回來」，不會有任何錯誤。挑型別時要先想清楚值的範圍。</p>
+
+    <h3 id="pit-string-int">5. 用 string(n) 把數字轉成文字</h3>
+    <pre class="code bad" data-vet-error><code>package main
+
+import "fmt"
+
+func main() {
+	n := 65
+	s := string(n)
+	fmt.Println(s)
+}</code></pre>
+    <pre class="shell"><code>go vet .</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out err"><code>main.go:7:7: conversion from int to string yields a string of one rune, not a string of digits</code></pre>
+    <p>這支程式可以編譯，執行會印出 <code>A</code>，而不是 <code>65</code>。vet 的訊息說得很清楚：結果是一個字元，不是一串數字。要數字的文字就用 <code>strconv.Itoa(n)</code>；真的想要字元，就明寫 <code>string(rune(n))</code>，vet 就不會再警告。</p>
+
+    <h3 id="pit-float-eq">6. 用 == 比較浮點數</h3>
+    <div class="compare">
+      <p class="label bad">錯誤寫法</p>
+      <pre class="code bad" data-src="chapters/01-variables/floats.go#floatError"><code>func floatError() {
+	a, b := 0.1, 0.2
+	fmt.Println(a+b, a+b == 0.3)
+
+	sum := 0.0
+	for range 10 {
+		sum += 0.1
+	}
+	fmt.Println(sum)
+}</code></pre>
+      <p class="label good">正確寫法：允許一點誤差</p>
+      <pre class="code good" data-src="chapters/01-variables/floats.go#floatCompare"><code>func floatCompare() {
+	a, b := 0.1, 0.2
+	const epsilon = 1e-9
+	fmt.Println(math.Abs(a+b-0.3) &lt; epsilon)
+}</code></pre>
+    </div>
+    <p>運算過的浮點數幾乎不可能剛好等於你寫的那個小數。比較時用 <code>math.Abs(a-b) &lt; epsilon</code>，金額則從一開始就改用整數存（第 4 節）。</p>
+
+    <h3 id="pit-builtin">7. 變數名稱蓋掉內建的名字</h3>
+    <pre class="code bad" data-compile-error><code>package main
+
+import "fmt"
+
+func main() {
+	len := 3
+	fmt.Println(len("Go"))
+}</code></pre>
+    <p class="label">編譯錯誤</p>
+    <pre class="out err"><code>./main.go:7:14: invalid operation: cannot call len (variable of type int): int is not a function</code></pre>
+    <p><code>len</code> 不是關鍵字，而是全域作用域裡的一個名字，可以被遮蔽。宣告 <code>len := 3</code> 之後，這個範圍裡的 <code>len</code> 就是那個整數了。<code>len</code>、<code>cap</code>、<code>new</code>、<code>copy</code>、<code>string</code>、<code>max</code>、<code>min</code> 都不要拿來當變數名稱，換成 <code>length</code>、<code>count</code>、<code>maxPrice</code> 這種更具體的名字。</p>
   </section>
 
   <section aria-labelledby="java">
@@ -158,23 +912,166 @@
       <table class="vs">
         <thead><tr><th scope="col">主題</th><th scope="col">Java</th><th scope="col">Go</th></tr></thead>
         <tbody>
-          <tr><th scope="row">型別推斷</th><td class="java"><code>var x = 10;</code>（Java 10 起）</td><td><code>x := 10</code> 或 <code>var x = 10</code></td></tr>
+          <tr><th scope="row">宣告</th><td class="java"><code>int x = 10;</code>、<code>var x = 10;</code>（Java 10 起）</td><td><code>var x int = 10</code>、<code>x := 10</code>，型別寫在名稱後面</td></tr>
           <tr><th scope="row">預設值</th><td class="java">欄位有預設值，區域變數沒給值不能用</td><td>任何變數都有零值，宣告完就能用</td></tr>
-          <tr><th scope="row">常數</th><td class="java"><code>static final</code></td><td><code>const</code>，只能是數字、字串、布林</td></tr>
-          <tr><th scope="row">列舉</th><td class="java"><code>enum</code></td><td><code>const</code> 搭配 <code>iota</code></td></tr>
-          <tr><th scope="row">數字轉換</th><td class="java">小轉大會自動轉（<code>int</code> → <code>long</code>）</td><td>一律要明寫，<code>int</code> 不會自動變 <code>int64</code></td></tr>
-          <tr><th scope="row">無號整數</th><td class="java">沒有</td><td><code>uint</code>、<code>uint8</code>、<code>uint64</code> 都有</td></tr>
+          <tr><th scope="row">沒用到的區域變數</th><td class="java">頂多警告</td><td>編譯錯誤</td></tr>
+          <tr><th scope="row"><code>int</code> 的大小</th><td class="java">固定 32 位元，<code>long</code> 是 64 位元</td><td>跟著平台，64 位元系統上是 64 位元；固定大小用 <code>int32</code>、<code>int64</code></td></tr>
+          <tr><th scope="row">無號整數</th><td class="java">沒有（<code>char</code> 除外）</td><td><code>uint8</code> 到 <code>uint64</code>、<code>uint</code> 都有</td></tr>
+          <tr><th scope="row">字元</th><td class="java"><code>char</code>，16 位元的 UTF-16 單位</td><td><code>rune</code>（<code>int32</code>），一個完整的 Unicode 字元</td></tr>
+          <tr><th scope="row">數字轉換</th><td class="java">小轉大自動轉（<code>int</code> → <code>long</code> → <code>double</code>）</td><td>一律要明寫，連 <code>int</code> 到 <code>int64</code> 都要</td></tr>
+          <tr><th scope="row">數字轉字串</th><td class="java"><code>"" + n</code>、<code>String.valueOf(n)</code></td><td><code>strconv.Itoa(n)</code>、<code>fmt.Sprint(n)</code>；<code>"" + n</code> 是編譯錯誤</td></tr>
+          <tr><th scope="row">常數</th><td class="java"><code>static final</code>，可以是任何物件</td><td><code>const</code>，只能是數字、字串、布林，值在編譯時決定</td></tr>
+          <tr><th scope="row">列舉</th><td class="java"><code>enum</code>，本身是類別，可以有欄位和方法</td><td>自訂型別加上 <code>const</code> 和 <code>iota</code>，本質是整數</td></tr>
+          <tr><th scope="row">整數溢位</th><td class="java">默默繞回來，<code>Math.addExact</code> 會丟例外</td><td>默默繞回來，需要時自己檢查</td></tr>
+          <tr><th scope="row">位元運算</th><td class="java"><code>~</code>、<code>&gt;&gt;&gt;</code></td><td><code>^x</code> 取反；沒有 <code>&gt;&gt;&gt;</code>，改用無號型別；多了 <code>&amp;^</code></td></tr>
+          <tr><th scope="row"><code>++</code></th><td class="java">運算式，有前置和後置</td><td>只有後置，而且是敘述</td></tr>
+          <tr><th scope="row">三元運算子</th><td class="java"><code>a ? b : c</code></td><td>沒有，用 <code>if</code></td></tr>
         </tbody>
       </table>
     </div>
   </section>
 
+  <section aria-labelledby="exercises">
+    <h2 id="exercises">練習</h2>
+    <p>題目在 <code>exercises/01-variables/exercises.go</code>。幾題會用到 <code>if</code>，寫法和第 00 章練習的一樣：<code>if 條件 { … }</code>，完整的介紹在第 <a href="03-control-flow.html">03 章</a>。</p>
+    <pre class="shell"><code>go test ./exercises/01-variables/                     <span class="c"># 跑全部練習</span>
+go test ./exercises/01-variables/ -run TestSplitBill  <span class="c"># 只跑一題</span>
+go test -tags solution ./exercises/01-variables/      <span class="c"># 跑參考解答</span></code></pre>
+    <ol class="exercises">
+      <li>
+        <h3><span class="level l1">入門</span>練習 1：分帳</h3>
+        <p>把 total 元平分給 people 個人，回傳每人付的整數元和分不完的零頭。people 小於 1 時回傳 0, 0。</p>
+        <pre class="code" data-src="exercises/01-variables/exercises.go#SplitBill"><code>func SplitBill(total, people int) (each, rest int) {
+	// TODO: 實作
+	return 0, 0
+}</code></pre>
+        <p>例如 <code>SplitBill(1000, 3)</code> 是 <code>333, 1</code>。測試：<code>TestSplitBill</code>。</p>
+        <details><summary>提示</summary><p>整數除法 <code>/</code> 和餘數 <code>%</code> 各算一個。函式有兩個回傳值時寫成 <code>return a, b</code>。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l1">入門</span>練習 2：要幾張桌子</h3>
+        <p>guests 位客人，每桌最多坐 perTable 人，至少要幾張桌子？任何一個參數小於 1 時回傳 0。</p>
+        <pre class="code" data-src="exercises/01-variables/exercises.go#Tables"><code>func Tables(guests, perTable int) int {
+	// TODO: 實作
+	return 0
+}</code></pre>
+        <p>例如 10 位客人、每桌 4 人要 3 張桌子；8 位剛好 2 張。測試：<code>TestTables</code>。</p>
+        <details><summary>提示</summary><p>整數除法是無條件捨去，這題要的是無條件進位。可以先除，再用餘數判斷要不要加 1；也可以用一行算出來：<code>(guests + perTable - 1) / perTable</code>，想想看為什麼這樣就是進位。</p></details>
+      </li>
+      <li>
+        <h3><span class="level fix">找錯</span>練習 3：平均分數</h3>
+        <p>這個函式算出來的平均永遠沒有小數，例如 <code>Average(80, 85, 91)</code> 應該是 85.333…，它卻回傳 85。找出原因並修好它。</p>
+        <pre class="code" data-src="exercises/01-variables/exercises.go#Average"><code>func Average(a, b, c int) float64 {
+	return float64((a + b + c) / 3)
+}</code></pre>
+        <p>測試：<code>TestAverage</code>。</p>
+        <details><summary>提示</summary><p>看清楚括號裡先算了什麼。轉換成 <code>float64</code> 的時間點太晚了，第 5 節有說明。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l2">進階</span>練習 4：檔案大小</h3>
+        <p>先用 <code>iota</code> 改寫 <code>KB</code>、<code>MB</code>、<code>GB</code> 三個常數（不要直接寫出 1024），再實作 <code>FormatSize</code>，把 byte 數寫成好讀的字串。</p>
+        <pre class="code" data-src="exercises/01-variables/exercises.go#KB,FormatSize"><code>const (
+	// TODO: 用 iota 改寫這三個常數，不要直接寫出數字
+	KB = 0
+	MB = 0
+	GB = 0
+)
+
+func FormatSize(bytes int64) string {
+	// TODO: 實作
+	return ""
+}</code></pre>
+        <p>規則：小於 1 KB 用 B，小於 1 MB 用 KB，小於 1 GB 用 MB，其他都用 GB；KB 以上取到小數第一位，負數當成 0。例如 512 是 <code>"512 B"</code>，1536 是 <code>"1.5 KB"</code>，3145728 是 <code>"3.0 MB"</code>。測試：<code>TestFormatSize</code>，它會先檢查三個常數的值。</p>
+        <details><summary>提示</summary><p>1024 是 2 的 10 次方，所以 KB、MB、GB 分別是 <code>1 &lt;&lt; 10</code>、<code>1 &lt;&lt; 20</code>、<code>1 &lt;&lt; 30</code>。寫成 <code>1 &lt;&lt; (10 * iota)</code> 的話，第一行的 iota 是 0，所以要先用 <code>_ = iota</code> 跳過一行。格式化用 <code>fmt.Sprintf("%.1f KB", float64(bytes)/KB)</code>，<code>%.1f</code> 是小數一位。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l2">進階</span>練習 5：員工權限</h3>
+        <p><code>doc.go</code> 定義了四種權限，每種佔一個位元。實作授權、撤銷和檢查三個函式。</p>
+        <pre class="code" data-src="exercises/01-variables/doc.go#Perm,Checkout"><code>type Perm uint8
+
+const (
+	Checkout  Perm = 1 &lt;&lt; iota // 收銀
+	Refund                     // 退款
+	EditPrice                  // 改價
+	CloseDay                   // 關帳
+)</code></pre>
+        <pre class="code" data-src="exercises/01-variables/exercises.go#Grant,Revoke,Has"><code>func Grant(p, q Perm) Perm {
+	// TODO: 實作
+	return 0
+}
+
+func Revoke(p, q Perm) Perm {
+	// TODO: 實作
+	return 0
+}
+
+func Has(p, q Perm) bool {
+	// TODO: 實作
+	return false
+}</code></pre>
+        <p>注意 <code>Has</code> 要的是「每一個」：收銀員（只有 <code>Checkout</code>）問 <code>Has(p, Checkout|Refund)</code> 要回答 false。測試：<code>TestPerm</code>。</p>
+        <details><summary>提示</summary><p>授權和撤銷各是一個運算子，第 8 節的表格裡都有。檢查「有沒有其中一個」是 <code>p&amp;q != 0</code>，但這題要的是「全部都有」：<code>p&amp;q</code> 留下的位元要剛好等於 <code>q</code>。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l2">進階</span>練習 6：不會繞回來的庫存</h3>
+        <p>庫存計數器是 <code>uint8</code>，最多只能記到 255。相加超過 255 時回傳 255 和 false，不能讓它繞回小的數字。</p>
+        <pre class="code" data-src="exercises/01-variables/exercises.go#AddStock"><code>func AddStock(stock, n uint8) (uint8, bool) {
+	// TODO: 實作
+	return 0, false
+}</code></pre>
+        <p>例如 <code>AddStock(250, 5)</code> 是 <code>255, true</code>，<code>AddStock(250, 6)</code> 是 <code>255, false</code>。測試：<code>TestAddStock</code>。</p>
+        <details><summary>提示</summary><p>兩種做法。一是先轉成比較大的型別再相加：<code>int(stock) + int(n)</code>，和 <code>math.MaxUint8</code> 比較。二是利用溢位本身：兩個無號數相加，如果結果反而比其中一個小，就表示繞回來了。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l3">挑戰</span>練習 7：號碼牌循環</h3>
+        <p>號碼牌從 1 到 999 循環，999 的下一號是 1，1 的前一號是 999。回傳 current 往後數 delta 號的號碼，delta 可以是負數，也可以超過 999。</p>
+        <pre class="code" data-src="exercises/01-variables/exercises.go#Ticket"><code>func Ticket(current, delta int) int {
+	// TODO: 實作
+	return 0
+}</code></pre>
+        <p>例如 <code>Ticket(999, 1)</code> 是 1，<code>Ticket(1, -1)</code> 是 999，<code>Ticket(5, -2000)</code> 是 3。測試：<code>TestTicket</code>。</p>
+        <details><summary>提示</summary><p>先把號碼換成從 0 開始的位置（減 1），算完再加回 1，循環就是取 <code>% 999</code>。麻煩在負數：Go 的 <code>%</code> 正負號跟著被除數，<code>-1 % 999</code> 是 -1，不是 998（第 3 節）。得到負的餘數時，再加上 999 就回到正確的範圍。</p></details>
+      </li>
+    </ol>
+    <p><a href="https://github.com/xinqilin/GO-Playground/blob/main/exercises/01-variables/solution.go">參考解答</a>：先自己寫完再看。測試通過的寫法都是對的。</p>
+  </section>
+
+  <section aria-labelledby="recap">
+    <h2 id="recap">重點回顧</h2>
+    <ul class="recap">
+      <li><code>var</code> 哪裡都能用；<code>:=</code> 只能在函式裡，左邊至少要有一個新變數。</li>
+      <li><code>:=</code> 建立新變數，<code>=</code> 修改已存在的變數。</li>
+      <li>沒給初始值的變數是零值：0、false、<code>""</code>、<code>nil</code>，可以直接使用。</li>
+      <li>沒有特別理由就用 <code>int</code> 和 <code>float64</code>；<code>byte</code> 是 <code>uint8</code>，<code>rune</code> 是 <code>int32</code>。</li>
+      <li>執行時的整數溢位會繞回來，不會報錯；常數溢位是編譯錯誤。</li>
+      <li>整數除法往 0 捨去，<code>%</code> 的正負號跟著被除數；整數除以 0 會 panic。</li>
+      <li>浮點數是近似值：不要用 <code>==</code> 比較，金額用整數存最小單位。</li>
+      <li>型別轉換一律明寫成 <code>T(v)</code>；浮點轉整數直接截斷；數字和字串互轉用 <code>strconv</code>。</li>
+      <li>沒有型別的常數用到時才決定型別，所以可以安全地和各種數字型別搭配。</li>
+      <li>列舉用自訂型別加上 <code>iota</code>；<code>1 &lt;&lt; iota</code> 做位元旗標。</li>
+      <li>內層的同名變數會遮蔽外層，包括 <code>len</code> 這類內建名字。</li>
+      <li><code>&lt;&lt;</code>、<code>&amp;</code> 和 <code>*</code> 同一級；<code>&amp;&amp;</code>、<code>||</code> 會短路；<code>++</code> 是敘述；沒有三元運算子。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="further">
+    <h2 id="further">延伸閱讀</h2>
+    <ul class="notes">
+      <li>Go 語言規格：<a href="https://go.dev/ref/spec#Variable_declarations">Variable declarations</a>、<a href="https://go.dev/ref/spec#Short_variable_declarations">Short variable declarations</a>、<a href="https://go.dev/ref/spec#The_zero_value">The zero value</a>、<a href="https://go.dev/ref/spec#Numeric_types">Numeric types</a>、<a href="https://go.dev/ref/spec#Conversions">Conversions</a>。</li>
+      <li>常數：規格的 <a href="https://go.dev/ref/spec#Constants">Constants</a>、<a href="https://go.dev/ref/spec#Constant_expressions">Constant expressions</a>、<a href="https://go.dev/ref/spec#Iota">Iota</a>，以及 Go Blog 的 <a href="https://go.dev/blog/constants">Constants</a>。</li>
+      <li>作用域：規格的 <a href="https://go.dev/ref/spec#Declarations_and_scope">Declarations and scope</a>、<a href="https://go.dev/ref/spec#Predeclared_identifiers">Predeclared identifiers</a>。</li>
+      <li>運算子：規格的 <a href="https://go.dev/ref/spec#Operator_precedence">Operator precedence</a>、<a href="https://go.dev/ref/spec#Arithmetic_operators">Arithmetic operators</a>、<a href="https://go.dev/ref/spec#Integer_overflow">Integer overflow</a>。</li>
+      <li>標準庫文件：<a href="https://pkg.go.dev/strconv">strconv</a>、<a href="https://pkg.go.dev/math">math</a>。</li>
+    </ul>
+  </section>
+
   <section aria-labelledby="run">
     <h2 id="run">動手跑</h2>
     <p class="label">在 repo 根目錄</p>
-    <pre class="shell"><code>go run ./chapters/01-variables
-go test ./chapters/01-variables</code></pre>
-    <p><a href="https://github.com/xinqilin/GO-Playground/tree/main/chapters/01-variables">在 GitHub 看完整程式碼</a></p>
+    <pre class="shell"><code>go run ./chapters/01-variables                  <span class="c"># 執行本章所有示範</span>
+go test ./chapters/01-variables                 <span class="c"># 驗證頁面上的每一段輸出</span>
+go test ./exercises/01-variables/               <span class="c"># 做練習</span></code></pre>
+    <p><a href="https://github.com/xinqilin/GO-Playground/tree/main/chapters/01-variables">在 GitHub 看本章完整程式碼</a>，或看<a href="https://github.com/xinqilin/GO-Playground/tree/main/exercises/01-variables">練習題</a>。</p>
   </section>
 </main>
 
