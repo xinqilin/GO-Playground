@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>interface｜Go 圖解手冊</title>
-<meta name="description" content="Go 的 interface：隱式實作、interface 值裡的型別與值、type switch，以及 nil interface 的陷阱。">
+<meta name="description" content="Go 的 interface：隱式實作、interface 值裡的型別與值、type assertion 與 type switch、any、nil interface 陷阱、標準庫常見的 interface，以及怎麼設計小而且放在使用端的 interface，附可執行的練習題。">
 <link rel="stylesheet" href="assets/style.css">
 </head>
 <body>
@@ -13,140 +13,786 @@
   <span class="count">10 / 24</span>
 </header>
 
-<main class="page">
+<main class="page long">
   <header class="hero">
     <div class="num" aria-hidden="true">10</div>
     <p class="eyebrow">Part 2 · 型別系統 · 第 10 章</p>
     <h1>interface</h1>
-    <p class="analogy">interface 是一張「會做什麼」的清單：方法對上了就符合，不用先報名。</p>
+    <p class="analogy">interface 是一張「會做什麼」的清單。任何型別只要有清單上的方法，就自動符合，不必宣告；用的人只看清單，不管背後是誰。</p>
   </header>
 
-  <section aria-labelledby="look">
-    <h2 id="look">看圖</h2>
-    <div class="figs">
-      <figure class="fig">
-        <svg viewBox="0 0 480 244" role="img" aria-label="Shape 清單要求 Area 和 Perimeter；Rect 和 Circle 兩個都有，自動符合；Line 只有 Length，不符合">
-          <title>interface 是一張技能清單</title>
-          <rect class="acc" x="150" y="16" width="180" height="80" rx="8"/>
-          <text class="mono bold" x="240" y="40" text-anchor="middle">Shape</text>
-          <text class="small mono" x="240" y="64" text-anchor="middle">Area()</text>
-          <text class="small mono" x="240" y="86" text-anchor="middle">Perimeter()</text>
-          <path class="wire acc-ln" d="M200 96 V122 H85 V138 M240 96 V138"/>
-          <path class="tip acc-tip" d="M85 148 L78 135 L92 135 Z"/>
-          <path class="tip acc-tip" d="M240 148 L233 135 L247 135 Z"/>
-          <path class="wire hot-ln dash" d="M280 96 V122 H395 V128"/>
-          <path class="wire hot-ln" d="M387 128 L403 144 M403 128 L387 144"/>
-          <text class="sm t-acc" x="140" y="116" text-anchor="middle">自動符合</text>
-          <text class="sm t-hot" x="436" y="116" text-anchor="middle">缺方法</text>
-          <rect class="soft" x="20" y="150" width="130" height="80" rx="8"/>
-          <rect class="soft" x="175" y="150" width="130" height="80" rx="8"/>
-          <rect class="soft" x="330" y="150" width="130" height="80" rx="8"/>
-          <text class="mono bold" x="85" y="174" text-anchor="middle">Rect</text>
-          <text class="small mono" x="85" y="198" text-anchor="middle">Area()</text>
-          <text class="small mono" x="85" y="218" text-anchor="middle">Perimeter()</text>
-          <text class="mono bold" x="240" y="174" text-anchor="middle">Circle</text>
-          <text class="small mono" x="240" y="198" text-anchor="middle">Area()</text>
-          <text class="small mono" x="240" y="218" text-anchor="middle">Perimeter()</text>
-          <text class="mono bold" x="395" y="174" text-anchor="middle">Line</text>
-          <text class="small mono" x="395" y="198" text-anchor="middle">Length()</text>
-        </svg>
-        <figcaption>Shape 只是一張清單：有 <code>Area()</code> 和 <code>Perimeter()</code> 的型別自動符合，不用宣告 implements。</figcaption>
-      </figure>
+  <nav class="toc-inline" aria-labelledby="toc-title">
+    <p class="label" id="toc-title">本章內容</p>
+    <ol>
+      <li><a href="#goals">本章你會學到</a></li>
+      <li><a href="#implicit">方法清單</a></li>
+      <li><a href="#value">interface 值</a></li>
+      <li><a href="#assert">type assertion</a></li>
+      <li><a href="#switch">type switch 與 any</a></li>
+      <li><a href="#nil">nil interface 陷阱</a></li>
+      <li><a href="#stdlib">標準庫裡的 interface</a></li>
+      <li><a href="#design">設計 interface</a></li>
+      <li><a href="#pitfalls">常見錯誤</a></li>
+      <li><a href="#java">從 Java 來的你</a></li>
+      <li><a href="#exercises">練習</a></li>
+      <li><a href="#recap">重點回顧</a></li>
+      <li><a href="#further">延伸閱讀</a></li>
+    </ol>
+  </nav>
 
-      <figure class="fig">
-        <svg viewBox="0 0 480 256" role="img" aria-label="interface 的值有型別和值兩格；兩格都是 nil 才等於 nil；裝了 nil 的 *MyErr 時型別那格有東西，所以不等於 nil">
-          <title>interface 裡裝著型別和值</title>
-          <text class="sm" x="76" y="22" text-anchor="middle">型別</text>
-          <text class="sm" x="196" y="22" text-anchor="middle">值</text>
-          <rect class="acc" x="16" y="32" width="120" height="50"/>
-          <rect class="acc" x="136" y="32" width="120" height="50"/>
-          <text class="mono" x="76" y="63" text-anchor="middle">Rect</text>
-          <text class="mono" x="196" y="63" text-anchor="middle">{3 4}</text>
-          <text class="small mono" x="280" y="52">Shape = Rect{3, 4}</text>
-          <text class="small" x="280" y="76">不是 nil</text>
-
-          <rect class="soft" x="16" y="112" width="120" height="50"/>
-          <rect class="soft" x="136" y="112" width="120" height="50"/>
-          <text class="mono mute" x="76" y="143" text-anchor="middle">nil</text>
-          <text class="mono mute" x="196" y="143" text-anchor="middle">nil</text>
-          <text class="small mono" x="280" y="132">var e error</text>
-          <text class="small t-acc bold" x="280" y="156">e == nil</text>
-
-          <rect class="hot" x="16" y="192" width="120" height="50"/>
-          <rect class="soft" x="136" y="192" width="120" height="50"/>
-          <text class="mono t-hot" x="76" y="223" text-anchor="middle">*MyErr</text>
-          <text class="mono mute" x="196" y="223" text-anchor="middle">nil</text>
-          <text class="small mono" x="280" y="212">error = (*MyErr)(nil)</text>
-          <text class="small t-hot bold" x="280" y="236">e != nil</text>
-        </svg>
-        <figcaption>interface 的值有「型別」和「值」兩格。兩格都空才等於 nil；裝了一個 nil 指標，型別那格有東西，就不是 nil。</figcaption>
-      </figure>
-
-      <figure class="fig">
-        <svg viewBox="0 0 480 208" role="img" aria-label="type switch 依實際型別分類：Rect 進 case Shape，42 進 case int，字串 hi 進 default">
-          <title>type switch 是分類機</title>
-          <rect class="soft" x="12" y="40" width="110" height="34" rx="6"/>
-          <rect class="soft" x="12" y="93" width="110" height="34" rx="6"/>
-          <rect class="soft" x="12" y="146" width="110" height="34" rx="6"/>
-          <text class="small mono" x="67" y="62" text-anchor="middle">Rect{1, 2}</text>
-          <text class="small mono" x="67" y="115" text-anchor="middle">42</text>
-          <text class="small mono" x="67" y="168" text-anchor="middle">"hi"</text>
-          <path class="wire" d="M122 57 H140 M122 110 H140 M122 163 H140 M140 57 V163 M140 110 H158"/>
-          <path class="tip" d="M168 110 L156 104 L156 116 Z"/>
-          <rect class="acc" x="170" y="70" width="120" height="80" rx="10"/>
-          <text class="small mono" x="230" y="106" text-anchor="middle">switch</text>
-          <text class="small mono" x="230" y="128" text-anchor="middle">v.(type)</text>
-          <path class="wire" d="M290 110 H306 M306 57 V163 M306 57 H320 M306 163 H320"/>
-          <path class="tip" d="M330 57 L318 51 L318 63 Z"/>
-          <path class="tip" d="M330 110 L318 104 L318 116 Z"/>
-          <path class="tip" d="M330 163 L318 157 L318 169 Z"/>
-          <rect class="acc" x="332" y="40" width="136" height="34" rx="6"/>
-          <rect class="acc" x="332" y="93" width="136" height="34" rx="6"/>
-          <rect class="soft" x="332" y="146" width="136" height="34" rx="6"/>
-          <text class="small mono" x="400" y="62" text-anchor="middle">case Shape</text>
-          <text class="small mono" x="400" y="115" text-anchor="middle">case int</text>
-          <text class="small mono" x="400" y="168" text-anchor="middle">default</text>
-        </svg>
-        <figcaption>type switch 依實際型別分類；只想取出某個具體型別，用 <code>v.(T)</code> 加上 <code>ok</code>，就不會 panic。</figcaption>
-      </figure>
-    </div>
+  <section aria-labelledby="goals">
+    <h2 id="goals">本章你會學到</h2>
+    <ul class="notes">
+      <li>定義 interface，以及型別什麼時候算是「滿足」它。</li>
+      <li>interface 值裡面裝著什麼，指標 receiver 對它有什麼影響。</li>
+      <li>用 type assertion 取出具體的值、檢查額外的能力。</li>
+      <li>用 type switch 依型別分流，知道 <code>any</code> 的代價。</li>
+      <li>看懂「不是 nil 的 nil」：最常見的 interface 陷阱。</li>
+      <li>標準庫最常用的幾個 interface，並自己實作 <code>io.Writer</code> 和 <code>sort.Interface</code>。</li>
+      <li>設計 interface：小、放在使用端、組合，以及用假的實作來測試。</li>
+    </ul>
+    <p>先備：<a href="09-structs-methods.html">09 struct 與方法</a>（特別是 <a href="09-structs-methods.html#method-set">method set</a>）、<a href="02-input-output.html#stringer">02 章的 Stringer</a>。</p>
   </section>
 
-  <section aria-labelledby="code">
-    <h2 id="code">最小範例</h2>
-    <pre class="code"><code>type Shape interface{ Area() float64 }
+  <section aria-labelledby="implicit">
+    <h2 id="implicit">1. interface 是一份方法清單</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 236" role="img" aria-label="SMS 和 Email 都有 Notify 方法，所以都符合 Notifier 這份清單；callNumber 只要求一個 Notifier，兩種都能傳進去">
+        <title>有清單上的方法就符合</title>
+        <rect class="soft" x="16" y="30" width="130" height="70" rx="8"/>
+        <text class="mono bold" x="81" y="58" text-anchor="middle">SMS</text>
+        <rect class="box" x="30" y="68" width="102" height="24" rx="4"/>
+        <text class="sm mono" x="81" y="85" text-anchor="middle">Notify</text>
+        <rect class="soft" x="16" y="136" width="130" height="70" rx="8"/>
+        <text class="mono bold" x="81" y="164" text-anchor="middle">Email</text>
+        <rect class="box" x="30" y="174" width="102" height="24" rx="4"/>
+        <text class="sm mono" x="81" y="191" text-anchor="middle">Notify</text>
+        <path class="wire acc-ln" d="M146 65 H174 V110 H186"/>
+        <path class="wire acc-ln" d="M146 171 H174 V126 H186"/>
+        <path class="tip acc-tip" d="M196 118 L184 112 L184 124 Z"/>
+        <rect class="acc" x="198" y="76" width="140" height="84" rx="8"/>
+        <text class="mono bold" x="268" y="104" text-anchor="middle">Notifier</text>
+        <text class="sm" x="268" y="126" text-anchor="middle">清單上只有</text>
+        <text class="sm mono" x="268" y="146" text-anchor="middle">Notify(string)</text>
+        <path class="wire" d="M338 118 H362"/>
+        <path class="tip" d="M372 118 L360 112 L360 124 Z"/>
+        <rect class="box" x="374" y="94" width="96" height="48" rx="6"/>
+        <text class="sm mono" x="422" y="114" text-anchor="middle">callNumber</text>
+        <text class="sm" x="422" y="134" text-anchor="middle">只看清單</text>
+        <text class="sm" x="268" y="216" text-anchor="middle">不必寫 implements</text>
+      </svg>
+      <figcaption>Notifier 只列出一個方法。SMS 和 Email 都有這個方法，所以都可以當成 Notifier 用，它們自己完全不用提到 Notifier。</figcaption>
+    </figure>
+    <p><strong>interface 型別</strong>列出一組方法簽名。任何型別只要擁有這些方法（名稱、參數、回傳值都一樣），就<strong>滿足</strong>（satisfy）這個 interface，可以放進這個型別的變數、當成這個型別的參數傳進去。不需要任何宣告，這叫<strong>隱式實作</strong>：</p>
+    <pre class="code" data-src="chapters/10-interfaces/notifier.go#Notifier,SMS,SMS.Notify,Email,Email.Notify,callNumber,implicitDemo"><code>type Notifier interface {
+	Notify(msg string)
+}
 
-type Rect struct{ W, H float64 }
-type Circle struct{ R float64 }
+type SMS struct {
+	Phone string
+}
 
-func (r Rect) Area() float64   { return r.W * r.H }
-func (c Circle) Area() float64 { return math.Pi * c.R * c.R }
+func (s SMS) Notify(msg string) {
+	fmt.Printf("簡訊 %s：%s\n", s.Phone, msg)
+}
 
-func main() {
-	for _, s := range []Shape{Rect{3, 4}, Circle{1}} {
-		fmt.Printf("%T %.2f\n", s, s.Area())
-	}
-	var v any = Rect{1, 2}
-	if r, ok := v.(Rect); ok {
-		fmt.Println("寬", r.W)
+type Email struct {
+	Addr string
+}
+
+func (e Email) Notify(msg string) {
+	fmt.Printf("Email %s：%s\n", e.Addr, msg)
+}
+
+func callNumber(n Notifier, no int) {
+	n.Notify(fmt.Sprintf("%d 號的餐點好了", no))
+}
+
+func implicitDemo() {
+	callNumber(SMS{Phone: "0912-345-678"}, 17)
+	callNumber(Email{Addr: "amei@example.com"}, 18)
+
+	list := []Notifier{SMS{Phone: "0987-654-321"}, Email{Addr: "kuo@example.com"}}
+	for _, n := range list {
+		n.Notify("明天公休")
 	}
 }</code></pre>
     <p class="label">輸出</p>
-    <pre class="out"><code>main.Rect 12.00
-main.Circle 3.14
-寬 1</code></pre>
+    <pre class="out" data-example="chapters/10-interfaces#Example_implicitDemo"><code>簡訊 0912-345-678：17 號的餐點好了
+Email amei@example.com：18 號的餐點好了
+簡訊 0987-654-321：明天公休
+Email kuo@example.com：明天公休</code></pre>
+    <ul class="notes">
+      <li>callNumber 的參數型別是 Notifier，它只能呼叫 Notify，也只需要 Notify。傳進來的是簡訊還是 Email，它不知道也不在乎。</li>
+      <li><code>[]Notifier</code> 可以裝不同型別的值，只要每一個都滿足 Notifier。</li>
+      <li>SMS 和 Email 的原始碼裡沒有出現 Notifier 這個字。在別的 package 寫的型別，甚至在 Notifier 被寫出來之前就存在的型別，只要方法對得上，就能拿來用。</li>
+    </ul>
+    <p>方法差一點就不算。參數多了一個、回傳值型別不同、名稱拼錯，編譯器都會拒絕，而且會把「有的」和「要的」並排列出來：</p>
+    <pre class="code bad" data-compile-error><code>package main
+
+import "fmt"
+
+type Notifier interface {
+	Notify(msg string)
+}
+
+type Email struct {
+	Addr string
+}
+
+func (e Email) Notify(msg string, urgent bool) {
+	fmt.Println(e.Addr, msg, urgent)
+}
+
+func main() {
+	var n Notifier = Email{Addr: "amei@example.com"}
+	n.Notify("餐點好了")
+}</code></pre>
+    <p class="label">編譯錯誤</p>
+    <pre class="out err"><code>./main.go:18:19: cannot use Email{…} (value of struct type Email) as Notifier value in variable declaration: Email does not implement Notifier (wrong type for method Notify)
+		have Notify(string, bool)
+		want Notify(string)</code></pre>
+    <p>既然不用宣告，要怎麼確定某個型別真的滿足某個 interface？只要有地方把它當成那個 interface 用，編譯器就會檢查。如果程式裡暫時還沒有這樣的地方，可以寫一段專門給編譯器看的宣告：</p>
+    <pre class="code" data-src="chapters/10-interfaces/notifier.go#_"><code>var (
+	_ Notifier = SMS{}
+	_ Notifier = Email{}
+)</code></pre>
+    <p>把 SMS 指定給一個 Notifier 型別的變數，變數名稱是 <code>_</code>，表示不會用到它，也不會佔用任何執行時間。哪天有人改了 Notify 的簽名，這幾行就會編譯失敗，錯誤訊息和上面的一樣。</p>
   </section>
 
-  <section aria-labelledby="notes">
-    <h2 id="notes">工程師筆記</h2>
+  <section aria-labelledby="value">
+    <h2 id="value">2. interface 值</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 254" role="img" aria-label="interface 值有兩格：型別和值。var n Notifier 時兩格都是空的，n 等於 nil；放進 SMS 之後，型別格是 main.SMS，值格是複製進來的 SMS；放進 &amp;b 之後，型別格是 *main.Buzzer，值格是指向 b 的指標">
+        <title>interface 值：型別和值兩格</title>
+        <text class="small mono" x="16" y="38">var n Notifier</text>
+        <rect class="box dash" x="200" y="16" width="120" height="36" rx="4"/>
+        <rect class="box dash" x="320" y="16" width="140" height="36" rx="4"/>
+        <text class="sm mono mute" x="260" y="39" text-anchor="middle">nil</text>
+        <text class="sm mono mute" x="390" y="39" text-anchor="middle">nil</text>
+        <text class="sm" x="200" y="70">型別</text>
+        <text class="sm" x="320" y="70">值</text>
+        <text class="small mono" x="16" y="114">n = SMS{…}</text>
+        <rect class="acc" x="200" y="92" width="120" height="36" rx="4"/>
+        <rect class="soft" x="320" y="92" width="140" height="36" rx="4"/>
+        <text class="sm mono" x="260" y="115" text-anchor="middle">main.SMS</text>
+        <text class="sm mono" x="390" y="115" text-anchor="middle">{0912-…}</text>
+        <text class="sm" x="390" y="146" text-anchor="middle">複製進來的一份</text>
+        <text class="small mono" x="16" y="190">n = &amp;b</text>
+        <rect class="acc" x="200" y="168" width="120" height="36" rx="4"/>
+        <rect class="soft" x="320" y="168" width="140" height="36" rx="4"/>
+        <text class="sm mono" x="260" y="191" text-anchor="middle">*main.Buzzer</text>
+        <text class="sm mono" x="372" y="191" text-anchor="middle">指標</text>
+        <path class="wire hot-ln" d="M404 186 H430 V220 H330"/>
+        <path class="tip hot-tip" d="M320 220 L332 214 L332 226 Z"/>
+        <rect class="hot" x="200" y="206" width="118" height="32" rx="4"/>
+        <text class="sm mono" x="259" y="227" text-anchor="middle">b (Buzzer)</text>
+      </svg>
+      <figcaption>interface 值有兩格：實際的型別，和實際的值。兩格都空才是 nil。放進一般的值會複製一份；放進指標，複製的只是指標，指向的還是原本那個變數。</figcaption>
+    </figure>
+    <pre class="code" data-src="chapters/10-interfaces/value.go#interfaceValue"><code>func interfaceValue() {
+	var n Notifier
+	fmt.Println(n == nil)
+	fmt.Printf("%T\n", n)
+
+	n = SMS{Phone: "0912-345-678"}
+	fmt.Printf("%T %v\n", n, n)
+
+	n = Email{Addr: "amei@example.com"}
+	fmt.Printf("%T %v\n", n, n)
+	fmt.Println(n == nil)
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/10-interfaces#Example_interfaceValue"><code>true
+&lt;nil&gt;
+main.SMS {0912-345-678}
+main.Email {amei@example.com}
+false</code></pre>
+    <p>interface 型別的變數裡面記著兩件事：現在裝的是<strong>哪個型別</strong>（dynamic type），以及<strong>那個值</strong>（dynamic value）。零值是兩格都空的 nil，<code>%T</code> 印出 <code>&lt;nil&gt;</code>。放進 SMS 之後，<code>%T</code> 印出的是裡面那個值的型別 <code>main.SMS</code>，不是 Notifier；同一個變數之後也可以換裝 Email。呼叫 <code>n.Notify(…)</code> 時，Go 依照型別那一格找到要執行的方法，這個「執行時才決定呼叫誰」的動作叫做動態分派（dynamic dispatch）。</p>
+
+    <h3>放進指標</h3>
+    <pre class="code" data-src="chapters/10-interfaces/value.go#Buzzer,Buzzer.Notify,pointerInInterface"><code>type Buzzer struct {
+	No    int
+	count int
+}
+
+func (b *Buzzer) Notify(msg string) {
+	b.count++
+	fmt.Printf("呼叫器 %d 號響了（第 %d 次）：%s\n", b.No, b.count, msg)
+}
+
+func pointerInInterface() {
+	b := Buzzer{No: 5}
+	var n Notifier = &amp;b
+	n.Notify("餐點好了")
+	n.Notify("請到櫃台取餐")
+	fmt.Println(b.count)
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/10-interfaces#Example_pointerInInterface"><code>呼叫器 5 號響了（第 1 次）：餐點好了
+呼叫器 5 號響了（第 2 次）：請到櫃台取餐
+2</code></pre>
+    <p>取餐呼叫器要記得自己響了幾次，Notify 必須修改 count，所以用指標 receiver（<a href="09-structs-methods.html#receivers">09 章</a>）。放進 interface 的是 <code>&amp;b</code>，透過 n 呼叫兩次，改到的就是 b 本身，最後印出 2。</p>
+    <p>那可以放 b 本身嗎？不行。09 章的 <a href="09-structs-methods.html#method-set">method set</a> 規則在這裡發揮作用：Notify 掛在 <code>*Buzzer</code> 上，<code>Buzzer</code> 這個型別沒有 Notify 方法，所以只有 <code>*Buzzer</code> 滿足 Notifier：</p>
+    <pre class="code bad" data-compile-error><code>package main
+
+import "fmt"
+
+type Notifier interface {
+	Notify(msg string)
+}
+
+type Buzzer struct {
+	No    int
+	count int
+}
+
+func (b *Buzzer) Notify(msg string) {
+	b.count++
+	fmt.Println(b.No, msg)
+}
+
+func main() {
+	b := Buzzer{No: 5}
+	var n Notifier = b
+	n.Notify("餐點好了")
+}</code></pre>
+    <p class="label">編譯錯誤</p>
+    <pre class="out err"><code>./main.go:21:19: cannot use b (variable of struct type Buzzer) as Notifier value in variable declaration: Buzzer does not implement Notifier (method Notify has pointer receiver)</code></pre>
+    <p>這條規則保護了你：如果允許放 b，interface 裡裝的是 b 的複本，Notify 改到的會是那個看不到的複本，count 永遠不會增加。看到 “method has pointer receiver”，就把 <code>b</code> 改成 <code>&amp;b</code>。</p>
+
+    <section class="deep" aria-labelledby="compare">
+      <p class="tag">深入：第一次讀可以先跳過</p>
+      <h3 id="compare">2.1 比較兩個 interface</h3>
+      <pre class="code" data-src="chapters/10-interfaces/value.go#compareInterfaces"><code>func compareInterfaces() {
+	var a, b Notifier = SMS{Phone: "0912"}, SMS{Phone: "0912"}
+	var c Notifier = Email{Addr: "0912"}
+	fmt.Println(a == b, a == c)
+
+	defer func() {
+		fmt.Println("panic:", recover())
+	}()
+	var x, y any = []string{"排骨"}, []string{"排骨"}
+	fmt.Println(x == y)
+}</code></pre>
+      <p class="label">輸出</p>
+      <pre class="out" data-example="chapters/10-interfaces#Example_compareInterfaces"><code>true false
+panic: runtime error: comparing uncomparable type []string</code></pre>
+      <p>interface 可以用 <code>==</code> 比較：先比型別那一格，型別相同再比值。a 和 b 都是 SMS 而且內容一樣，所以相等；a 和 c 裡面的字串一樣，型別卻不同，所以不相等。</p>
+      <p>麻煩在於值那一格可能是不能比較的型別，例如 slice。<code>[]string == []string</code> 在編譯期就會被擋下（<a href="06-arrays-slices.html#pit-compare">06 章</a>），但包在 any 裡面時，編譯器不知道裡面裝什麼，只能放行，結果在執行期 panic。用 any 當 map 的 key 時也一樣，放進 slice 當 key 就會 panic。所以拿 interface 做比較或當 key 之前，要確定裡面只會裝可以比較的型別。</p>
+    </section>
+  </section>
+
+  <section aria-labelledby="assert">
+    <h2 id="assert">3. type assertion</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 232" role="img" aria-label="n 裡裝著 SMS。n.(SMS) 檢查通過，拿到 SMS；e, ok := n.(Email) 檢查不通過，ok 是 false，e 是 Email 的零值；e := n.(Email) 檢查不通過，直接 panic">
+        <title>type assertion：問 interface 裡裝的是不是某個型別</title>
+        <rect class="acc" x="16" y="86" width="100" height="36" rx="4"/>
+        <rect class="soft" x="116" y="86" width="60" height="36" rx="4"/>
+        <text class="sm mono" x="66" y="109" text-anchor="middle">main.SMS</text>
+        <text class="sm mono" x="146" y="109" text-anchor="middle">{…}</text>
+        <text class="small mono" x="96" y="72" text-anchor="middle">n</text>
+        <path class="wire" d="M176 104 H200 V36 H218"/>
+        <path class="wire" d="M200 104 H218"/>
+        <path class="wire" d="M200 104 V182 H218"/>
+        <path class="tip" d="M228 36 L216 30 L216 42 Z"/>
+        <path class="tip" d="M228 104 L216 98 L216 110 Z"/>
+        <path class="tip" d="M228 182 L216 176 L216 188 Z"/>
+        <text class="small mono" x="234" y="32">s := n.(SMS)</text>
+        <text class="sm t-acc" x="234" y="54">型別相符，拿到 SMS</text>
+        <text class="small mono" x="234" y="100">e, ok := n.(Email)</text>
+        <text class="sm" x="234" y="122">不符：ok 是 false，e 是零值</text>
+        <text class="small mono" x="234" y="178">e := n.(Email)</text>
+        <text class="sm t-hot" x="234" y="200">不符而且沒有 ok：panic</text>
+      </svg>
+      <figcaption>type assertion 檢查 interface 裡裝的是不是某個型別。不確定的時候一定要用帶 ok 的寫法。</figcaption>
+    </figure>
+    <p>透過 interface 只能呼叫清單上的方法。想拿回裡面那個具體的值，例如讀 SMS 的 Phone 欄位，要用 <strong>type assertion</strong>：<code>n.(SMS)</code>，意思是「我認為 n 裡裝的是 SMS」。</p>
+    <pre class="code" data-src="chapters/10-interfaces/assert.go#assertDemo"><code>func assertDemo() {
+	var n Notifier = SMS{Phone: "0912-345-678"}
+
+	s := n.(SMS)
+	fmt.Println(s.Phone)
+
+	e, ok := n.(Email)
+	fmt.Println(ok, e)
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/10-interfaces#Example_assertDemo"><code>0912-345-678
+false {}</code></pre>
     <ul class="notes">
-      <li>interface 越小越好。標準庫最常用的 <code>io.Reader</code>、<code>io.Writer</code>、<code>fmt.Stringer</code>、<code>error</code> 都只有一個方法。</li>
-      <li>慣例是「參數收 interface、回傳具體型別」；interface 由使用的那一方定義，真的需要時再抽出來。</li>
-      <li><code>var _ Shape = Rect{}</code> 讓編譯器幫你確認型別有實作介面。</li>
-      <li>不帶 ok 的 <code>v.(Rect)</code>，型別不符會 panic；不確定時用 <code>r, ok := v.(Rect)</code>。</li>
-      <li>函式回傳 <code>error</code> 時，沒錯就直接 <code>return nil</code>，不要回傳一個值是 nil 的具體型別指標，否則呼叫端的 <code>err != nil</code> 會成立。</li>
-      <li>方法是 pointer receiver 時，只有指標符合介面：要放 <code>&amp;T{}</code> 進去，放 <code>T{}</code> 會編譯錯誤。</li>
+      <li><code>n.(SMS)</code>：裡面確實是 SMS，得到一個 SMS 型別的值，可以讀 Phone。</li>
+      <li><code>e, ok := n.(Email)</code>：多接一個 bool。型別不符時 ok 是 false，e 是 Email 的零值 <code>{}</code>，不會出錯。這和 <a href="07-maps.html#lookup">07 章 map 的 comma-ok</a> 是同一個模式。</li>
+      <li>type assertion 只能用在 interface 型別的值上；對一個本來就是 SMS 的變數寫 <code>s.(SMS)</code> 是編譯錯誤。</li>
     </ul>
+    <p>只寫一個變數、型別又不符時，程式會 panic：</p>
+    <pre class="code" data-src="chapters/10-interfaces/assert.go#assertPanic"><code>func assertPanic() {
+	defer func() {
+		fmt.Println("panic:", recover())
+	}()
+	var n Notifier = SMS{Phone: "0912-345-678"}
+	e := n.(Email)
+	fmt.Println(e.Addr)
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/10-interfaces#Example_assertPanic"><code>panic: interface conversion: main.Notifier is main.SMS, not main.Email</code></pre>
+    <p>這裡用 <a href="04-functions.html#panic">04 章的 recover</a> 把 panic 接住印出來；沒有 recover，程式就整個結束了。除非你百分之百確定裡面的型別，否則都用帶 ok 的寫法。</p>
+
+    <h3>問它「你還會做什麼」</h3>
+    <pre class="code" data-src="chapters/10-interfaces/assert.go#Urgent,SMS.NotifyUrgent,alert,optionalDemo"><code>type Urgent interface {
+	NotifyUrgent(msg string)
+}
+
+func (s SMS) NotifyUrgent(msg string) {
+	fmt.Printf("簡訊 %s：【緊急】%s\n", s.Phone, msg)
+}
+
+func alert(n Notifier, msg string) {
+	if u, ok := n.(Urgent); ok {
+		u.NotifyUrgent(msg)
+		return
+	}
+	n.Notify(msg)
+}
+
+func optionalDemo() {
+	alert(SMS{Phone: "0912-345-678"}, "訂單被取消了")
+	alert(Email{Addr: "amei@example.com"}, "訂單被取消了")
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/10-interfaces#Example_optionalDemo"><code>簡訊 0912-345-678：【緊急】訂單被取消了
+Email amei@example.com：訂單被取消了</code></pre>
+    <p>assertion 的目標也可以是另一個 interface：<code>n.(Urgent)</code> 問的是「n 裡面那個值，是不是<strong>也</strong>有 NotifyUrgent 方法？」SMS 有，就發緊急簡訊；Email 沒有，就退回一般的 Notify。這讓 alert 只要求最基本的 Notifier，同時又能利用某些實作額外的能力。標準庫常用這一招，例如 <code>io.Copy</code> 會先檢查來源有沒有實作 <code>io.WriterTo</code>，有的話就讓它自己用更快的方式寫出去。</p>
+  </section>
+
+  <section aria-labelledby="switch">
+    <h2 id="switch">4. type switch 與 any</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 238" role="img" aria-label="type switch 由上往下一個一個 case 比對：nil、int 或 int64、string、error、Notifier，第一個符合的就執行，都不符合才走 default。SMS 在 Notifier 這一格被接住">
+        <title>type switch：由上往下，第一個符合的勝出</title>
+        <text class="small mono" x="60" y="28" text-anchor="middle">v.(type)</text>
+        <path class="wire" d="M60 36 V214"/>
+        <rect class="box" x="120" y="16" width="200" height="28" rx="4"/>
+        <text class="sm mono" x="136" y="35">case nil</text>
+        <rect class="box" x="120" y="50" width="200" height="28" rx="4"/>
+        <text class="sm mono" x="136" y="69">case int, int64</text>
+        <rect class="box" x="120" y="84" width="200" height="28" rx="4"/>
+        <text class="sm mono" x="136" y="103">case string</text>
+        <rect class="box" x="120" y="118" width="200" height="28" rx="4"/>
+        <text class="sm mono" x="136" y="137">case error</text>
+        <rect class="acc" x="120" y="152" width="200" height="28" rx="4"/>
+        <text class="sm mono" x="136" y="171">case Notifier</text>
+        <rect class="box dash" x="120" y="186" width="200" height="28" rx="4"/>
+        <text class="sm mono" x="136" y="205">default</text>
+        <path class="wire faint" d="M60 30 H120 M60 64 H120 M60 98 H120 M60 132 H120 M60 200 H120"/>
+        <path class="wire acc-ln" d="M60 166 H110"/>
+        <path class="tip acc-tip" d="M120 166 L108 160 L108 172 Z"/>
+        <text class="sm t-acc" x="336" y="171">SMS 停在這裡</text>
+        <text class="sm" x="336" y="35">由上往下比對</text>
+        <text class="sm" x="336" y="57">第一個符合的勝出</text>
+      </svg>
+      <figcaption>type switch 由上往下比對每個 case，第一個符合的就執行，後面的不再看。</figcaption>
+    </figure>
+    <p>要依型別做好幾種不同的事時，連續寫 assertion 很囉嗦，改用 <strong>type switch</strong>：</p>
+    <pre class="code" data-src="chapters/10-interfaces/assert.go#label,typeSwitchDemo"><code>func label(v any) string {
+	switch x := v.(type) {
+	case nil:
+		return "什麼都沒有"
+	case int, int64:
+		return fmt.Sprintf("整數 %v", x)
+	case string:
+		return "字串 " + x
+	case error:
+		return "錯誤：" + x.Error()
+	case Notifier:
+		return fmt.Sprintf("通知方式 %T", x)
+	default:
+		return fmt.Sprintf("不認得的 %T", x)
+	}
+}
+
+func typeSwitchDemo() {
+	values := []any{nil, 42, int64(7), "排骨飯", errors.New("賣完了"), SMS{Phone: "0912"}, 3.5}
+	for _, v := range values {
+		fmt.Println(label(v))
+	}
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/10-interfaces#Example_typeSwitchDemo"><code>什麼都沒有
+整數 42
+整數 7
+字串 排骨飯
+錯誤：賣完了
+通知方式 main.SMS
+不認得的 float64</code></pre>
+    <ul class="notes">
+      <li><code>switch x := v.(type)</code> 的 <code>.(type)</code> 只能寫在 switch 裡。每個只列一個型別的 case 裡，x 就是那個型別：<code>case string</code> 裡的 x 是 string，所以可以直接寫 <code>"字串 " + x</code>。</li>
+      <li>一個 case 列了好幾個型別（<code>case int, int64</code>）或 default 時，x 不知道該是哪一個，就維持原本的型別 any，只能拿去印、不能拿來算。</li>
+      <li><code>case nil</code> 接住的是空的 interface（兩格都是 nil）。</li>
+      <li>case 可以是 interface：<code>case error</code> 接住所有有 Error 方法的值，<code>case Notifier</code> 接住 SMS。3.5 是 float64，哪一格都不符合，走到 default。</li>
+      <li>比對由上往下，第一個符合的勝出，和 <a href="03-control-flow.html#switch">03 章的 switch</a> 一樣。一個值可能同時符合好幾個 case（例如某個型別既是 error 又有 String 方法），所以具體的型別要寫在比較寬的 interface 前面。練習 7 就是這個 bug。</li>
+    </ul>
+
+    <h3>any</h3>
+    <p><code>any</code> 是 <code>interface{}</code> 的別名（<a href="09-structs-methods.html#types">09 章的 alias</a>）。它的方法清單是空的，所以<strong>每一個</strong>型別都滿足它，什麼都能放。<code>fmt.Println(a ...any)</code> 能印任何東西就是因為這樣，舊的程式碼裡則會看到 <code>interface{}</code> 這種寫法。</p>
+    <p>代價是編譯器幫不上忙了：放進 any 的值，要用 assertion 或 type switch 取出來才能使用，型別錯了要到執行期才知道。所以 any 適合真的什麼都要收的地方（印出、序列化），自己的程式優先用具體型別或小的 interface；需要「同一段程式套用到很多型別」時，用 <a href="12-generics.html">12 泛型</a>，型別檢查仍然在編譯期完成。</p>
+  </section>
+
+  <section aria-labelledby="nil">
+    <h2 id="nil">5. nil interface 陷阱</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 198" role="img" aria-label="左邊：return nil 得到型別和值都是空的 error，等於 nil。右邊：回傳一個值為 nil 的 *FormError，型別格是 *main.FormError，值格是 nil，這個 error 不等於 nil">
+        <title>不是 nil 的 nil</title>
+        <path class="wire faint" d="M240 12 V188"/>
+        <text class="small mono" x="120" y="30" text-anchor="middle">return nil</text>
+        <rect class="box dash" x="30" y="50" width="90" height="40" rx="4"/>
+        <rect class="box dash" x="120" y="50" width="90" height="40" rx="4"/>
+        <text class="sm mono mute" x="75" y="75" text-anchor="middle">nil</text>
+        <text class="sm mono mute" x="165" y="75" text-anchor="middle">nil</text>
+        <text class="sm" x="75" y="110" text-anchor="middle">型別</text>
+        <text class="sm" x="165" y="110" text-anchor="middle">值</text>
+        <text class="t-acc" x="120" y="154" text-anchor="middle">err == nil</text>
+        <text class="small mono" x="360" y="30" text-anchor="middle">return err（*FormError）</text>
+        <rect class="hot" x="258" y="50" width="130" height="40" rx="4"/>
+        <rect class="box dash" x="388" y="50" width="76" height="40" rx="4"/>
+        <text class="sm mono" x="323" y="75" text-anchor="middle">*main.FormError</text>
+        <text class="sm mono mute" x="426" y="75" text-anchor="middle">nil</text>
+        <text class="sm" x="323" y="110" text-anchor="middle">型別</text>
+        <text class="sm" x="426" y="110" text-anchor="middle">值</text>
+        <text class="t-hot" x="360" y="154" text-anchor="middle">err != nil</text>
+        <text class="sm" x="360" y="180" text-anchor="middle">型別格不是空的</text>
+      </svg>
+      <figcaption>interface 只有在兩格都空的時候才等於 nil。裝著一個 nil 指標的 interface，型別格已經有東西了，所以不是 nil。</figcaption>
+    </figure>
+    <p>這是 Go 最有名的陷阱，而且通常出現在錯誤處理裡：</p>
+    <pre class="code" data-src="chapters/10-interfaces/niltrap.go#FormError,FormError.Error,checkNameBuggy,checkName,nilTrapDemo"><code>type FormError struct {
+	Field string
+}
+
+func (e *FormError) Error() string {
+	return e.Field + "沒有填"
+}
+
+func checkNameBuggy(name string) error {
+	var err *FormError
+	if name == "" {
+		err = &amp;FormError{Field: "姓名"}
+	}
+	return err
+}
+
+func checkName(name string) error {
+	if name == "" {
+		return &amp;FormError{Field: "姓名"}
+	}
+	return nil
+}
+
+func nilTrapDemo() {
+	err := checkNameBuggy("王小明")
+	fmt.Println(err == nil)
+	fmt.Printf("%T\n", err)
+
+	fmt.Println(checkName("王小明") == nil)
+	fmt.Println(checkName(""))
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/10-interfaces#Example_nilTrapDemo"><code>false
+*main.FormError
+true
+姓名沒有填</code></pre>
+    <p>checkNameBuggy 宣告了一個 <code>*FormError</code> 型別的變數 err，名字有填，所以 err 一直是 nil 指標。問題出在 <code>return err</code>：函式的回傳型別是 error（一個 interface），nil 指標被放進 interface 時，型別格填上了 <code>*main.FormError</code>，值格才是 nil。呼叫的人檢查 <code>err == nil</code>，比的是「兩格都空嗎」，答案是否定的，於是一個正常的名字被當成錯誤。</p>
+    <p>為什麼不乾脆把它當成 nil？因為裝著 nil 指標的 interface 仍然可以呼叫方法，指標 receiver 的方法也可以自己處理 receiver 是 nil 的情況。它不是「什麼都沒有」，而是「一個 *FormError，剛好是 nil」。</p>
+    <p>規則很簡單：<strong>回傳 interface（尤其是 error）的函式，沒有東西要回傳時就直接寫 <code>return nil</code></strong>，不要先宣告一個具體型別的變數再把它回傳出去，像 checkName 那樣。<a href="11-errors.html">11 錯誤處理</a>會一直用到這條規則。練習 6 就是這個 bug。</p>
+  </section>
+
+  <section aria-labelledby="stdlib">
+    <h2 id="stdlib">6. 標準庫裡的 interface</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 236" role="img" aria-label="fmt.Fprintf 只要求一個 io.Writer，os.Stdout、strings.Builder、檔案、HTTP 回應和自己寫的 PaperRoll 都滿足它">
+        <title>一個 io.Writer，很多種實作</title>
+        <rect class="box" x="16" y="96" width="104" height="44" rx="6"/>
+        <text class="sm mono" x="68" y="123" text-anchor="middle">fmt.Fprintf</text>
+        <path class="wire" d="M120 118 H140"/>
+        <path class="tip" d="M150 118 L138 112 L138 124 Z"/>
+        <rect class="acc" x="152" y="92" width="110" height="52" rx="8"/>
+        <text class="mono bold" x="207" y="116" text-anchor="middle">io.Writer</text>
+        <text class="sm mono" x="207" y="136" text-anchor="middle">Write([]byte)</text>
+        <path class="wire acc-ln" d="M262 118 H288"/>
+        <path class="wire acc-ln" d="M288 30 V206"/>
+        <path class="wire acc-ln" d="M288 30 H300 M288 74 H300 M288 118 H300 M288 162 H300 M288 206 H300"/>
+        <rect class="soft" x="300" y="14" width="164" height="32" rx="4"/>
+        <text class="sm mono" x="382" y="35" text-anchor="middle">os.Stdout</text>
+        <rect class="soft" x="300" y="58" width="164" height="32" rx="4"/>
+        <text class="sm mono" x="382" y="79" text-anchor="middle">*strings.Builder</text>
+        <rect class="soft" x="300" y="102" width="164" height="32" rx="4"/>
+        <text class="sm" x="382" y="123" text-anchor="middle">打開的檔案</text>
+        <rect class="soft" x="300" y="146" width="164" height="32" rx="4"/>
+        <text class="sm" x="382" y="167" text-anchor="middle">HTTP 回應</text>
+        <rect class="hot" x="300" y="190" width="164" height="32" rx="4"/>
+        <text class="sm mono" x="382" y="211" text-anchor="middle">*PaperRoll</text>
+      </svg>
+      <figcaption>Fprintf 只認得 io.Writer。螢幕、記憶體、檔案、網路，以及你自己寫的型別，只要有 Write 方法就都能接。</figcaption>
+    </figure>
+    <p>標準庫的 interface 大多只有一兩個方法，你會一直遇到這幾個：</p>
+    <div class="table-wrap">
+      <table class="vs">
+        <thead><tr><th scope="col">interface</th><th scope="col">方法</th><th scope="col">誰會用它</th></tr></thead>
+        <tbody>
+          <tr><th scope="row"><code>fmt.Stringer</code></th><td><code>String() string</code></td><td>fmt 印出值的時候（<a href="02-input-output.html#stringer">02 章</a>）</td></tr>
+          <tr><th scope="row"><code>error</code></th><td><code>Error() string</code></td><td>所有會失敗的函式（<a href="11-errors.html">11 章</a>）</td></tr>
+          <tr><th scope="row"><code>io.Reader</code></th><td><code>Read(p []byte) (n int, err error)</code></td><td>bufio.Scanner、io.Copy、json.Decoder…</td></tr>
+          <tr><th scope="row"><code>io.Writer</code></th><td><code>Write(p []byte) (n int, err error)</code></td><td>fmt.Fprintf、io.Copy、log…</td></tr>
+          <tr><th scope="row"><code>sort.Interface</code></th><td><code>Len</code>、<code>Less</code>、<code>Swap</code></td><td>sort.Sort</td></tr>
+          <tr><th scope="row"><code>http.Handler</code></th><td><code>ServeHTTP(w, r)</code></td><td>HTTP 伺服器（<a href="23-http.html">HTTP 服務</a>那一章）</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>自己寫一個 io.Writer</h3>
+    <pre class="code" data-src="chapters/10-interfaces/stdlib.go#ErrOutOfPaper,PaperRoll,PaperRoll.Write,writerDemo"><code>var ErrOutOfPaper = errors.New("紙用完了")
+
+type PaperRoll struct {
+	Cap int
+	buf []byte
+}
+
+func (r *PaperRoll) Write(p []byte) (int, error) {
+	room := r.Cap - len(r.buf)
+	if len(p) &lt;= room {
+		r.buf = append(r.buf, p...)
+		return len(p), nil
+	}
+	r.buf = append(r.buf, p[:room]...)
+	return room, ErrOutOfPaper
+}
+
+func writerDemo() {
+	roll := &amp;PaperRoll{Cap: 19}
+	n, err := fmt.Fprintf(roll, "排骨飯 x%d\n", 2)
+	fmt.Println(n, err)
+	n, err = fmt.Fprintf(roll, "滷蛋 x%d\n", 3)
+	fmt.Println(n, err)
+	fmt.Printf("%q\n", roll.buf)
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/10-interfaces#Example_writerDemo"><code>13 &lt;nil&gt;
+6 紙用完了
+"排骨飯 x2\n滷蛋"</code></pre>
+    <p>PaperRoll 只有一個 Write 方法，就能直接交給 Fprintf，因為 Fprintf 只要求 io.Writer；換成 Fprintln、io.WriteString、io.Copy 也一樣。Fprintf 先把整段文字格式化好，再呼叫一次 Write，並把 Write 回傳的 n 和 err 原封不動地交還給你。</p>
+    <p>實作 Write 要遵守 io.Writer 的約定（寫在 <a href="https://pkg.go.dev/io#Writer">io.Writer 的文件</a>裡）：回傳的 n 是真正寫出去的 byte 數；<strong>只要 n 小於 <code>len(p)</code>，就一定要回傳一個錯誤</strong>，呼叫的人才知道後面沒寫到。紙捲還剩 6 個 byte，「滷蛋 x3\n」有 10 個 byte，於是只印出「滷蛋」，回傳 6 和 ErrOutOfPaper。另外，Write 不可以修改 p 的內容，也不可以在回傳之後還留著 p，所以 PaperRoll 是把資料 append 到自己的 buf。<a href="02-input-output.html#rw">02 章</a>介紹過 io.Reader 和 io.Writer 的用法，這裡是反過來，自己當實作的那一方。</p>
+
+    <h3>sort.Interface</h3>
+    <pre class="code" data-src="chapters/10-interfaces/stdlib.go#Order,byPriority,byPriority.Len,byPriority.Swap,byPriority.Less,sortDemo"><code>type Order struct {
+	No  int
+	VIP bool
+}
+
+type byPriority []Order
+
+func (o byPriority) Len() int      { return len(o) }
+
+func (o byPriority) Swap(i, j int) { o[i], o[j] = o[j], o[i] }
+
+func (o byPriority) Less(i, j int) bool {
+	if o[i].VIP != o[j].VIP {
+		return o[i].VIP
+	}
+	return o[i].No &lt; o[j].No
+}
+
+func sortDemo() {
+	orders := []Order{{No: 3}, {No: 1, VIP: true}, {No: 2}, {No: 4, VIP: true}}
+	sort.Sort(byPriority(orders))
+	fmt.Println(orders)
+
+	slices.SortFunc(orders, func(a, b Order) int {
+		return cmp.Compare(a.No, b.No)
+	})
+	fmt.Println(orders)
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/10-interfaces#Example_sortDemo"><code>[{1 true} {4 true} {2 false} {3 false}]
+[{1 true} {2 false} {3 false} {4 true}]</code></pre>
+    <p>sort.Sort 不知道你要排什麼，它只透過三個方法操作：有幾個（Len）、第 i 個要不要排在第 j 個前面（Less）、交換兩個（Swap）。<code>byPriority(orders)</code> 是型別轉換（<a href="09-structs-methods.html#types">09 章</a>），讓同一個 slice 帶上這三個方法，不會複製資料。</p>
+    <p>這是 interface 的經典用法，你會在很多程式裡看到。不過 Go 1.21 起有了 <code>slices.SortFunc</code>，只要傳一個比較函式，不必另外定義型別和三個方法，新程式通常用它（<a href="06-arrays-slices.html#pkg">06 章的 slices 套件</a>）。</p>
+  </section>
+
+  <section aria-labelledby="design">
+    <h2 id="design">7. 設計 interface</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 226" role="img" aria-label="remindAll 自己定義它需要的 Notifier。正式執行時傳入 SMS，真的發簡訊；測試時傳入 recorder，只把訊息記下來，讓測試檢查">
+        <title>在使用端定義 interface，測試時換成假的</title>
+        <rect class="acc" x="160" y="18" width="160" height="56" rx="8"/>
+        <text class="mono bold" x="240" y="42" text-anchor="middle">remindAll</text>
+        <text class="sm" x="240" y="62" text-anchor="middle">只要一個 Notifier</text>
+        <path class="wire" d="M200 74 V112 H110 V136"/>
+        <path class="tip" d="M110 146 L104 134 L116 134 Z"/>
+        <path class="wire" d="M280 74 V112 H370 V136"/>
+        <path class="tip" d="M370 146 L364 134 L376 134 Z"/>
+        <rect class="soft" x="30" y="148" width="160" height="48" rx="6"/>
+        <text class="mono" x="110" y="170" text-anchor="middle">SMS</text>
+        <text class="sm" x="110" y="188" text-anchor="middle">真的發簡訊</text>
+        <rect class="hot" x="290" y="148" width="160" height="48" rx="6"/>
+        <text class="mono" x="370" y="170" text-anchor="middle">*recorder</text>
+        <text class="sm" x="370" y="188" text-anchor="middle">只記下訊息</text>
+        <text class="sm" x="110" y="216" text-anchor="middle">正式執行</text>
+        <text class="sm" x="370" y="216" text-anchor="middle">測試</text>
+      </svg>
+      <figcaption>使用的一方只要求它需要的方法。正式執行時傳真的實作，測試時傳一個假的，remindAll 一行都不用改。</figcaption>
+    </figure>
+
+    <h3>小，而且可以組合</h3>
+    <pre class="code" data-src="chapters/10-interfaces/design.go#Loader,Saver,Store,memStore,memStore.Load,memStore.Save,lastOrder,embedInterfaceDemo"><code>type Loader interface {
+	Load(key string) (string, bool)
+}
+
+type Saver interface {
+	Save(key, value string)
+}
+
+type Store interface {
+	Loader
+	Saver
+}
+
+type memStore struct {
+	data map[string]string
+}
+
+func (m *memStore) Load(key string) (string, bool) {
+	v, ok := m.data[key]
+	return v, ok
+}
+
+func (m *memStore) Save(key, value string) {
+	m.data[key] = value
+}
+
+func lastOrder(l Loader, member string) string {
+	if v, ok := l.Load(member); ok {
+		return v
+	}
+	return "第一次來"
+}
+
+func embedInterfaceDemo() {
+	s := &amp;memStore{data: map[string]string{}}
+	var st Store = s
+	st.Save("小明", "排骨飯")
+	fmt.Println(lastOrder(st, "小明"))
+	fmt.Println(lastOrder(s, "阿美"))
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/10-interfaces#Example_embedInterfaceDemo"><code>排骨飯
+第一次來</code></pre>
+    <ul class="notes">
+      <li>interface 可以嵌入其他 interface：Store 的方法清單就是 Loader 加上 Saver。標準庫的 <code>io.ReadWriter</code> 也是這樣由 Reader 和 Writer 組成的。</li>
+      <li>lastOrder 只需要讀，所以參數只要求 Loader，而不是整個 Store。要求得越少，能傳進來的東西就越多，測試時要做的假物件也越簡單。</li>
+      <li>方法越多的 interface，能滿足它的型別就越少，用途也越窄。標準庫最常用的 interface 幾乎都只有一個方法，這不是巧合。</li>
+    </ul>
+
+    <h3>在使用端定義，測試時換成假的</h3>
+    <pre class="code" data-src="chapters/10-interfaces/design.go#remindAll,remindDemo"><code>func remindAll(n Notifier, waiting []int) {
+	for _, no := range waiting {
+		n.Notify(fmt.Sprintf("%d 號請取餐", no))
+	}
+}
+
+func remindDemo() {
+	remindAll(SMS{Phone: "0912-345-678"}, []int{17, 21})
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/10-interfaces#Example_remindDemo"><code>簡訊 0912-345-678：17 號請取餐
+簡訊 0912-345-678：21 號請取餐</code></pre>
+    <p>remindAll 只依賴 Notifier。正式執行時傳 SMS，真的會發出簡訊；測試時當然不想真的發簡訊，就在測試檔裡寫一個假的 Notifier，只把收到的訊息記下來：</p>
+    <pre class="code" data-src="chapters/10-interfaces/main_test.go#recorder,recorder.Notify,TestRemindAll"><code>type recorder struct {
+	msgs []string
+}
+
+func (r *recorder) Notify(msg string) {
+	r.msgs = append(r.msgs, msg)
+}
+
+func TestRemindAll(t *testing.T) {
+	var r recorder
+	remindAll(&amp;r, []int{17, 21})
+	want := []string{"17 號請取餐", "21 號請取餐"}
+	if !slices.Equal(r.msgs, want) {
+		t.Errorf("收到 %q, want %q", r.msgs, want)
+	}
+}</code></pre>
+    <p>這是 Go 測試最常用的手法：<strong>依賴 interface，測試時換成假的實作</strong>。不需要任何 mock 框架，一個 struct 加一個方法就夠了（完整的測試技巧在<a href="21-testing.html">測試</a>那一章）。</p>
+    <p>注意 interface 由誰定義。在 Java，通常是提供功能的一方先寫好 interface，實作類別再宣告 implements。Go 是隱式實作，提供功能的一方不需要知道 interface 的存在，所以慣例反過來：<strong>使用的一方</strong>依照自己需要的方法定義 interface，提供的一方回傳具體的型別就好。常聽到的說法是「接受 interface，回傳 struct」。</p>
+    <p>也因此，不要替每一個 struct 都先配一個 interface。等到真的有第二種實作，或者測試需要換成假的時候，再在使用的地方定義一個剛好夠用的 interface，這時候它的方法清單才會是對的。</p>
+  </section>
+
+  <section aria-labelledby="pitfalls">
+    <h2 id="pitfalls">常見錯誤</h2>
+    <h3 id="pit-typed-nil">1. 回傳裝著 nil 指標的 error</h3>
+    <div class="compare">
+      <p class="label bad">錯誤寫法：沒有錯誤時，呼叫的人看到的 err 也不是 nil</p>
+      <pre class="code bad" data-src="chapters/10-interfaces/niltrap.go#checkNameBuggy"><code>func checkNameBuggy(name string) error {
+	var err *FormError
+	if name == "" {
+		err = &amp;FormError{Field: "姓名"}
+	}
+	return err
+}</code></pre>
+      <p class="label good">正確寫法</p>
+      <pre class="code good" data-src="chapters/10-interfaces/niltrap.go#checkName"><code>func checkName(name string) error {
+	if name == "" {
+		return &amp;FormError{Field: "姓名"}
+	}
+	return nil
+}</code></pre>
+    </div>
+    <p>沒有錯誤時一律寫 <code>return nil</code>（第 5 節）。</p>
+
+    <h3 id="pit-assert">2. 不帶 ok 的 type assertion</h3>
+    <p><code>n.(Email)</code> 型別不符就 panic（第 3 節）。除非前面的程式已經保證了型別，否則寫成 <code>e, ok := n.(Email)</code>，或用 type switch。</p>
+
+    <h3 id="pit-ptr-iface">3. 指向 interface 的指標</h3>
+    <pre class="code bad" data-compile-error><code>package main
+
+import "fmt"
+
+type Notifier interface {
+	Notify(msg string)
+}
+
+type SMS struct {
+	Phone string
+}
+
+func (s SMS) Notify(msg string) {
+	fmt.Println(s.Phone, msg)
+}
+
+func send(n *Notifier, msg string) {
+	n.Notify(msg)
+}
+
+func main() {
+	var n Notifier = SMS{Phone: "0912-345-678"}
+	send(&n, "餐點好了")
+}</code></pre>
+    <p class="label">編譯錯誤</p>
+    <pre class="out err"><code>./main.go:18:4: n.Notify undefined (type *Notifier is pointer to interface, not interface)</code></pre>
+    <p>習慣「大的東西傳指標」的人常會寫出 <code>*Notifier</code>。interface 值本身只有兩格，複製它很便宜；需要共用狀態時，應該把<strong>具體型別的指標</strong>放進 interface（像第 2 節的 <code>&amp;b</code>），而不是取 interface 的地址。參數寫 <code>n Notifier</code> 就對了。</p>
+
+    <h3 id="pit-ptr-receiver">4. 方法是指標 receiver，卻把值放進 interface</h3>
+    <p>編譯錯誤 “method Notify has pointer receiver”（第 2 節）。改成放指標 <code>&amp;b</code>；如果這個型別的方法其實都不需要修改 receiver，也可以考慮全部改成值 receiver。</p>
+
+    <h3 id="pit-case-order">5. type switch 裡，寬的 interface 寫在前面</h3>
+    <p><code>case fmt.Stringer</code> 寫在 <code>case Price</code> 前面，有 String 方法的 Price 就永遠走不到自己的 case，而且編譯器不會警告（第 4 節、練習 7）。具體的型別寫在前面，interface 寫在後面。</p>
+
+    <h3 id="pit-compare-panic">6. 比較裝著 slice 或 map 的 interface</h3>
+    <p>編譯會過，執行時 panic：<code>comparing uncomparable type []string</code>（2.1 節）。把 any 當 map 的 key 時也一樣。</p>
+
+    <h3 id="pit-big-iface">7. 先寫一個大 interface，再寫唯一的實作</h3>
+    <p>替每個 struct 先配一個把所有方法都列出來的 interface，只多了一層要維護的東西，卻沒有帶來彈性。等有第二種實作或測試需要時，再在使用端定義只包含需要的方法的小 interface（第 7 節）。</p>
   </section>
 
   <section aria-labelledby="java">
@@ -155,22 +801,205 @@ main.Circle 3.14
       <table class="vs">
         <thead><tr><th scope="col">主題</th><th scope="col">Java</th><th scope="col">Go</th></tr></thead>
         <tbody>
-          <tr><th scope="row">實作介面</th><td class="java"><code>class Rect implements Shape</code></td><td>不用宣告，方法對上就符合</td></tr>
-          <tr><th scope="row">介面放哪</th><td class="java">通常和實作放在一起</td><td>慣例放在使用端，而且越小越好</td></tr>
+          <tr><th scope="row">實作介面</th><td class="java"><code>class SMS implements Notifier</code></td><td>不用宣告，方法對上就符合</td></tr>
+          <tr><th scope="row">介面放哪</th><td class="java">通常和實作放在一起，由提供方定義</td><td>慣例放在使用端，而且越小越好</td></tr>
           <tr><th scope="row">型別判斷</th><td class="java"><code>instanceof</code>、pattern matching switch</td><td><code>v.(T)</code>、type switch</td></tr>
           <tr><th scope="row">萬用型別</th><td class="java"><code>Object</code></td><td><code>any</code>（就是 <code>interface{}</code>）</td></tr>
           <tr><th scope="row">轉成字串</th><td class="java"><code>toString()</code></td><td><code>String() string</code>（<code>fmt.Stringer</code>）</td></tr>
+          <tr><th scope="row">default method</th><td class="java">介面裡可以有預設實作</td><td>沒有；共用的邏輯寫成接收 interface 的函式，例如 <code>fmt.Fprintf(w, …)</code></td></tr>
+          <tr><th scope="row">null</th><td class="java">變數是 null 就是 null</td><td>interface 要型別和值都空才是 nil（第 5 節）</td></tr>
+          <tr><th scope="row">誰能實作</th><td class="java">class（<code>int</code> 要先包成 <code>Integer</code>）</td><td>任何自訂型別，包括 <code>type Price int</code>、函式型別</td></tr>
+          <tr><th scope="row">測試替身</th><td class="java">常用 Mockito 之類的框架</td><td>多半手寫一個小 struct 滿足 interface</td></tr>
         </tbody>
       </table>
     </div>
   </section>
 
+  <section aria-labelledby="exercises">
+    <h2 id="exercises">練習</h2>
+    <p>題目在 <code>exercises/10-interfaces/exercises.go</code>，用到的型別定義在 <code>doc.go</code>。</p>
+    <pre class="shell"><code>go test ./exercises/10-interfaces/                      <span class="c"># 跑全部練習</span>
+go test ./exercises/10-interfaces/ -run TestAsFloat     <span class="c"># 只跑一題</span>
+go test -tags solution ./exercises/10-interfaces/       <span class="c"># 跑參考解答</span></code></pre>
+    <ol class="exercises">
+      <li>
+        <h3><span class="level l1">入門</span>練習 1：什麼都收的數字</h3>
+        <p>把各種型別的值轉成 float64，轉不了的回報 false。</p>
+        <pre class="code" data-src="exercises/10-interfaces/exercises.go#AsFloat"><code>func AsFloat(v any) (float64, bool) {
+	// TODO: 實作
+	return 0, false
+}</code></pre>
+        <p><code>AsFloat(int64(-3))</code> 是 <code>-3, true</code>，<code>AsFloat("85.5")</code> 是 <code>85.5, true</code>，<code>AsFloat(true)</code> 是 <code>0, false</code>。測試：<code>TestAsFloat</code>。</p>
+        <details><summary>提示</summary><p>用 <code>switch x := v.(type)</code>，每個 case 裡的 x 已經是那個型別，<code>float64(x)</code> 就能轉換。string 的 case 呼叫 <code>strconv.ParseFloat(x, 64)</code>，記得檢查它的 err。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l1">入門</span>練習 2：最便宜的運費</h3>
+        <p>超商取貨已經寫好了。替宅配寫 Fee，讓它滿足 Shipper，再從好幾種寄送方式裡挑出最便宜的。</p>
+        <pre class="code" data-src="exercises/10-interfaces/doc.go#Shipper,StorePickup,StorePickup.Fee,HomeDelivery"><code>type Shipper interface {
+	Fee(grams int) int
+}
+
+type StorePickup struct{}
+
+func (StorePickup) Fee(grams int) int {
+	if grams &gt; 5000 {
+		return -1
+	}
+	return 60
+}
+
+type HomeDelivery struct{}</code></pre>
+        <pre class="code" data-src="exercises/10-interfaces/exercises.go#HomeDelivery.Fee,Cheapest"><code>func (HomeDelivery) Fee(grams int) int {
+	// TODO: 實作
+	return 0
+}
+
+func Cheapest(options []Shipper, grams int) int {
+	// TODO: 實作
+	return 0
+}</code></pre>
+        <p>測試裡還有一個只在測試檔裡定義的寄送方式 <code>flat</code>，Cheapest 也要能處理它。測試：<code>TestShipping</code>。</p>
+        <details><summary>提示</summary><p>「不足 1000 也算 1000」是無條件進位：<code>(extra + 999) / 1000</code>。Cheapest 用一個變數記住目前最好的索引，初始值 -1；遇到 Fee 是 -1 的就 continue。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l2">進階</span>練習 3：遮住數字的 Writer</h3>
+        <p>寫出去的內容裡，數字都要換成星號，例如寫 log 時遮住電話號碼。</p>
+        <pre class="code" data-src="exercises/10-interfaces/doc.go#Masker"><code>type Masker struct {
+	W io.Writer
+}</code></pre>
+        <pre class="code" data-src="exercises/10-interfaces/exercises.go#Masker.Write"><code>func (m Masker) Write(p []byte) (int, error) {
+	// TODO: 實作
+	return 0, nil
+}</code></pre>
+        <p><code>fmt.Fprintf(Masker{W: &amp;b}, "電話 %s", "0912-345-678")</code> 之後，b 裡是 <code>電話 ****-***-***</code>。測試：<code>TestMasker</code>。</p>
+        <details><summary>提示</summary><p>先 <code>make([]byte, len(p))</code> 複製一份再改，才不會動到呼叫者的 p。中文字的 UTF-8 編碼裡沒有任何一個 byte 落在 <code>'0'</code> 到 <code>'9'</code> 之間，所以一個 byte 一個 byte 檢查是安全的（<a href="08-strings-runes.html">08 章</a>）。成功時回傳的是 <code>len(p)</code>。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l2">進階</span>練習 4：有些品項可以折價</h3>
+        <p>算總價時，問每個品項「你也是 Discounter 嗎？」，是的話扣掉折扣。</p>
+        <pre class="code" data-src="exercises/10-interfaces/doc.go#Item,Discounter,Combo,Combo.Price,Combo.Discount"><code>type Item interface {
+	Price() int
+}
+
+type Discounter interface {
+	Discount() int
+}
+
+type Combo struct {
+	Name string
+	Cost int
+	Off  int
+}
+
+func (c Combo) Price() int    { return c.Cost }
+
+func (c Combo) Discount() int { return c.Off }</code></pre>
+        <pre class="code" data-src="exercises/10-interfaces/exercises.go#Total"><code>func Total(items []Item) int {
+	// TODO: 實作
+	return 0
+}</code></pre>
+        <p>A 餐 120 元折 20、排骨飯 85 元，總價是 185。測試：<code>TestTotal</code>。</p>
+        <details><summary>提示</summary><p>第 3 節的 alert：<code>if d, ok := it.(Discounter); ok { … }</code>。每一樣最低 0 元，可以用內建的 <code>max(price, 0)</code>。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l3">挑戰</span>練習 5：一種不行就換下一種</h3>
+        <p>Fallback 是由好幾種 Sender 組成的 Sender：依序嘗試，直到有一種成功。因為它自己也滿足 Sender，Fallback 裡面還可以再放 Fallback。</p>
+        <pre class="code" data-src="exercises/10-interfaces/doc.go#Sender,Fallback,ErrNoSender"><code>type Sender interface {
+	Send(msg string) error
+}
+
+type Fallback []Sender
+
+var ErrNoSender = errors.New("沒有可用的傳送方式")</code></pre>
+        <pre class="code" data-src="exercises/10-interfaces/exercises.go#Fallback.Send"><code>func (f Fallback) Send(msg string) error {
+	// TODO: 實作
+	return nil
+}</code></pre>
+        <p>測試用一個假的 Sender 檢查：成功之後不能再嘗試後面的、全部失敗時回傳最後一個錯誤。測試：<code>TestFallback</code>。</p>
+        <details><summary>提示</summary><p>先處理 <code>len(f) == 0</code>。迴圈裡 <code>err := s.Send(msg)</code>，是 nil 就立刻 return nil，否則記到一個 <code>last</code> 變數；迴圈結束就回傳 last。</p></details>
+      </li>
+      <li>
+        <h3><span class="level fix">找錯</span>練習 6：正常的訂單也報錯</h3>
+        <p>呼叫的人檢查 <code>err != nil</code>，正常的訂單也成立。</p>
+        <pre class="code" data-src="exercises/10-interfaces/doc.go#Order,OrderError,OrderError.Error"><code>type Order struct {
+	Items int
+	Paid  bool
+}
+
+type OrderError struct {
+	Reason string
+}
+
+func (e *OrderError) Error() string { return "訂單錯誤：" + e.Reason }</code></pre>
+        <pre class="code" data-src="exercises/10-interfaces/exercises.go#CheckOrder"><code>func CheckOrder(o Order) error {
+	var err *OrderError
+	if o.Items == 0 {
+		err = &amp;OrderError{Reason: "沒有點東西"}
+	} else if !o.Paid {
+		err = &amp;OrderError{Reason: "還沒付款"}
+	}
+	return err
+}</code></pre>
+        <p>測試：<code>TestCheckOrder</code>。</p>
+        <details><summary>提示</summary><p>第 5 節。</p></details>
+      </li>
+      <li>
+        <h3><span class="level fix">找錯</span>練習 7：價格被分錯類</h3>
+        <p><code>Kind(Price(85))</code> 應該是「價格」，卻回傳「可以印的」。</p>
+        <pre class="code" data-src="exercises/10-interfaces/doc.go#Price,Price.String"><code>type Price int
+
+func (p Price) String() string { return fmt.Sprintf("%d 元", int(p)) }</code></pre>
+        <pre class="code" data-src="exercises/10-interfaces/exercises.go#Kind"><code>func Kind(v any) string {
+	switch v.(type) {
+	case fmt.Stringer:
+		return "可以印的"
+	case Price:
+		return "價格"
+	case error:
+		return "錯誤"
+	default:
+		return "其他"
+	}
+}</code></pre>
+        <p>測試：<code>TestKind</code>。</p>
+        <details><summary>提示</summary><p>Price 有 String 方法，所以它也是 fmt.Stringer。type switch 由上往下比對。</p></details>
+      </li>
+    </ol>
+    <p><a href="https://github.com/xinqilin/GO-Playground/blob/main/exercises/10-interfaces/solution.go">參考解答</a>：先自己寫完再看。測試通過的寫法都是對的。</p>
+  </section>
+
+  <section aria-labelledby="recap">
+    <h2 id="recap">重點回顧</h2>
+    <ul class="recap">
+      <li>interface 是一份方法清單；有這些方法的型別就自動滿足它，不必宣告。</li>
+      <li><code>var _ I = T{}</code> 讓編譯器檢查 T 是否滿足 I。</li>
+      <li>interface 值有兩格：實際的型別和實際的值；兩格都空才是 nil。</li>
+      <li>方法是指標 receiver 時，只有指標滿足 interface：放 <code>&amp;b</code>，不是 <code>b</code>。</li>
+      <li>type assertion <code>v.(T)</code> 取出具體的值；不確定就用 <code>t, ok := v.(T)</code>，否則會 panic。</li>
+      <li>assertion 的目標也可以是 interface，用來檢查額外的能力。</li>
+      <li>type switch 由上往下比對，第一個符合的勝出；具體型別寫在 interface 前面。</li>
+      <li><code>any</code> 什麼都能裝，但型別檢查就延到了執行期；能用具體型別、小 interface 或泛型就不要用 any。</li>
+      <li>回傳 error 的函式，沒有錯誤時直接 <code>return nil</code>。</li>
+      <li>interface 要小、可以組合、由使用的一方定義；測試時換成手寫的假實作。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="further">
+    <h2 id="further">延伸閱讀</h2>
+    <ul class="notes">
+      <li>Go 語言規格：<a href="https://go.dev/ref/spec#Interface_types">Interface types</a>（含 <a href="https://go.dev/ref/spec#Embedded_interfaces">Embedded interfaces</a>、<a href="https://go.dev/ref/spec#Implementing_an_interface">Implementing an interface</a>）、<a href="https://go.dev/ref/spec#Method_sets">Method sets</a>、<a href="https://go.dev/ref/spec#Type_assertions">Type assertions</a>、<a href="https://go.dev/ref/spec#Type_switches">Type switches</a>、<a href="https://go.dev/ref/spec#Comparison_operators">Comparison operators</a>（interface 的比較）。</li>
+      <li>套件文件：<a href="https://pkg.go.dev/io#Writer">io.Writer</a>、<a href="https://pkg.go.dev/io#Reader">io.Reader</a>、<a href="https://pkg.go.dev/fmt#Stringer">fmt.Stringer</a>、<a href="https://pkg.go.dev/sort#Interface">sort.Interface</a>、<a href="https://pkg.go.dev/slices#SortFunc">slices.SortFunc</a>。</li>
+      <li><a href="https://go.dev/doc/faq#nil_error">Go FAQ：Why is my nil error value not equal to nil?</a></li>
+    </ul>
+  </section>
+
   <section aria-labelledby="run">
     <h2 id="run">動手跑</h2>
     <p class="label">在 repo 根目錄</p>
-    <pre class="shell"><code>go run ./chapters/10-interfaces
-go test ./chapters/10-interfaces</code></pre>
-    <p><a href="https://github.com/xinqilin/GO-Playground/tree/main/chapters/10-interfaces">在 GitHub 看完整程式碼</a></p>
+    <pre class="shell"><code>go run ./chapters/10-interfaces                 <span class="c"># 執行本章所有示範</span>
+go test ./chapters/10-interfaces                <span class="c"># 驗證頁面上的每一段輸出</span>
+go test ./exercises/10-interfaces/              <span class="c"># 做練習</span></code></pre>
+    <p><a href="https://github.com/xinqilin/GO-Playground/tree/main/chapters/10-interfaces">在 GitHub 看本章完整程式碼</a>，或看<a href="https://github.com/xinqilin/GO-Playground/tree/main/exercises/10-interfaces">練習題</a>。</p>
   </section>
 </main>
 
