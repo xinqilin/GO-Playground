@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>goroutine｜Go 圖解手冊</title>
-<meta name="description" content="goroutine 入門：main 不會等 goroutine、用 sync.WaitGroup 與 Go 1.25 的 wg.Go 等待完成，以及把工作切段平行處理。">
+<meta name="description" content="Go 的 goroutine：go 敘述、main 不等人、sync.WaitGroup 與 Go 1.25 的 wg.Go、把結果和錯誤交回來、goroutine 為什麼便宜、排程器與 GOMAXPROCS、並行與平行、goroutine 裡的 panic 與洩漏，附可執行的練習題。">
 <link rel="stylesheet" href="assets/style.css">
 </head>
 <body>
@@ -13,102 +13,588 @@
   <span class="count">14 / 24</span>
 </header>
 
-<main class="page">
+<main class="page long">
   <header class="hero">
     <div class="num" aria-hidden="true">14</div>
     <p class="eyebrow">Part 3 · 並行 · 第 14 章</p>
     <h1>goroutine</h1>
-    <p class="analogy">goroutine 是很便宜的分身：在函式呼叫前面加上 go，它就在背景自己跑。</p>
+    <p class="analogy">goroutine 是便當店多請的一位廚師：開一位幾乎不花錢，大家同時做不同的便當；但老闆要記得等所有人做完再打烊，不然做到一半的便當就沒了。</p>
   </header>
 
-  <section aria-labelledby="look">
-    <h2 id="look">看圖</h2>
-    <div class="figs">
-      <figure class="fig">
-        <svg viewBox="0 0 480 264" role="img" aria-label="沒有等待時，main 一結束程式就結束，goroutine 還沒做完就被砍掉；用 wg.Wait 時，main 會等 goroutine 做完才結束">
-          <title>main 不等人</title>
-          <text class="small bold" x="16" y="24">沒有等待</text>
-          <text class="small mono" x="16" y="51">main</text>
-          <rect class="acc" x="80" y="36" width="180" height="20" rx="4"/>
-          <text class="small mono" x="16" y="85">go f()</text>
-          <rect class="acc" x="160" y="70" width="100" height="20" rx="4"/>
-          <rect class="wire hot-ln dash" x="260" y="70" width="140" height="20" rx="4"/>
-          <path class="wire hot-ln" d="M260 28 V100"/>
-          <text class="small t-hot" x="268" y="118">main 結束，整個程式跟著結束</text>
+  <nav class="toc-inline" aria-labelledby="toc-title">
+    <p class="label" id="toc-title">本章內容</p>
+    <ol>
+      <li><a href="#goals">本章你會學到</a></li>
+      <li><a href="#go">go 敘述：多開一位廚師</a></li>
+      <li><a href="#waitgroup">等它們做完：sync.WaitGroup</a></li>
+      <li><a href="#results">把結果交回來</a></li>
+      <li><a href="#cheap">goroutine 很便宜</a></li>
+      <li><a href="#scheduler">排程器：並行與平行</a></li>
+      <li><a href="#panic">panic 與洩漏</a></li>
+      <li><a href="#pitfalls">常見錯誤</a></li>
+      <li><a href="#java">從 Java 來的你</a></li>
+      <li><a href="#exercises">練習</a></li>
+      <li><a href="#recap">重點回顧</a></li>
+      <li><a href="#further">延伸閱讀</a></li>
+    </ol>
+  </nav>
 
-          <text class="small bold" x="16" y="160">wg.Wait()</text>
-          <text class="small mono" x="16" y="187">main</text>
-          <rect class="acc" x="80" y="172" width="180" height="20" rx="4"/>
-          <rect class="soft" x="260" y="172" width="140" height="20" rx="4"/>
-          <text class="sm" x="330" y="187" text-anchor="middle">Wait</text>
-          <text class="small mono" x="16" y="221">go f()</text>
-          <rect class="acc" x="160" y="206" width="240" height="20" rx="4"/>
-          <path class="wire acc-ln" d="M400 164 V236"/>
-          <text class="small t-acc" x="400" y="254" text-anchor="end">全部做完才結束</text>
-        </svg>
-        <figcaption>main 一結束，整個程式就結束，還在跑的 goroutine 會被直接砍掉。要等它們做完，用 <code>sync.WaitGroup</code>。</figcaption>
-      </figure>
-
-      <figure class="fig">
-        <svg viewBox="0 0 480 250" role="img" aria-label="1 到 1000 切成 4 段，每段由一個 goroutine 加總成小計，4 個小計再加起來得到 500500">
-          <title>一個工作切給多個 goroutine</title>
-          <rect class="soft" x="20" y="30" width="110" height="40"/>
-          <rect class="soft" x="130" y="30" width="110" height="40"/>
-          <rect class="soft" x="240" y="30" width="110" height="40"/>
-          <rect class="soft" x="350" y="30" width="110" height="40"/>
-          <text class="small mono" x="75" y="55" text-anchor="middle">1–250</text>
-          <text class="small mono" x="185" y="55" text-anchor="middle">251–500</text>
-          <text class="small mono" x="295" y="55" text-anchor="middle">501–750</text>
-          <text class="small mono" x="405" y="55" text-anchor="middle">751–1000</text>
-          <path class="wire" d="M75 70 V98 M185 70 V98 M295 70 V98 M405 70 V98"/>
-          <path class="tip" d="M75 108 L68 95 L82 95 Z"/>
-          <path class="tip" d="M185 108 L178 95 L192 95 Z"/>
-          <path class="tip" d="M295 108 L288 95 L302 95 Z"/>
-          <path class="tip" d="M405 108 L398 95 L412 95 Z"/>
-          <rect class="acc" x="30" y="110" width="90" height="40" rx="20"/>
-          <rect class="acc" x="140" y="110" width="90" height="40" rx="20"/>
-          <rect class="acc" x="250" y="110" width="90" height="40" rx="20"/>
-          <rect class="acc" x="360" y="110" width="90" height="40" rx="20"/>
-          <text class="small mono" x="75" y="135" text-anchor="middle">31375</text>
-          <text class="small mono" x="185" y="135" text-anchor="middle">93875</text>
-          <text class="small mono" x="295" y="135" text-anchor="middle">156375</text>
-          <text class="small mono" x="405" y="135" text-anchor="middle">218875</text>
-          <path class="wire" d="M75 150 V170 H405 V150 M185 150 V170 M295 150 V170 M240 170 V188"/>
-          <path class="tip" d="M240 198 L233 185 L247 185 Z"/>
-          <rect class="hot" x="170" y="200" width="140" height="40" rx="6"/>
-          <text class="bold t-hot" x="240" y="226" text-anchor="middle">500500</text>
-        </svg>
-        <figcaption>把 1 到 1000 切成 4 段，每段交給一個 goroutine 加總，最後把 4 個小計加起來。每個 goroutine 只寫自己的格子，不會互相干擾。</figcaption>
-      </figure>
-    </div>
+  <section aria-labelledby="goals">
+    <h2 id="goals">本章你會學到</h2>
+    <ul class="notes">
+      <li>用 <code>go</code> 開一個 goroutine，以及為什麼 main 一結束，其他 goroutine 也跟著消失。</li>
+      <li>用 <code>sync.WaitGroup</code> 等一群 goroutine 做完，包括 Go 1.25 起的 <code>wg.Go</code> 和更早的 Add、Done 寫法。</li>
+      <li>goroutine 沒有回傳值，結果和錯誤要怎麼安全地交回來。</li>
+      <li>goroutine 為什麼可以開上萬個，以及「便宜」不等於「免費」。</li>
+      <li>排程器、<code>GOMAXPROCS</code>，以及並行（concurrency）和平行（parallelism）的差別。</li>
+      <li>goroutine 裡的 panic 會讓整個程式當掉，以及什麼叫 goroutine 洩漏。</li>
+    </ul>
+    <p>先備：<a href="04-functions.html#closures">04 章的 closure</a>、<a href="04-functions.html#defer">defer</a> 和 <a href="04-functions.html#panic">panic</a>，<a href="11-errors.html#join">11 章的 errors.Join</a>。</p>
   </section>
 
-  <section aria-labelledby="code">
-    <h2 id="code">最小範例</h2>
-    <pre class="code"><code>func main() {
-	nums := []int{1, 2, 3, 4}
-	out := make([]int, len(nums))
+  <section aria-labelledby="go">
+    <h2 id="go">1. go 敘述：多開一位廚師</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 200" role="img" aria-label="時間軸：main goroutine 執行 go 敘述後馬上繼續往下，印出點完餐走人就結束；另一個 goroutine 還在睡，main 結束時整個程式結束，它來不及印出排骨飯做好了">
+        <title>main 不等人</title>
+        <text class="small bold" x="16" y="56">main</text>
+        <text class="small bold" x="16" y="136">goroutine</text>
+        <path class="wire acc-ln" d="M110 50 H300"/>
+        <circle class="acc" cx="300" cy="50" r="7"/>
+        <text class="sm" x="300" y="30" text-anchor="middle">main 回傳，程式結束</text>
+        <path class="wire dash" d="M150 50 V122"/>
+        <text class="sm mono" x="158" y="92">go func()</text>
+        <path class="wire" d="M150 130 H300"/>
+        <path class="wire hot-ln dash" d="M300 130 H440"/>
+        <text class="t-hot bold" x="300" y="138" text-anchor="middle">×</text>
+        <text class="sm" x="225" y="158" text-anchor="middle">還在睡 100ms</text>
+        <text class="sm t-hot" x="440" y="158" text-anchor="end">來不及印「做好了」</text>
+        <path class="wire faint" d="M110 186 H460"/>
+        <path class="tip" d="M470 186 L458 180 L458 192 Z"/>
+        <text class="sm" x="110" y="180">時間</text>
+      </svg>
+      <figcaption>go 敘述一執行完，main 就繼續往下走。main 回傳時整個程式結束，不管其他 goroutine 跑完了沒有。</figcaption>
+    </figure>
+    <p><strong>goroutine</strong> 是 Go 裡「同時執行」的單位。每個程式一開始只有一個 goroutine，就是執行 main 的那一個。在函式呼叫前面加上 <code>go</code>，就會開一個新的 goroutine 去執行那個呼叫：</p>
+    <pre class="code" data-src="chapters/14-goroutines/nowait/main.go#main"><code>func main() {
+	go func() {
+		time.Sleep(100 * time.Millisecond)
+		fmt.Println("排骨飯做好了")
+	}()
+	fmt.Println("點完餐，走人")
+}</code></pre>
+    <p class="label">輸出（<code>go run ./chapters/14-goroutines/nowait</code>）</p>
+    <pre class="out"><code>點完餐，走人</code></pre>
+    <p>「排骨飯做好了」沒有印出來。<code>go func() { … }()</code> 這一行只是把函式交給新的 goroutine，<strong>立刻</strong>就返回，main 繼續往下印「點完餐，走人」，然後 main 回傳。規格寫得很清楚：main 回傳時程式就結束，<strong>不會等</strong>其他 goroutine。那個還在睡的 goroutine 就這樣跟著程式一起消失了。</p>
+    <ul class="notes">
+      <li><code>go</code> 後面一定要是函式<strong>呼叫</strong>。最常見的是 <code>go func() { … }()</code>：寫一個匿名函式，結尾的 <code>()</code> 呼叫它。</li>
+      <li>被呼叫的函式就算有回傳值，也會被丟掉，沒有地方可以接。結果要怎麼拿回來，是第 3 節的主題。</li>
+      <li>沒有任何 API 可以從外面「殺掉」一個 goroutine，也沒有 API 可以取得 goroutine 的編號。goroutine 只能自己結束：函式 return，或程式結束。</li>
+    </ul>
+    <p>這支程式的輸出取決於時間，所以它放在 <code>nowait</code> 子目錄，沒有測試。本章其他示範都會先等 goroutine 做完再印，輸出才會固定。等的方法就是下一節。</p>
+  </section>
+
+  <section aria-labelledby="waitgroup">
+    <h2 id="waitgroup">2. 等它們做完：sync.WaitGroup</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 200" role="img" aria-label="WaitGroup 是一塊計數板：開三個 goroutine 計數變成 3，每做完一個減 1，變成 2、1、0；計數變成 0 時，卡在 Wait 的 main 才繼續">
+        <title>WaitGroup 是一塊計數板</title>
+        <rect class="box" x="16" y="70" width="64" height="56" rx="8"/>
+        <text class="lg mono" x="48" y="109" text-anchor="middle">3</text>
+        <rect class="box" x="122" y="70" width="64" height="56" rx="8"/>
+        <text class="lg mono" x="154" y="109" text-anchor="middle">2</text>
+        <rect class="box" x="228" y="70" width="64" height="56" rx="8"/>
+        <text class="lg mono" x="260" y="109" text-anchor="middle">1</text>
+        <rect class="acc" x="334" y="70" width="64" height="56" rx="8"/>
+        <text class="lg mono" x="366" y="109" text-anchor="middle">0</text>
+        <path class="wire" d="M80 98 H110 M186 98 H216 M292 98 H322"/>
+        <path class="tip" d="M120 98 L108 92 L108 104 Z M226 98 L214 92 L214 104 Z M332 98 L320 92 L320 104 Z"/>
+        <text class="sm" x="48" y="56" text-anchor="middle">開了 3 個</text>
+        <text class="sm" x="154" y="56" text-anchor="middle">做完一個</text>
+        <text class="sm" x="260" y="56" text-anchor="middle">再一個</text>
+        <text class="sm" x="366" y="56" text-anchor="middle">全部做完</text>
+        <path class="wire acc-ln" d="M366 126 V160 H420"/>
+        <path class="tip acc-tip" d="M430 160 L418 154 L418 166 Z"/>
+        <text class="small" x="434" y="166">main</text>
+        <text class="sm" x="366" y="186" text-anchor="middle">Wait 放行</text>
+        <text class="sm mono" x="200" y="160" text-anchor="middle">Wait() 一直卡著</text>
+        <path class="wire faint dash" d="M30 146 H330"/>
+      </svg>
+      <figcaption>WaitGroup 記住「還有幾個沒做完」。Wait 會一直等，直到計數變成 0。</figcaption>
+    </figure>
+    <p><code>sync.WaitGroup</code> 是一個計數器：開一個 goroutine 就加 1，做完一個就減 1，<code>Wait</code> 會等到計數變成 0 才返回。Go 1.25 起，「加 1、開 goroutine、做完減 1」這三件事可以用一個 <code>wg.Go</code> 完成：</p>
+    <pre class="code" data-src="chapters/14-goroutines/waitgroup.go#prepare,kitchenDemo"><code>func prepare(order string) string {
+	return order + "好了"
+}
+
+func kitchenDemo() {
+	orders := []string{"排骨飯", "雞腿飯", "魚排飯"}
+	done := make([]string, len(orders))
 	var wg sync.WaitGroup
-	for i, n := range nums {
-		wg.Go(func() { out[i] = n * n }) <span class="c">// Go 1.25 起的寫法</span>
+	for i, o := range orders {
+		wg.Go(func() {
+			done[i] = prepare(o)
+		})
 	}
-	wg.Wait() <span class="c">// 等全部做完</span>
-	fmt.Println(out)
+	wg.Wait()
+	fmt.Println(strings.Join(done, "、"))
 }</code></pre>
     <p class="label">輸出</p>
-    <pre class="out"><code>[1 4 9 16]</code></pre>
+    <pre class="out" data-example="chapters/14-goroutines#Example_kitchenDemo"><code>排骨飯好了、雞腿飯好了、魚排飯好了</code></pre>
+    <ul class="notes">
+      <li>WaitGroup 的零值就能用，<code>var wg sync.WaitGroup</code> 就好。</li>
+      <li><code>wg.Go(f)</code> 開一個新的 goroutine 執行 f，並把它登記在 WaitGroup 上；f 回傳時自動登出。</li>
+      <li>三份餐是同時做的，完成的順序每次可能不同。但每個 goroutine 只寫 <code>done</code> 裡自己那一格，Wait 之後再依照索引印出來，結果就固定了。</li>
+      <li>Go 1.22 起，for 迴圈每一圈的 <code>i</code>、<code>o</code> 都是新的變數（<a href="03-control-flow.html#loopvar">03 章</a>），每個 goroutine 抓到的是自己那一圈的值，可以放心在 closure 裡使用。</li>
+    </ul>
+    <p>Go 1.25 以前沒有 wg.Go，要自己寫 Add 和 Done。舊的程式碼裡到處都是這種寫法，一定要看得懂：</p>
+    <pre class="code" data-src="chapters/14-goroutines/waitgroup.go#kitchenAddDone"><code>func kitchenAddDone() {
+	orders := []string{"排骨飯", "雞腿飯", "魚排飯"}
+	done := make([]string, len(orders))
+	var wg sync.WaitGroup
+	for i, o := range orders {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			done[i] = prepare(o)
+		}()
+	}
+	wg.Wait()
+	fmt.Println(strings.Join(done, "、"))
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/14-goroutines#Example_kitchenAddDone"><code>排骨飯好了、雞腿飯好了、魚排飯好了</code></pre>
+    <p><code>wg.Add(1)</code> 必須寫在 go <strong>之前</strong>，在開 goroutine 的那一方執行。如果寫在 goroutine 裡面，main 可能在任何一個 goroutine 來得及 Add 之前就執行 Wait，看到計數是 0，直接放行（常見錯誤 2）。<code>defer wg.Done()</code> 寫在 goroutine 的第一行，不管函式從哪裡 return 都會減 1。新寫的程式用 wg.Go 就不會犯這些錯。</p>
+    <p>go 和 <a href="04-functions.html#defer">defer</a> 有一個共同點：後面那個呼叫的<strong>參數</strong>，在 go 這一行就求值了，goroutine 晚一點才開始跑也不影響：</p>
+    <pre class="code" data-src="chapters/14-goroutines/waitgroup.go#argsNowDemo"><code>func argsNowDemo() {
+	var wg sync.WaitGroup
+	order := "排骨飯"
+	wg.Add(1)
+	go func(o string) {
+		defer wg.Done()
+		fmt.Println("廚房收到", o)
+	}(order)
+	order = "雞腿飯"
+	wg.Wait()
+	fmt.Println("櫃台現在的單", order)
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/14-goroutines#Example_argsNowDemo"><code>廚房收到 排骨飯
+櫃台現在的單 雞腿飯</code></pre>
+    <p>參數 o 在 go 那一行就拿到了「排骨飯」，之後櫃台把 order 改成雞腿飯，廚房收到的還是排骨飯。如果 goroutine 不用參數，而是直接在 closure 裡讀 order，就變成 main 在寫、goroutine 在讀同一個變數，這是 data race，<code>go test -race</code> 會抓到（「<a href="17-sync.html">sync 與 data race</a>」那一章）。</p>
   </section>
 
-  <section aria-labelledby="notes">
-    <h2 id="notes">工程師筆記</h2>
+  <section aria-labelledby="results">
+    <h2 id="results">3. 把結果交回來</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 200" role="img" aria-label="四個 goroutine 各自查詢一家分店，結果寫進 counts 的對應格子，錯誤寫進 errs 的對應格子；Wait 之後 main 才讀取兩個 slice">
+        <title>各寫各的格子</title>
+        <text class="sm mono" x="16" y="96">counts</text>
+        <text class="sm mono" x="16" y="146">errs</text>
+        <rect class="box" x="80" y="76" width="80" height="30"/>
+        <rect class="box" x="160" y="76" width="80" height="30"/>
+        <rect class="box" x="240" y="76" width="80" height="30"/>
+        <rect class="box" x="320" y="76" width="80" height="30"/>
+        <text class="small mono" x="120" y="97" text-anchor="middle">12</text>
+        <text class="small mono" x="200" y="97" text-anchor="middle">0</text>
+        <text class="small mono" x="280" y="97" text-anchor="middle">0</text>
+        <text class="small mono" x="360" y="97" text-anchor="middle">7</text>
+        <rect class="box" x="80" y="126" width="80" height="30"/>
+        <rect class="box" x="160" y="126" width="80" height="30"/>
+        <rect class="hot" x="240" y="126" width="80" height="30"/>
+        <rect class="box" x="320" y="126" width="80" height="30"/>
+        <text class="sm mono" x="120" y="146" text-anchor="middle">nil</text>
+        <text class="sm mono" x="200" y="146" text-anchor="middle">nil</text>
+        <text class="sm" x="280" y="146" text-anchor="middle">查不到</text>
+        <text class="sm mono" x="360" y="146" text-anchor="middle">nil</text>
+        <text class="sm" x="120" y="30" text-anchor="middle">中山店</text>
+        <text class="sm" x="200" y="30" text-anchor="middle">雙連店</text>
+        <text class="sm" x="280" y="30" text-anchor="middle">圓山店</text>
+        <text class="sm" x="360" y="30" text-anchor="middle">民權店</text>
+        <path class="wire acc-ln" d="M120 38 V66 M200 38 V66 M280 38 V66 M360 38 V66"/>
+        <path class="tip acc-tip" d="M120 76 L114 64 L126 64 Z M200 76 L194 64 L206 64 Z M280 76 L274 64 L286 64 Z M360 76 L354 64 L366 64 Z"/>
+        <text class="sm" x="240" y="186" text-anchor="middle">每個 goroutine 只碰自己那一格；Wait 之後 main 才讀</text>
+      </svg>
+      <figcaption>goroutine 沒有回傳值。最簡單又安全的做法：事先準備好 slice，每個 goroutine 只寫自己的索引那一格。</figcaption>
+    </figure>
+    <p>goroutine 沒有回傳值，常見的交回結果方式有兩種：寫進事先準備好的位置，或透過 channel 送回來（「<a href="15-channels.html">channel</a>」那一章）。這一章先用第一種，它不需要任何新工具：</p>
+    <pre class="code" data-src="chapters/14-goroutines/results.go#sumParallel,sumDemo"><code>func sumParallel(nums []int, parts int) int {
+	parts = max(parts, 1)
+	partial := make([]int, parts)
+	size := (len(nums) + parts - 1) / parts
+	var wg sync.WaitGroup
+	for p := range parts {
+		lo := min(p*size, len(nums))
+		hi := min(lo+size, len(nums))
+		wg.Go(func() {
+			for _, n := range nums[lo:hi] {
+				partial[p] += n
+			}
+		})
+	}
+	wg.Wait()
+
+	total := 0
+	for _, s := range partial {
+		total += s
+	}
+	return total
+}
+
+func sumDemo() {
+	nums := make([]int, 1000)
+	for i := range nums {
+		nums[i] = i + 1
+	}
+	fmt.Println(sumParallel(nums, 4))
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/14-goroutines#Example_sumDemo"><code>500500</code></pre>
+    <p>1 到 1000 切成四段，每段由一個 goroutine 加總到 <code>partial[p]</code>，Wait 之後再把四個部分和加起來。這樣做之所以安全，有兩個原因：</p>
     <ul class="notes">
-      <li>main 結束程式就結束，不會等 goroutine；要等就用 <code>sync.WaitGroup</code>。Go 1.25 起可以直接 <code>wg.Go(f)</code>。</li>
-      <li>用傳統的 <code>wg.Add(1)</code> 時，要在 <code>go</code> 之前呼叫，不能放進 goroutine 裡。</li>
-      <li>每個 goroutine 都要有結束的方式。卡在 channel 上永遠等不到的 goroutine 會一直佔著記憶體，叫 goroutine leak。</li>
-      <li>多個 goroutine 寫同一個 slice 的不同格子沒問題；寫同一個變數就要加鎖（第 17 章）。</li>
-      <li>Go 1.22 起，迴圈變數每一圈都是新的一份，直接在 goroutine 裡用不會全部拿到最後一個值。</li>
-      <li>同時跑在幾個 CPU 上由 <code>GOMAXPROCS</code> 決定，預設是 CPU 數；在 Linux 上還會參考容器（cgroup）的 CPU 限制。</li>
+      <li><strong>不同的 goroutine 寫不同的格子</strong>。slice 的每個元素是不同的記憶體位置，同時寫不同的元素不算衝突。但如果大家都 <code>total += n</code> 寫同一個變數，或對同一個 slice <code>append</code>，就是 data race。</li>
+      <li><strong>讀取發生在 Wait 之後</strong>。WaitGroup 保證：goroutine 在結束前寫的東西，在 Wait 返回之後一定看得到。在 Wait 之前偷看 partial，可能看到寫了一半的結果。</li>
     </ul>
+    <p>錯誤也是一樣的道理：每個 goroutine 把自己的錯誤寫進 <code>errs</code> 的對應格子，Wait 之後用 errors.Join 合起來（<a href="11-errors.html#join">11 章</a>），順序和輸入一致：</p>
+    <pre class="code" data-src="chapters/14-goroutines/results.go#ErrNoStore,shelves,stock,checkStores,storesDemo"><code>var ErrNoStore = errors.New("沒有這家分店")
+
+var shelves = map[string]int{"中山店": 12, "雙連店": 0, "民權店": 7}
+
+func stock(store string) (int, error) {
+	n, ok := shelves[store]
+	if !ok {
+		return 0, fmt.Errorf("%s：%w", store, ErrNoStore)
+	}
+	return n, nil
+}
+
+func checkStores(stores []string) ([]int, error) {
+	counts := make([]int, len(stores))
+	errs := make([]error, len(stores))
+	var wg sync.WaitGroup
+	for i, s := range stores {
+		wg.Go(func() {
+			counts[i], errs[i] = stock(s)
+		})
+	}
+	wg.Wait()
+	return counts, errors.Join(errs...)
+}
+
+func storesDemo() {
+	counts, err := checkStores([]string{"中山店", "雙連店", "圓山店", "民權店"})
+	fmt.Println(counts)
+	fmt.Println(err)
+	fmt.Println(errors.Is(err, ErrNoStore))
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/14-goroutines#Example_storesDemo"><code>[12 0 0 7]
+圓山店：沒有這家分店
+true</code></pre>
+    <p>四家分店是同時查詢的，真實的程式裡每次查詢是一個網路請求，同時查比一家一家查快得多。圓山店查不到，但其他三家的結果照樣拿得到；errors.Join 會略過 nil，全部成功時回傳的就是 nil。</p>
+    <p>map 不能這樣用：好幾個 goroutine 同時寫同一個 map，就算 key 不同，也可能讓程式直接當掉（<a href="07-maps.html#pit-concurrent">07 章</a>）。需要的話，讓每個 goroutine 寫自己的 map，Wait 之後再合併（練習 4）。</p>
+  </section>
+
+  <section aria-labelledby="cheap">
+    <h2 id="cheap">4. goroutine 很便宜</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 196" role="img" aria-label="左邊一條作業系統執行緒預留一大塊 stack；右邊同樣的空間可以放很多個 goroutine，每個一開始只有幾 KB 的 stack，不夠時才長大">
+        <title>執行緒和 goroutine 的 stack</title>
+        <rect class="soft" x="20" y="30" width="180" height="120" rx="8"/>
+        <text class="small" x="110" y="86" text-anchor="middle">一條執行緒</text>
+        <text class="sm" x="110" y="108" text-anchor="middle">stack 預留以 MB 計</text>
+        <rect class="box" x="260" y="30" width="36" height="24" rx="4"/>
+        <rect class="box" x="304" y="30" width="36" height="24" rx="4"/>
+        <rect class="box" x="348" y="30" width="36" height="24" rx="4"/>
+        <rect class="box" x="392" y="30" width="36" height="24" rx="4"/>
+        <rect class="box" x="436" y="30" width="36" height="24" rx="4"/>
+        <rect class="box" x="260" y="62" width="36" height="24" rx="4"/>
+        <rect class="box" x="304" y="62" width="36" height="24" rx="4"/>
+        <rect class="acc" x="348" y="62" width="36" height="56" rx="4"/>
+        <rect class="box" x="392" y="62" width="36" height="24" rx="4"/>
+        <rect class="box" x="436" y="62" width="36" height="24" rx="4"/>
+        <rect class="box" x="260" y="94" width="36" height="24" rx="4"/>
+        <rect class="box" x="304" y="94" width="36" height="24" rx="4"/>
+        <rect class="box" x="392" y="94" width="36" height="24" rx="4"/>
+        <rect class="box" x="436" y="94" width="36" height="24" rx="4"/>
+        <rect class="box" x="260" y="126" width="36" height="24" rx="4"/>
+        <rect class="box" x="304" y="126" width="36" height="24" rx="4"/>
+        <rect class="box" x="348" y="126" width="36" height="24" rx="4"/>
+        <rect class="box" x="392" y="126" width="36" height="24" rx="4"/>
+        <rect class="box" x="436" y="126" width="36" height="24" rx="4"/>
+        <text class="sm" x="366" y="178" text-anchor="middle">從幾 KB 開始，不夠才長大</text>
+        <text class="sm" x="110" y="178" text-anchor="middle">一開始就佔一大塊</text>
+      </svg>
+      <figcaption>goroutine 的 stack 從很小開始，需要時由 runtime 自動長大，所以同樣的記憶體可以放下多得多的 goroutine。</figcaption>
+    </figure>
+    <p>作業系統的執行緒（thread）在建立時就要預留一大塊 stack，建立和切換也要經過作業系統，開幾千條就很吃力。goroutine 由 Go 的 runtime 自己管理：</p>
+    <ul class="notes">
+      <li>每個 goroutine 的 stack 一開始只有幾 KB，不夠用時 runtime 會配置一塊更大的，把內容搬過去。</li>
+      <li>建立 goroutine 和在 goroutine 之間切換，都不需要進入作業系統，比執行緒便宜得多。</li>
+      <li>runtime 把大量的 goroutine 分配到少數幾條執行緒上執行（第 5 節）。</li>
+    </ul>
+    <pre class="code" data-src="chapters/14-goroutines/cheap.go#spawn,spawnDemo"><code>func spawn(n int) int {
+	done := make([]bool, n)
+	var wg sync.WaitGroup
+	for i := range n {
+		wg.Go(func() { done[i] = true })
+	}
+	wg.Wait()
+
+	count := 0
+	for _, d := range done {
+		if d {
+			count++
+		}
+	}
+	return count
+}
+
+func spawnDemo() {
+	fmt.Println(spawn(10000))
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/14-goroutines#Example_spawnDemo"><code>10000</code></pre>
+    <p>一萬個 goroutine 一瞬間就開完、跑完了。stack 會自動長大，所以在 goroutine 裡遞迴十萬層也沒問題：</p>
+    <pre class="code" data-src="chapters/14-goroutines/cheap.go#depth,growDemo"><code>func depth(n int) int {
+	if n == 0 {
+		return 0
+	}
+	return 1 + depth(n-1)
+}
+
+func growDemo() {
+	var got int
+	var wg sync.WaitGroup
+	wg.Go(func() {
+		got = depth(100_000)
+	})
+	wg.Wait()
+	fmt.Println(got)
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/14-goroutines#Example_growDemo"><code>100000</code></pre>
+    <p>但「便宜」不等於「免費」。每個 goroutine 在結束之前都佔著自己的 stack 和它抓住的變數；而且 goroutine 要做的事通常會用到外部資源，例如資料庫連線、對方伺服器的處理能力。一口氣對資料庫開一萬個查詢，倒下的會是資料庫。限制同時執行數量的做法，在「<a href="19-concurrency-patterns.html">並行模式</a>」那一章。</p>
+  </section>
+
+  <section aria-labelledby="scheduler">
+    <h2 id="scheduler">5. 排程器：並行與平行</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 200" role="img" aria-label="上面：一個 CPU 核心輪流執行 A、B、C 三個 goroutine，這是並行；下面：兩個核心同時執行，A 和 B 在同一時間各在一個核心上跑，這是平行">
+        <title>並行和平行</title>
+        <text class="small bold" x="16" y="26">並行：一個核心輪流做</text>
+        <text class="sm" x="16" y="66">核心 1</text>
+        <rect class="acc" x="80" y="44" width="60" height="32" rx="4"/>
+        <text class="small" x="110" y="66" text-anchor="middle">A</text>
+        <rect class="soft" x="140" y="44" width="60" height="32" rx="4"/>
+        <text class="small" x="170" y="66" text-anchor="middle">B</text>
+        <rect class="box" x="200" y="44" width="60" height="32" rx="4"/>
+        <text class="small" x="230" y="66" text-anchor="middle">C</text>
+        <rect class="acc" x="260" y="44" width="60" height="32" rx="4"/>
+        <text class="small" x="290" y="66" text-anchor="middle">A</text>
+        <rect class="soft" x="320" y="44" width="60" height="32" rx="4"/>
+        <text class="small" x="350" y="66" text-anchor="middle">B</text>
+        <rect class="box" x="380" y="44" width="60" height="32" rx="4"/>
+        <text class="small" x="410" y="66" text-anchor="middle">C</text>
+        <text class="small bold" x="16" y="112">平行：兩個核心同時做</text>
+        <text class="sm" x="16" y="152">核心 1</text>
+        <rect class="acc" x="80" y="130" width="90" height="28" rx="4"/>
+        <text class="small" x="125" y="150" text-anchor="middle">A</text>
+        <rect class="box" x="170" y="130" width="90" height="28" rx="4"/>
+        <text class="small" x="215" y="150" text-anchor="middle">C</text>
+        <rect class="acc" x="260" y="130" width="90" height="28" rx="4"/>
+        <text class="small" x="305" y="150" text-anchor="middle">A</text>
+        <text class="sm" x="16" y="186">核心 2</text>
+        <rect class="soft" x="80" y="164" width="90" height="28" rx="4"/>
+        <text class="small" x="125" y="184" text-anchor="middle">B</text>
+        <rect class="soft" x="170" y="164" width="90" height="28" rx="4"/>
+        <text class="small" x="215" y="184" text-anchor="middle">B</text>
+        <rect class="box" x="260" y="164" width="90" height="28" rx="4"/>
+        <text class="small" x="305" y="184" text-anchor="middle">C</text>
+      </svg>
+      <figcaption>並行是「程式的結構」：好幾件事都在進行中。平行是「執行的方式」：同一個瞬間真的有好幾件事在跑。</figcaption>
+    </figure>
+    <p>這兩個詞常被混用，但意思不同：</p>
+    <ul class="notes">
+      <li><strong>並行</strong>（concurrency）：把程式寫成好幾件可以各自進行的工作。只有一個核心時，它們輪流執行，看起來像同時。</li>
+      <li><strong>平行</strong>（parallelism）：好幾件工作在同一個瞬間，分別在不同的核心上執行。</li>
+    </ul>
+    <p>goroutine 讓你寫出並行的程式；有沒有平行，由 runtime 和機器決定。<code>GOMAXPROCS</code> 是「同時最多有幾條執行緒在跑 Go 的程式碼」，預設等於這台機器可用的 CPU 數：</p>
+    <pre class="code" data-src="chapters/14-goroutines/procs/main.go#main"><code>func main() {
+	fmt.Println("CPU 數", runtime.NumCPU())
+	fmt.Println("GOMAXPROCS", runtime.GOMAXPROCS(0))
+	fmt.Println("goroutine 數", runtime.NumGoroutine())
+}</code></pre>
+    <p class="label">輸出（在一台 10 核心的筆電上執行 <code>go run ./chapters/14-goroutines/procs</code>，你的數字會不同）</p>
+    <pre class="out"><code>CPU 數 10
+GOMAXPROCS 10
+goroutine 數 1</code></pre>
+    <ul class="notes">
+      <li><code>runtime.GOMAXPROCS(0)</code> 只查詢不修改。幾乎不需要自己設定它，預設值就是對的。</li>
+      <li>Go 1.25 起（go.mod 寫 go 1.25 以上時），在 Linux 容器裡執行，預設值也會參考容器的 CPU 配額，而不是只看整台主機有幾顆 CPU；之後配額改變時，runtime 也會跟著調整。</li>
+      <li>goroutine 數是 1：程式剛開始時只有 main 自己。</li>
+    </ul>
+    <p>goroutine 什麼時候執行、在哪個核心上執行、輪到誰，都由 runtime 的<strong>排程器</strong>決定，你無法控制，也不應該依賴它的順序。Go 1.14 起，排程器可以強制暫停一個跑太久的 goroutine，讓其他 goroutine 有機會執行，所以就算有一個 goroutine 在跑沒有函式呼叫的無窮迴圈，其他 goroutine 也不會因此餓死。</p>
+    <p>多開 goroutine 不一定會變快。工作是在等網路、等磁碟的（I/O bound），同時等很多個會快很多，第 3 節的分店查詢就是這種。工作是純計算的（CPU bound），最多只能快到核心數那麼多倍，而且切太細的話，開 goroutine、合併結果的成本還會超過省下的時間。要不要並行，用 benchmark 量過再決定。</p>
+
+    <section class="deep" aria-labelledby="gmp">
+      <p class="tag">深入：第一次讀可以先跳過</p>
+      <h3 id="gmp">5.1 G、M、P</h3>
+      <figure class="fig">
+        <svg viewBox="0 0 480 210" role="img" aria-label="兩個 P 各有一排等待執行的 G，每個 P 綁著一條執行緒 M 在 CPU 上執行目前的 G；一條 M 卡在系統呼叫時，P 會改綁另一條 M">
+          <title>G、M、P</title>
+          <rect class="acc" x="40" y="20" width="160" height="40" rx="8"/>
+          <text class="small mono" x="120" y="46" text-anchor="middle">M（執行緒）</text>
+          <rect class="acc" x="280" y="20" width="160" height="40" rx="8"/>
+          <text class="small mono" x="360" y="46" text-anchor="middle">M（執行緒）</text>
+          <path class="wire" d="M120 60 V80 M360 60 V80"/>
+          <rect class="box" x="70" y="80" width="100" height="36" rx="8"/>
+          <text class="small mono bold" x="120" y="104" text-anchor="middle">P</text>
+          <rect class="box" x="310" y="80" width="100" height="36" rx="8"/>
+          <text class="small mono bold" x="360" y="104" text-anchor="middle">P</text>
+          <path class="wire" d="M120 116 V136 M360 116 V136"/>
+          <circle class="soft" cx="90" cy="156" r="16"/>
+          <circle class="soft" cx="130" cy="156" r="16"/>
+          <circle class="soft" cx="170" cy="156" r="16"/>
+          <text class="sm mono" x="90" y="161" text-anchor="middle">G</text>
+          <text class="sm mono" x="130" y="161" text-anchor="middle">G</text>
+          <text class="sm mono" x="170" y="161" text-anchor="middle">G</text>
+          <circle class="soft" cx="340" cy="156" r="16"/>
+          <text class="sm mono" x="340" y="161" text-anchor="middle">G</text>
+          <path class="wire acc-ln dash" d="M190 156 H312"/>
+          <path class="tip acc-tip" d="M322 156 L310 150 L310 162 Z"/>
+          <text class="sm" x="262" y="146" text-anchor="middle">閒的 P 來偷工作</text>
+          <text class="sm" x="240" y="200" text-anchor="middle">P 的數量 = GOMAXPROCS；G 排在 P 的佇列裡等著被執行</text>
+        </svg>
+        <figcaption>排程器的三個角色：G 是 goroutine，M 是作業系統執行緒，P 是「執行 Go 程式碼的許可證」。</figcaption>
+      </figure>
+      <p>runtime 的排程器常用三個字母描述。這是實作細節，不是語言規格，版本之間可能調整，了解概念就好：</p>
+      <ul class="notes">
+        <li><strong>G</strong>：一個 goroutine，記錄它的 stack 和執行到哪裡。</li>
+        <li><strong>M</strong>：一條作業系統執行緒，真正在 CPU 上跑的東西。</li>
+        <li><strong>P</strong>：執行 Go 程式碼需要的資源，數量就是 GOMAXPROCS。M 必須拿到一個 P，才能執行 G；每個 P 有自己的一排等待執行的 G。</li>
+      </ul>
+      <p>一個 P 的佇列空了，它會去別的 P 那裡拿一些 G 過來，讓工作平均分配。一個 G 因為系統呼叫（例如讀檔）卡住時，它所在的 M 也卡住，P 會交給另一條 M 繼續執行其他的 G，所以一個 goroutine 卡住不會拖累其他人。等 channel、等鎖這類 Go 自己的等待，則只是把 G 放到一邊，M 和 P 馬上去執行下一個 G。</p>
+    </section>
+  </section>
+
+  <section aria-labelledby="panic">
+    <h2 id="panic">6. panic 與洩漏</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 190" role="img" aria-label="main 用 defer recover 想接住 panic，但 panic 發生在另一個 goroutine，main 的 recover 接不到，整個程式當掉">
+        <title>recover 接不到別的 goroutine 的 panic</title>
+        <rect class="soft" x="16" y="30" width="190" height="110" rx="10"/>
+        <text class="small bold" x="111" y="56" text-anchor="middle">main</text>
+        <text class="sm mono" x="111" y="84" text-anchor="middle">defer recover()</text>
+        <text class="sm mono" x="111" y="112" text-anchor="middle">wg.Wait()</text>
+        <rect class="hot" x="274" y="30" width="190" height="110" rx="10"/>
+        <text class="small bold" x="369" y="56" text-anchor="middle">goroutine</text>
+        <text class="sm mono" x="369" y="84" text-anchor="middle">stock["排骨飯"]--</text>
+        <text class="small t-hot bold" x="369" y="114" text-anchor="middle">panic</text>
+        <path class="wire hot-ln dash" d="M274 110 H218"/>
+        <text class="t-hot bold" x="240" y="104" text-anchor="middle">×</text>
+        <text class="sm" x="240" y="132" text-anchor="middle">接不到</text>
+        <text class="small t-hot" x="240" y="176" text-anchor="middle">整個程式結束，exit status 2</text>
+      </svg>
+      <figcaption>recover 只能接住同一個 goroutine 裡的 panic。沒有被接住的 panic，不管發生在哪個 goroutine，都會讓整個程式結束。</figcaption>
+    </figure>
+    <p><a href="04-functions.html#panic">04 章</a>說過，recover 要寫在 defer 裡，接住同一個函式呼叫鏈上的 panic。關鍵在「同一個」：每個 goroutine 有自己的呼叫鏈，main 的 recover 管不到別的 goroutine：</p>
+    <pre class="code" data-src="chapters/14-goroutines/crash/main.go#main"><code>func main() {
+	defer func() {
+		fmt.Println("main 接到了：", recover())
+	}()
+
+	var wg sync.WaitGroup
+	wg.Add(1) // wg.Go 的文件規定傳進去的函式不可以 panic，所以這裡用 Add 和 Done
+	go func() {
+		var stock map[string]int
+		stock["排骨飯"]-- // 寫入 nil map：panic
+		wg.Done()
+	}()
+	wg.Wait()
+	fmt.Println("不會印出來")
+}</code></pre>
+    <p class="label">輸出（<code>go run ./chapters/14-goroutines/crash</code>，後面的 stack trace 省略）</p>
+    <pre class="out err"><code>panic: assignment to entry in nil map
+
+goroutine 35 [running]:
+main.main.func2()</code></pre>
+    <p>main 的 defer 根本沒有執行，「main 接到了」沒有印出來，程式以 exit status 2 結束。goroutine 的編號每次執行都可能不同。後果比單一執行緒的程式嚴重：一個處理請求的 goroutine panic，整個伺服器都會掛掉，連帶所有正在處理中的請求。</p>
+    <ul class="notes">
+      <li>可能 panic 的 goroutine，要在<strong>它自己</strong>的第一行寫 defer 和 recover，把 panic 轉成錯誤交回來（練習 5）。</li>
+      <li><code>wg.Go</code> 的文件規定：傳進去的函式不可以 panic。要在 wg.Go 裡跑可能 panic 的程式，recover 一樣要寫在傳進去的函式裡面。</li>
+      <li>標準庫的 HTTP 伺服器會替每個請求的 goroutine 接住 panic，但那是它自己寫的保護，你自己開的 goroutine 沒有。</li>
+    </ul>
+    <p>另一個問題是 <strong>goroutine 洩漏</strong>（goroutine leak）：goroutine 在等一個永遠不會發生的事，例如等一個沒有人會送資料的 channel、等一把沒有人會放開的鎖。它不會結束，也沒有辦法從外面殺掉，它的 stack 和抓住的變數就一直佔著記憶體。伺服器每處理一個請求漏一個，跑幾天就會把記憶體吃光。</p>
+    <p>避免洩漏的原則很簡單：<strong>每開一個 goroutine，都要知道它什麼時候、怎麼結束</strong>。用 WaitGroup 等它、用 channel 的 close 通知它（「<a href="15-channels.html">channel</a>」那一章）、用 context 取消它（「<a href="18-context.html">context</a>」那一章）。說不出它怎麼結束的 goroutine，就不要開。</p>
+  </section>
+
+  <section aria-labelledby="pitfalls">
+    <h2 id="pitfalls">常見錯誤</h2>
+    <h3 id="pit-nowait">1. main 沒有等就結束了</h3>
+    <p>goroutine 的工作做到一半，程式就結束了，而且沒有任何錯誤訊息（第 1 節）。用 WaitGroup 等所有 goroutine 做完。</p>
+
+    <h3 id="pit-add-inside">2. wg.Add 寫在 goroutine 裡面</h3>
+    <pre class="code bad" data-vet-error><code>package main
+
+import (
+	"fmt"
+	"sync"
+)
+
+func main() {
+	orders := []string{"排骨飯", "雞腿飯"}
+	done := make([]string, len(orders))
+	var wg sync.WaitGroup
+	for i, o := range orders {
+		go func() {
+			wg.Add(1)
+			defer wg.Done()
+			done[i] = o + "好了"
+		}()
+	}
+	wg.Wait()
+	fmt.Println(done)
+}</code></pre>
+    <p class="label">go vet</p>
+    <pre class="out err"><code>main.go:14:10: WaitGroup.Add called from inside new goroutine</code></pre>
+    <p>main 跑到 Wait 時，goroutine 可能都還沒開始，計數還是 0，Wait 直接放行，印出空的結果。Add 要在 go 之前、在開 goroutine 的那一方呼叫；或者直接用 wg.Go。</p>
+
+    <h3 id="pit-copy">3. 把 WaitGroup 當值傳進函式</h3>
+    <pre class="code bad" data-vet-error><code>package main
+
+import (
+	"fmt"
+	"sync"
+)
+
+func cook(wg sync.WaitGroup, order string) {
+	defer wg.Done()
+	fmt.Println(order, "好了")
+}
+
+func main() {
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go cook(wg, "排骨飯")
+	wg.Wait()
+}</code></pre>
+    <p class="label">go vet</p>
+    <pre class="out err"><code>main.go:8:14: cook passes lock by value: sync.WaitGroup contains sync.noCopy
+main.go:16:10: call of cook copies lock value: sync.WaitGroup contains sync.noCopy</code></pre>
+    <p>cook 拿到的是一份複本，它的 Done 減的是複本的計數，main 的 WaitGroup 永遠等不到 0。要傳就傳指標 <code>*sync.WaitGroup</code>；更好的做法是讓 cook 根本不知道 WaitGroup 的存在，在呼叫端寫 <code>wg.Go(func() { cook("排骨飯") })</code>。</p>
+
+    <h3 id="pit-sleep">4. 用 time.Sleep 等 goroutine</h3>
+    <p>「等一秒應該夠了吧」在你的電腦上夠，在忙碌的伺服器或 CI 上不一定夠；夠的時候又白白浪費了時間。等 goroutine 要用 WaitGroup 或 channel，讓它做完時明確地通知你。</p>
+
+    <h3 id="pit-shared">5. 好幾個 goroutine 寫同一個變數</h3>
+    <p><code>total += n</code>、對同一個 slice append、寫同一個 map，都是 data race：結果可能少算、可能壞掉，map 甚至會讓程式當掉。讓每個 goroutine 寫自己的格子（第 3 節），或用鎖保護（「<a href="17-sync.html">sync 與 data race</a>」那一章）。寫並行的程式時，測試一律加上 <code>-race</code>。</p>
+
+    <h3 id="pit-panic">6. 以為 main 的 recover 能接住所有 panic</h3>
+    <p>只能接住 main 自己那個 goroutine 的 panic（第 6 節）。每個可能 panic 的 goroutine 都要有自己的 recover。</p>
+
+    <h3 id="pit-leak">7. 開了 goroutine 就不管</h3>
+    <p>說不出它什麼時候結束，就可能洩漏（第 6 節）。寫下 go 的那一刻，就要想好它的結束方式。</p>
   </section>
 
   <section aria-labelledby="java">
@@ -117,22 +603,144 @@
       <table class="vs">
         <thead><tr><th scope="col">主題</th><th scope="col">Java</th><th scope="col">Go</th></tr></thead>
         <tbody>
-          <tr><th scope="row">執行單位</th><td class="java"><code>Thread</code>，一條平台執行緒的 stack 約 1MB</td><td>goroutine，起始 stack 只有幾 KB，可以開上萬個</td></tr>
-          <tr><th scope="row">啟動</th><td class="java"><code>executor.submit(task)</code></td><td><code>go f()</code></td></tr>
-          <tr><th scope="row">等待完成</th><td class="java"><code>CountDownLatch</code>、<code>Future.get()</code></td><td><code>sync.WaitGroup</code></td></tr>
+          <tr><th scope="row">執行單位</th><td class="java"><code>Thread</code>，一條平台執行緒的 stack 常見預設 1MB</td><td>goroutine，stack 從幾 KB 開始，可以開上萬個</td></tr>
           <tr><th scope="row">輕量執行緒</th><td class="java">Java 21 的 virtual thread</td><td>goroutine 從一開始就是這種模型</td></tr>
-          <tr><th scope="row">回傳值</th><td class="java"><code>Future&lt;T&gt;</code></td><td>沒有回傳值，用 channel 或各自寫進自己的格子</td></tr>
+          <tr><th scope="row">啟動</th><td class="java"><code>executor.submit(task)</code></td><td><code>go f()</code>，不需要執行緒池</td></tr>
+          <tr><th scope="row">等待完成</th><td class="java"><code>CountDownLatch</code>、<code>Future.get()</code></td><td><code>sync.WaitGroup</code></td></tr>
+          <tr><th scope="row">回傳值</th><td class="java"><code>Future&lt;T&gt;</code></td><td>沒有回傳值，寫進自己的格子或用 channel 送回來</td></tr>
+          <tr><th scope="row">未處理的例外</th><td class="java">只結束那一條執行緒</td><td>沒被 recover 的 panic 讓<strong>整個程式</strong>結束</td></tr>
+          <tr><th scope="row">中斷</th><td class="java"><code>Thread.interrupt()</code></td><td>無法從外面停止 goroutine，用 context 請它自己結束</td></tr>
+          <tr><th scope="row">程式結束</th><td class="java">等所有非 daemon 執行緒結束</td><td>main 回傳就結束，不等任何 goroutine</td></tr>
         </tbody>
       </table>
     </div>
   </section>
 
+  <section aria-labelledby="exercises">
+    <h2 id="exercises">練習</h2>
+    <p>題目在 <code>exercises/14-goroutines/exercises.go</code>。幾題的測試會檢查工作是不是真的同時在跑：一個接一個做的寫法，會等到逾時才失敗。寫完之後也用 <code>-race</code> 跑一次。</p>
+    <pre class="shell"><code>go test ./exercises/14-goroutines/                 <span class="c"># 跑全部練習</span>
+go test ./exercises/14-goroutines/ -run TestEach  <span class="c"># 只跑一題</span>
+go test -race ./exercises/14-goroutines/           <span class="c"># 檢查 data race</span>
+go test -tags solution ./exercises/14-goroutines/  <span class="c"># 跑參考解答</span></code></pre>
+    <ol class="exercises">
+      <li>
+        <h3><span class="level l1">入門</span>練習 1：大家一起開工</h3>
+        <p>同時呼叫 f(0) 到 f(n-1)，全部結束才回傳。</p>
+        <pre class="code" data-src="exercises/14-goroutines/exercises.go#Each"><code>func Each(n int, f func(i int)) {
+	// TODO: 實作
+}</code></pre>
+        <p>測試裡的 f 會等其他人到齊才結束，所以一個接一個呼叫會失敗。測試：<code>TestEach</code>。</p>
+        <details><summary>提示</summary><p>一個 WaitGroup，迴圈裡 <code>wg.Go(func() { f(i) })</code>，迴圈結束後 Wait。<code>range n</code> 在 n 小於等於 0 時一圈都不跑。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l1">入門</span>練習 2：同時算，照順序交</h3>
+        <p>每個元素一個 goroutine，結果的順序要和輸入一樣。</p>
+        <pre class="code" data-src="exercises/14-goroutines/exercises.go#MapParallel"><code>func MapParallel[T, U any](s []T, f func(T) U) []U {
+	// TODO: 實作
+	return nil
+}</code></pre>
+        <p>測試：<code>TestMapParallel</code>。</p>
+        <details><summary>提示</summary><p>先 <code>make([]U, len(s))</code>，每個 goroutine 只寫 <code>out[i]</code>（第 3 節）。不要 append，那是好幾個 goroutine 改同一個 slice。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l2">進階</span>練習 3：每家分店都檢查一遍</h3>
+        <p>同時檢查每一家分店，把所有錯誤依分店順序合在一起。</p>
+        <pre class="code" data-src="exercises/14-goroutines/exercises.go#CheckAll"><code>func CheckAll(stores []string, check func(store string) error) error {
+	// TODO: 實作
+	return nil
+}</code></pre>
+        <p>測試：<code>TestCheckAll</code>。</p>
+        <details><summary>提示</summary><p>和第 3 節的 checkStores 一樣，用一個 <code>[]error</code> 讓每個 goroutine 寫自己的格子，Wait 之後 <code>errors.Join(errs...)</code>。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l2">進階</span>練習 4：數點餐單上的詞</h3>
+        <p>好幾份點餐紀錄，每份交給一個 goroutine 數詞，最後合併。</p>
+        <pre class="code" data-src="exercises/14-goroutines/exercises.go#CountWords"><code>func CountWords(docs []string) map[string]int {
+	// TODO: 實作
+	return nil
+}</code></pre>
+        <p>寫完用 <code>-race</code> 跑，好幾個 goroutine 寫同一個 map 會被抓到。測試：<code>TestCountWords</code>。</p>
+        <details><summary>提示</summary><p>準備 <code>[]map[string]int</code>，每個 goroutine 建立並填好自己的 map，放進自己那一格。Wait 之後，在原本的 goroutine 裡把它們加總到一個新的 map。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l3">挑戰</span>練習 5：鍋子破了也不能倒店</h3>
+        <p>在新的 goroutine 裡執行 f，把 panic 轉成錯誤交回來，不讓整個程式當掉。</p>
+        <pre class="code" data-src="exercises/14-goroutines/exercises.go#Try"><code>func Try(f func()) error {
+	// TODO: 實作
+	return nil
+}</code></pre>
+        <p>測試：<code>TestTry</code>。</p>
+        <details><summary>提示</summary><p>Try 用具名回傳值 <code>(err error)</code>。在 wg.Go 的函式裡，第一行 defer 一個呼叫 recover 的函式：r 不是 nil 時，用 <code>r.(error)</code> 判斷它是不是 error，分別用 %w 或 %v 包成錯誤，指定給 err。recover 寫在 Try 本身是接不到的（第 6 節）。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l3">挑戰</span>練習 6：總店加總營業額</h3>
+        <p>總店底下有分店，分店底下還有分店，每一家子分店交給一個 goroutine 遞迴計算。</p>
+        <pre class="code" data-src="exercises/14-goroutines/doc.go#Branch"><code>type Branch struct {
+	Name     string
+	Sales    int
+	Children []*Branch
+}</code></pre>
+        <pre class="code" data-src="exercises/14-goroutines/exercises.go#Total"><code>func Total(b *Branch) int {
+	// TODO: 實作
+	return 0
+}</code></pre>
+        <p>測試：<code>TestTotal</code>。</p>
+        <details><summary>提示</summary><p>每一層都有自己的 WaitGroup 和一個 <code>[]int</code>，第 i 個 goroutine 把 <code>Total(b.Children[i])</code> 寫進第 i 格，Wait 之後加上 b.Sales。goroutine 裡再開 goroutine 完全沒問題。</p></details>
+      </li>
+      <li>
+        <h3><span class="level fix">找錯</span>練習 7：說好的一起做呢</h3>
+        <p>每個工作都有做到，但測試說它們沒有同時執行。</p>
+        <pre class="code" data-src="exercises/14-goroutines/exercises.go#RunAll"><code>func RunAll(tasks []func()) {
+	var wg sync.WaitGroup
+	for _, t := range tasks {
+		wg.Go(t)
+		wg.Wait()
+	}
+}</code></pre>
+        <p>測試：<code>TestRunAll</code>。</p>
+        <details><summary>提示</summary><p>每開一個 goroutine 就等它做完，等於一個接一個做。先把全部都開起來，最後才 Wait 一次。</p></details>
+      </li>
+    </ol>
+    <p><a href="https://github.com/xinqilin/GO-Playground/blob/main/exercises/14-goroutines/solution.go">參考解答</a>：先自己寫完再看。測試通過、而且 <code>-race</code> 沒有警告的寫法都是對的。</p>
+  </section>
+
+  <section aria-labelledby="recap">
+    <h2 id="recap">重點回顧</h2>
+    <ul class="recap">
+      <li><code>go f(x)</code> 開一個新的 goroutine 執行 f，go 這一行立刻返回；參數在 go 這一行就求值，回傳值會被丟掉。</li>
+      <li>main 回傳時整個程式結束，不等其他 goroutine。</li>
+      <li>用 <code>sync.WaitGroup</code> 等一群 goroutine：Go 1.25 起用 <code>wg.Go</code>，以前的寫法是 go 之前 <code>Add(1)</code>、goroutine 裡 <code>defer Done()</code>。</li>
+      <li>WaitGroup 不能複製，要傳就傳指標。</li>
+      <li>goroutine 沒有回傳值：讓每個 goroutine 寫自己的格子，Wait 之後再讀；錯誤也一樣，最後用 errors.Join 合起來。</li>
+      <li>好幾個 goroutine 寫同一個變數或 map 是 data race；測試並行的程式一律加 <code>-race</code>。</li>
+      <li>goroutine 的 stack 從幾 KB 開始、會自動長大，可以開上萬個，但它用到的外部資源不是免費的。</li>
+      <li>並行是程式的結構，平行是執行的方式；GOMAXPROCS 預設就是可用的 CPU 數。</li>
+      <li>沒被 recover 的 panic，不管在哪個 goroutine，都會讓整個程式結束；recover 只接得到同一個 goroutine 的 panic。</li>
+      <li>每開一個 goroutine，都要知道它怎麼結束，否則會洩漏。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="further">
+    <h2 id="further">延伸閱讀</h2>
+    <ul class="notes">
+      <li>Go 語言規格：<a href="https://go.dev/ref/spec#Go_statements">Go statements</a>、<a href="https://go.dev/ref/spec#Program_execution">Program execution</a>（main 回傳時程式結束）。</li>
+      <li>套件文件：<a href="https://pkg.go.dev/sync#WaitGroup">sync.WaitGroup</a>、<a href="https://pkg.go.dev/sync#WaitGroup.Go">WaitGroup.Go</a>、<a href="https://pkg.go.dev/runtime#GOMAXPROCS">runtime.GOMAXPROCS</a>。</li>
+      <li><a href="https://go.dev/ref/mem">The Go Memory Model</a>：WaitGroup 為什麼保證 Wait 之後看得到結果，「sync 與 data race」那一章會再談。</li>
+      <li>Go blog：<a href="https://go.dev/blog/waza-talk">Concurrency is not parallelism</a>。</li>
+    </ul>
+  </section>
+
   <section aria-labelledby="run">
     <h2 id="run">動手跑</h2>
     <p class="label">在 repo 根目錄</p>
-    <pre class="shell"><code>go run ./chapters/14-goroutines
-go test -race ./chapters/14-goroutines</code></pre>
-    <p><a href="https://github.com/xinqilin/GO-Playground/tree/main/chapters/14-goroutines">在 GitHub 看完整程式碼</a></p>
+    <pre class="shell"><code>go run ./chapters/14-goroutines               <span class="c"># 執行本章的示範</span>
+go run ./chapters/14-goroutines/nowait        <span class="c"># main 不等人</span>
+go run ./chapters/14-goroutines/procs         <span class="c"># 看你的 CPU 數和 GOMAXPROCS</span>
+go run ./chapters/14-goroutines/crash         <span class="c"># goroutine 裡的 panic 讓程式當掉</span>
+go test -race ./chapters/14-goroutines        <span class="c"># 驗證頁面上的每一段輸出</span>
+go test ./exercises/14-goroutines/            <span class="c"># 做練習</span></code></pre>
+    <p><a href="https://github.com/xinqilin/GO-Playground/tree/main/chapters/14-goroutines">在 GitHub 看本章完整程式碼</a>，或看<a href="https://github.com/xinqilin/GO-Playground/tree/main/exercises/14-goroutines">練習題</a>。</p>
   </section>
 </main>
 
