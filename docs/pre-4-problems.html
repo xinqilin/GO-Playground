@@ -1,0 +1,761 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>拆解問題：函式與清單｜Go 圖解手冊</title>
+<meta name="description" content="給從來沒寫過程式的人：函式的參數與回傳值、用 slice 當清單、走過清單、加總／計數／最大值／搜尋四個基本演算法、把大問題拆成小函式、用 Println 除錯，以及用範例和測試驗證程式，附可執行的練習題。">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<header class="site">
+  <a href="index.html">Go 圖解手冊</a>
+  <span class="count">先修 4 / 4</span>
+</header>
+
+<main class="page long">
+  <header class="hero">
+    <div class="num" aria-hidden="true">P4</div>
+    <p class="eyebrow">先修 · 第 4 章</p>
+    <h1>拆解問題：函式與清單</h1>
+    <p class="analogy">大問題沒辦法一口氣解決，但可以切成幾個小問題，每個小問題寫成一個有名字的函式。很多小問題其實長得一樣：加總、數數、找最大、找東西。</p>
+  </header>
+
+  <nav class="toc-inline" aria-labelledby="toc-title">
+    <p class="label" id="toc-title">本章內容</p>
+    <ol>
+      <li><a href="#goals">本章你會學到</a></li>
+      <li><a href="#funcs">函式：把步驟包起來</a></li>
+      <li><a href="#lists">清單：slice</a></li>
+      <li><a href="#walk">走過清單</a></li>
+      <li><a href="#algorithms">四個基本演算法</a></li>
+      <li><a href="#decompose">拆解問題</a></li>
+      <li><a href="#debug">用 Println 除錯</a></li>
+      <li><a href="#examples">用範例驗證</a></li>
+      <li><a href="#pitfalls">常見錯誤</a></li>
+      <li><a href="#exercises">練習</a></li>
+      <li><a href="#recap">重點回顧</a></li>
+      <li><a href="#next">接下來</a></li>
+      <li><a href="#further">延伸閱讀</a></li>
+    </ol>
+  </nav>
+
+  <section aria-labelledby="goals">
+    <h2 id="goals">本章你會學到</h2>
+    <ul class="notes">
+      <li>寫自己的函式：參數、回傳值、<code>return</code>，以及參數是一份複本。</li>
+      <li>用 slice 存一整份清單：索引、<code>len</code>、修改、<code>append</code>。</li>
+      <li>用 for 和 range 走過清單裡的每一個元素。</li>
+      <li>四個最基本的演算法：加總、計數、找最大值、搜尋。</li>
+      <li>把一個大問題拆成幾個小函式，再組合起來。</li>
+      <li>程式不對時，用 Println 看看每一步發生了什麼事。</li>
+      <li>先想好範例再寫程式，讀懂測試在檢查什麼。</li>
+    </ul>
+    <p>先備：<a href="pre-3-decisions.html">先修 3 判斷與重複</a>（if、for、計數器與累加器）。</p>
+  </section>
+
+  <section aria-labelledby="funcs">
+    <h2 id="funcs">1. 函式：把步驟包起來</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 190" role="img" aria-label="函式像一台機器：參數 price 是 85、qty 是 3，從左邊放進 subtotal，算出 price 乘以 qty，從右邊交回回傳值 255">
+        <title>參數進去，回傳值出來</title>
+        <text class="sm mono" x="56" y="34" text-anchor="middle">price</text>
+        <text class="sm mono" x="56" y="104" text-anchor="middle">qty</text>
+        <rect class="soft" x="16" y="40" width="80" height="40" rx="6"/>
+        <rect class="soft" x="16" y="110" width="80" height="40" rx="6"/>
+        <text class="lg" x="56" y="71" text-anchor="middle">85</text>
+        <text class="lg" x="56" y="141" text-anchor="middle">3</text>
+        <path class="wire" d="M96 60 H158 M96 130 H158"/>
+        <path class="tip" d="M170 60 L157 53 L157 67 Z"/>
+        <path class="tip" d="M170 130 L157 123 L157 137 Z"/>
+        <rect class="acc" x="172" y="36" width="146" height="118" rx="12"/>
+        <text class="small mono bold" x="245" y="84" text-anchor="middle">subtotal</text>
+        <text class="sm mono" x="245" y="112" text-anchor="middle">price * qty</text>
+        <path class="wire" d="M318 95 H358"/>
+        <path class="tip" d="M370 95 L357 88 L357 102 Z"/>
+        <text class="sm" x="417" y="64" text-anchor="middle">回傳值</text>
+        <rect class="soft" x="372" y="72" width="90" height="46" rx="6"/>
+        <text class="lg" x="417" y="106" text-anchor="middle">255</text>
+        <text class="sm" x="56" y="178" text-anchor="middle">參數（輸入）</text>
+        <text class="sm" x="245" y="178" text-anchor="middle">函式</text>
+        <text class="sm" x="417" y="178" text-anchor="middle">回傳值（輸出）</text>
+      </svg>
+      <figcaption>函式像一台小機器：從參數拿到材料，照著大括號裡的步驟做，用 return 把結果交回去。</figcaption>
+    </figure>
+    <p>先修 3 已經用過帶參數的函式（<code>passFail(72)</code>），這一章正式學怎麼寫。<strong>函式</strong>（function）是一段有名字的程式，像一份食譜：<strong>參數</strong>（parameter）是食材，大括號裡是步驟，<strong>回傳值</strong>（return value）是做好的菜。</p>
+    <pre class="code" data-src="chapters/pre-4-problems/funcs.go#greet,greetDemo"><code>func greet(name string) {
+	fmt.Println("早安，" + name)
+}
+
+func greetDemo() {
+	greet("小明")
+	greet("阿美")
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/pre-4-problems#Example_greetDemo"><code>早安，小明
+早安，阿美</code></pre>
+    <p><code>func greet(name string)</code> 讀作：「定義一個叫 greet 的函式，它需要一個叫 name 的 string」。呼叫 <code>greet("小明")</code> 時，"小明" 會放進 name，然後執行大括號裡的步驟。同一個函式可以呼叫很多次，每次給不同的值。這個函式只負責印東西，沒有交回任何結果。</p>
+    <pre class="code" data-src="chapters/pre-4-problems/funcs.go#subtotal,subtotalDemo"><code>func subtotal(price, qty int) int {
+	return price * qty
+}
+
+func subtotalDemo() {
+	a := subtotal(85, 3)
+	b := subtotal(90, 2)
+	fmt.Println(a, b, a+b)
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/pre-4-problems#Example_subtotalDemo"><code>255 180 435</code></pre>
+    <ul class="notes">
+      <li><code>(price, qty int)</code>：兩個參數都是 int 時，型別可以只寫一次。</li>
+      <li>右括號後面的 <code>int</code> 是回傳值的型別：這個函式會交回一個整數。</li>
+      <li><code>return price * qty</code> 算出結果並交回去。呼叫的地方 <code>subtotal(85, 3)</code> 就變成 255，可以存進變數，也可以直接拿去計算。</li>
+    </ul>
+
+    <h3>return 會立刻結束函式</h3>
+    <pre class="code" data-src="chapters/pre-4-problems/funcs.go#memberPrice,memberPriceDemo"><code>func memberPrice(price int, member bool) int {
+	if !member {
+		return price
+	}
+	return price * 9 / 10
+}
+
+func memberPriceDemo() {
+	fmt.Println(memberPrice(100, false))
+	fmt.Println(memberPrice(100, true))
+	fmt.Println(memberPrice(85, true))
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/pre-4-problems#Example_memberPriceDemo"><code>100
+90
+76</code></pre>
+    <p>不是會員時，第一個 return 直接交回原價，函式就結束了，後面打九折的那一行不會執行。所以這裡不需要 else。85 元打九折是 76.5，但 <code>price * 9 / 10</code> 全是整數運算，小數被丟掉，得到 76。先乘再除的順序也很重要：寫成 <code>price / 10 * 9</code>，85 / 10 會先變成 8，結果就是 72 了。</p>
+
+    <h3>一次回傳兩個值</h3>
+    <pre class="code" data-src="chapters/pre-4-problems/funcs.go#hoursMinutes,hoursMinutesDemo"><code>func hoursMinutes(minutes int) (int, int) {
+	return minutes / 60, minutes % 60
+}
+
+func hoursMinutesDemo() {
+	h, m := hoursMinutes(135)
+	fmt.Println(h, "小時", m, "分")
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/pre-4-problems#Example_hoursMinutesDemo"><code>2 小時 15 分</code></pre>
+    <p>回傳值的型別寫成 <code>(int, int)</code>，return 後面用逗號列出兩個值，呼叫時用兩個變數接住：<code>h, m := hoursMinutes(135)</code>。先修 2 的練習已經用過這種寫法。</p>
+
+    <h3>參數是一份複本</h3>
+    <pre class="code" data-src="chapters/pre-4-problems/funcs.go#addOne,copyDemo"><code>func addOne(n int) {
+	n = n + 1
+	fmt.Println("函式裡：", n)
+}
+
+func copyDemo() {
+	count := 5
+	addOne(count)
+	fmt.Println("函式外：", count)
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/pre-4-problems#Example_copyDemo"><code>函式裡： 6
+函式外： 5</code></pre>
+    <p>呼叫 <code>addOne(count)</code> 時，函式拿到的是 count 的值 5，放進它自己的變數 n。函式改的是 n，外面的 count 還是 5。函式要讓外面知道結果，就用 return 交回去。（想讓函式直接改外面的變數，要用 <a href="05-pointers.html">05 指標</a>，那是正文的內容。）</p>
+    <p>為什麼要把程式拆成函式？第一，<strong>有名字</strong>：讀到 <code>subtotal(85, 3)</code> 就知道在算小計，不用看裡面怎麼算。第二，<strong>可以重複用</strong>：寫一次，到處呼叫，改也只改一個地方。第三，<strong>可以單獨檢查</strong>：每個函式都能拿範例去試，這本手冊的練習就是這樣檢查你的答案的（第 7 節）。</p>
+  </section>
+
+  <section aria-labelledby="lists">
+    <h2 id="lists">2. 清單：slice</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 200" role="img" aria-label="prices 是一排格子，裝著 85、90、75，索引是 0、1、2，prices[1] 是 90，長度是 3。append 會在最後面加一格">
+        <title>slice 是一排編了號的格子</title>
+        <text class="small mono bold" x="16" y="90">prices</text>
+        <text class="sm mono" x="165" y="50" text-anchor="middle">[0]</text>
+        <text class="sm mono t-acc" x="259" y="50" text-anchor="middle">[1]</text>
+        <text class="sm mono" x="353" y="50" text-anchor="middle">[2]</text>
+        <rect class="soft" x="120" y="60" width="90" height="50" rx="4"/>
+        <rect class="acc" x="214" y="60" width="90" height="50" rx="4"/>
+        <rect class="soft" x="308" y="60" width="90" height="50" rx="4"/>
+        <rect class="soft dash" x="402" y="60" width="70" height="50" rx="4"/>
+        <text class="lg" x="165" y="96" text-anchor="middle">85</text>
+        <text class="lg" x="259" y="96" text-anchor="middle">90</text>
+        <text class="lg" x="353" y="96" text-anchor="middle">75</text>
+        <text class="sm mono" x="437" y="90" text-anchor="middle">append</text>
+        <path class="wire" d="M120 124 V132 H398 V124"/>
+        <text class="sm mono" x="259" y="154" text-anchor="middle">len(prices) == 3</text>
+        <text class="sm" x="240" y="188" text-anchor="middle">索引從 0 開始，最後一個是 len-1</text>
+      </svg>
+      <figcaption>slice 把好幾個同型別的值排成一列，每一格有一個從 0 開始的編號，叫做索引。</figcaption>
+    </figure>
+    <p>一週七天的營業額、一份菜單、排隊的名單：資料常常是一整串的。為每一筆都建立一個變數（day1、day2、day3……）太累了，而且數量會變。Go 用 <strong>slice</strong> 來存一份清單：</p>
+    <pre class="code" data-src="chapters/pre-4-problems/list.go#listBasics"><code>func listBasics() {
+	prices := []int{85, 90, 75}
+	fmt.Println(prices)
+	fmt.Println(prices[0], prices[2])
+	fmt.Println(len(prices))
+	prices[1] = 95
+	fmt.Println(prices)
+	prices = append(prices, 100)
+	fmt.Println(prices, len(prices))
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/pre-4-problems#Example_listBasics"><code>[85 90 75]
+85 75
+3
+[85 95 75]
+[85 95 75 100] 4</code></pre>
+    <ul class="notes">
+      <li><code>[]int{85, 90, 75}</code>：<code>[]int</code> 是「一串 int」，大括號裡列出一開始的內容。</li>
+      <li><code>prices[0]</code>：用中括號加<strong>索引</strong>（index）拿出某一格。索引從 <strong>0</strong> 開始，所以第一個是 <code>[0]</code>，第三個是 <code>[2]</code>。</li>
+      <li><code>len(prices)</code>：清單的長度，也就是有幾格。</li>
+      <li><code>prices[1] = 95</code>：把某一格換成新的值，和變數的指定一樣。</li>
+      <li><code>prices = append(prices, 100)</code>：在最後面加一格。append 會交回加好的新清單，一定要用 <code>=</code> 接回去（常見錯誤 2）。</li>
+    </ul>
+    <pre class="code" data-src="chapters/pre-4-problems/list.go#stringList,emptyList"><code>func stringList() {
+	menu := []string{"排骨飯", "雞腿飯", "素食餐"}
+	fmt.Println(menu[0])
+	fmt.Println(menu[len(menu)-1])
+}
+
+func emptyList() {
+	orders := []int{}
+	fmt.Println(len(orders))
+	orders = append(orders, 120)
+	orders = append(orders, 85)
+	fmt.Println(orders, len(orders))
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/pre-4-problems#Example_stringList"><code>排骨飯
+素食餐</code></pre>
+    <pre class="out" data-example="chapters/pre-4-problems#Example_emptyList"><code>0
+[120 85] 2</code></pre>
+    <p>清單裡可以放任何型別，但同一份清單只能放同一種。最後一個元素的索引是 <code>len(menu)-1</code>：3 個元素的索引是 0、1、2。不知道一開始有什麼時，從空的清單 <code>[]int{}</code> 開始，再一筆一筆 append。</p>
+
+    <h3>索引超出範圍</h3>
+    <p>3 個元素的清單沒有 <code>[3]</code>。用了不存在的索引，程式能編譯，但執行到那一行就會當掉：</p>
+    <pre class="code" data-src="chapters/pre-4-problems/outofrange/main.go#main"><code>func main() {
+	menu := []string{"排骨飯", "雞腿飯", "素食餐"}
+	for i := 0; i &lt;= len(menu); i++ {
+		fmt.Println(i, menu[i])
+	}
+}</code></pre>
+    <pre class="shell"><code>go run ./chapters/pre-4-problems/outofrange</code></pre>
+    <p class="label">輸出（檔案路徑的前半段以 … 代替）</p>
+    <pre class="out err"><code>0 排骨飯
+1 雞腿飯
+2 素食餐
+panic: runtime error: index out of range [3] with length 3
+
+goroutine 1 [running]:
+main.main()
+	…/chapters/pre-4-problems/outofrange/main.go:12 +0xd8
+exit status 2</code></pre>
+    <p>前三圈正常，第四圈 i 是 3，訊息說得很清楚：索引 3 超出範圍，這份清單的長度是 3。原因是條件寫成 <code>i &lt;= len(menu)</code>，多跑了一圈；正確的是 <code>i &lt; len(menu)</code>。這是先修 1 說的執行時錯誤，也是先修 3 的「邊界差一」。</p>
+  </section>
+
+  <section aria-labelledby="walk">
+    <h2 id="walk">3. 走過清單</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 196" role="img" aria-label="range 從左到右走過清單：第 1 圈 i 是 0、p 是 85；第 2 圈 i 是 1、p 是 90；第 3 圈 i 是 2、p 是 75">
+        <title>range 每一圈拿一格</title>
+        <text class="sm t-acc" x="259" y="22" text-anchor="middle">range 從左到右，每一格走一次</text>
+        <path class="wire acc-ln" d="M120 36 H390"/>
+        <path class="tip acc-tip" d="M402 36 L389 29 L389 43 Z"/>
+        <text class="small mono bold" x="16" y="82">prices</text>
+        <rect class="soft" x="120" y="52" width="90" height="50" rx="4"/>
+        <rect class="soft" x="214" y="52" width="90" height="50" rx="4"/>
+        <rect class="soft" x="308" y="52" width="90" height="50" rx="4"/>
+        <text class="lg" x="165" y="88" text-anchor="middle">85</text>
+        <text class="lg" x="259" y="88" text-anchor="middle">90</text>
+        <text class="lg" x="353" y="88" text-anchor="middle">75</text>
+        <text class="sm" x="165" y="132" text-anchor="middle">第 1 圈</text>
+        <text class="sm" x="259" y="132" text-anchor="middle">第 2 圈</text>
+        <text class="sm" x="353" y="132" text-anchor="middle">第 3 圈</text>
+        <text class="small mono t-acc" x="165" y="156" text-anchor="middle">i=0</text>
+        <text class="small mono t-acc" x="259" y="156" text-anchor="middle">i=1</text>
+        <text class="small mono t-acc" x="353" y="156" text-anchor="middle">i=2</text>
+        <text class="small mono t-acc" x="165" y="180" text-anchor="middle">p=85</text>
+        <text class="small mono t-acc" x="259" y="180" text-anchor="middle">p=90</text>
+        <text class="small mono t-acc" x="353" y="180" text-anchor="middle">p=75</text>
+      </svg>
+      <figcaption><code>for i, p := range prices</code> 每一圈拿到一格：i 是索引，p 是那一格的值。</figcaption>
+    </figure>
+    <p>清單幾乎都是搭配迴圈使用的。第一種寫法用先修 3 學過的 for，讓 i 從 0 走到 <code>len-1</code>：</p>
+    <pre class="code" data-src="chapters/pre-4-problems/list.go#loopIndex"><code>func loopIndex() {
+	menu := []string{"排骨飯", "雞腿飯", "素食餐"}
+	for i := 0; i &lt; len(menu); i++ {
+		fmt.Println(i, menu[i])
+	}
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/pre-4-problems#Example_loopIndex"><code>0 排骨飯
+1 雞腿飯
+2 素食餐</code></pre>
+    <p>條件用 <code>i &lt; len(menu)</code>，不管清單有幾個元素都剛好走完，不會超出範圍。第二種寫法是 <code>range</code>，它會自動走過每一格：</p>
+    <pre class="code" data-src="chapters/pre-4-problems/list.go#loopRange"><code>func loopRange() {
+	prices := []int{85, 90, 75}
+	for i, p := range prices {
+		fmt.Println("第", i+1, "個：", p, "元")
+	}
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/pre-4-problems#Example_loopRange"><code>第 1 個： 85 元
+第 2 個： 90 元
+第 3 個： 75 元</code></pre>
+    <ul class="notes">
+      <li><code>for i, p := range prices</code>：每一圈 i 是索引、p 是值。不用自己寫起點、條件、更新，也就不會寫錯邊界。</li>
+      <li>只需要值時，用底線 <code>_</code> 丟掉索引：<code>for _, p := range prices</code>。Go 不允許建立了卻沒用到的變數，<code>_</code> 就是「這個我不要」。</li>
+      <li>只需要索引時，寫 <code>for i := range prices</code>。</li>
+      <li>索引從 0 開始，給人看的「第幾個」通常是 <code>i+1</code>。</li>
+    </ul>
+    <p>一般來說，用 range 比較不容易出錯；需要同時看「這一個和前一個」（練習 3）這種跟索引有關的計算時，用索引的寫法比較方便。</p>
+  </section>
+
+  <section aria-labelledby="algorithms">
+    <h2 id="algorithms">4. 四個基本演算法</h2>
+    <p><strong>演算法</strong>（algorithm）聽起來很難，其實就是「解決某一類問題的固定步驟」。處理清單時，有四個演算法出現的次數遠遠超過其他的。它們都是先修 3 的計數器和累加器的延伸：</p>
+    <h3>加總</h3>
+    <pre class="code" data-src="chapters/pre-4-problems/algo.go#sum,sumDemo"><code>func sum(nums []int) int {
+	total := 0
+	for _, n := range nums {
+		total += n
+	}
+	return total
+}
+
+func sumDemo() {
+	sales := []int{3200, 4100, 2800, 5600, 4100}
+	fmt.Println(sum(sales))
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/pre-4-problems#Example_sumDemo"><code>19800</code></pre>
+    <p>累加器 total 從 0 開始，每個元素都加進去。這個函式不管清單有多長都能用；它自己不知道、也不需要知道 sales 是營業額，換成分數、重量也一樣。</p>
+    <h3>計數</h3>
+    <pre class="code" data-src="chapters/pre-4-problems/algo.go#countAtLeast,countDemo"><code>func countAtLeast(nums []int, limit int) int {
+	count := 0
+	for _, n := range nums {
+		if n &gt;= limit {
+			count++
+		}
+	}
+	return count
+}
+
+func countDemo() {
+	sales := []int{3200, 4100, 2800, 5600, 4100}
+	fmt.Println(countAtLeast(sales, 4000))
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/pre-4-problems#Example_countDemo"><code>3</code></pre>
+    <p>計數器 count 從 0 開始，只在條件成立時加 1。門檻 limit 做成參數，同一個函式可以數「4000 以上的天數」，也可以數「及格的人數」。</p>
+
+    <h3>找最大值</h3>
+    <figure class="fig">
+      <svg viewBox="0 0 480 214" role="img" aria-label="sales 依序是 3200、4100、2800、5600、4100。best 從第一個 3200 開始，遇到 4100 換成 4100，遇到 2800 不換，遇到 5600 換成 5600，最後的 4100 不換，所以最大值是 5600">
+        <title>記住目前最大的</title>
+        <text class="sm mono" x="16" y="67">sales</text>
+        <text class="sm mono" x="16" y="147">best</text>
+        <rect class="soft" x="90" y="40" width="70" height="44" rx="4"/>
+        <rect class="soft" x="168" y="40" width="70" height="44" rx="4"/>
+        <rect class="soft" x="246" y="40" width="70" height="44" rx="4"/>
+        <rect class="soft" x="324" y="40" width="70" height="44" rx="4"/>
+        <rect class="soft" x="402" y="40" width="70" height="44" rx="4"/>
+        <text class="small mono" x="125" y="67" text-anchor="middle">3200</text>
+        <text class="small mono" x="203" y="67" text-anchor="middle">4100</text>
+        <text class="small mono" x="281" y="67" text-anchor="middle">2800</text>
+        <text class="small mono" x="359" y="67" text-anchor="middle">5600</text>
+        <text class="small mono" x="437" y="67" text-anchor="middle">4100</text>
+        <path class="wire faint" d="M125 84 V116 M203 84 V116 M281 84 V116 M359 84 V116 M437 84 V116"/>
+        <rect class="acc" x="90" y="120" width="70" height="44" rx="4"/>
+        <rect class="acc" x="168" y="120" width="70" height="44" rx="4"/>
+        <rect class="soft" x="246" y="120" width="70" height="44" rx="4"/>
+        <rect class="acc" x="324" y="120" width="70" height="44" rx="4"/>
+        <rect class="soft" x="402" y="120" width="70" height="44" rx="4"/>
+        <text class="small mono" x="125" y="147" text-anchor="middle">3200</text>
+        <text class="small mono" x="203" y="147" text-anchor="middle">4100</text>
+        <text class="small mono" x="281" y="147" text-anchor="middle">4100</text>
+        <text class="small mono" x="359" y="147" text-anchor="middle">5600</text>
+        <text class="small mono" x="437" y="147" text-anchor="middle">5600</text>
+        <text class="sm" x="125" y="30" text-anchor="middle">起點</text>
+        <text class="sm" x="281" y="200" text-anchor="middle">遇到比 best 大的就換掉，走完之後 best 就是最大值</text>
+      </svg>
+      <figcaption>上面一列是清單，下面一列是每看完一格之後 best 的值。有底色的格子是 best 被換掉的時候。</figcaption>
+    </figure>
+    <pre class="code" data-src="chapters/pre-4-problems/algo.go#maxOf,maxDemo"><code>func maxOf(nums []int) int {
+	best := nums[0]
+	for _, n := range nums {
+		if n &gt; best {
+			best = n
+		}
+	}
+	return best
+}
+
+func maxDemo() {
+	sales := []int{3200, 4100, 2800, 5600, 4100}
+	fmt.Println(maxOf(sales))
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/pre-4-problems#Example_maxDemo"><code>5600</code></pre>
+    <p>想像你一張一張翻看成績單，手上只記一個數字「目前看過最高的」。翻到更高的，就把手上的數字換掉；翻完時，手上的就是最高分。best 一開始要設成<strong>清單的第一個值</strong>，不能隨便設成 0：</p>
+    <pre class="code" data-src="chapters/pre-4-problems/algo.go#wrongMax,wrongMaxDemo"><code>func wrongMax(nums []int) int {
+	best := 0
+	for _, n := range nums {
+		if n &gt; best {
+			best = n
+		}
+	}
+	return best
+}
+
+func wrongMaxDemo() {
+	temps := []int{-3, -5, -1}
+	fmt.Println(wrongMax(temps), maxOf(temps))
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/pre-4-problems#Example_wrongMaxDemo"><code>0 -1</code></pre>
+    <p>高山上三天的最低氣溫是 -3、-5、-1 度，最高的應該是 -1。但 wrongMax 從 0 開始比，沒有任何一個溫度比 0 大，best 從頭到尾都是 0，最後交回一個清單裡根本沒有的數字。從第一個值開始比，就不會有這個問題。找最小值的做法完全一樣，只是把 <code>&gt;</code> 換成 <code>&lt;</code>（練習 6）。</p>
+
+    <h3>搜尋</h3>
+    <pre class="code" data-src="chapters/pre-4-problems/algo.go#indexOf,searchDemo"><code>func indexOf(names []string, target string) int {
+	for i, name := range names {
+		if name == target {
+			return i
+		}
+	}
+	return -1
+}
+
+func searchDemo() {
+	queue := []string{"小明", "阿美", "小華"}
+	fmt.Println(indexOf(queue, "阿美"))
+	fmt.Println(indexOf(queue, "小芬"))
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/pre-4-problems#Example_searchDemo"><code>1
+-1</code></pre>
+    <p>一個一個比對，找到就立刻 return 它的索引，後面的不用再看了。整份清單都走完還沒有 return，就表示找不到，回傳 -1。-1 不可能是真的索引，所以呼叫的人看到 -1 就知道「沒有」。</p>
+    <div class="table-wrap">
+      <table class="vs">
+        <thead><tr><th scope="col">演算法</th><th scope="col">迴圈前</th><th scope="col">每一圈</th><th scope="col">結果</th></tr></thead>
+        <tbody>
+          <tr><th scope="row">加總</th><td><code>total := 0</code></td><td><code>total += n</code></td><td>total</td></tr>
+          <tr><th scope="row">計數</th><td><code>count := 0</code></td><td>條件成立時 <code>count++</code></td><td>count</td></tr>
+          <tr><th scope="row">最大值</th><td><code>best := nums[0]</code></td><td>比 best 大就換掉</td><td>best</td></tr>
+          <tr><th scope="row">搜尋</th><td>（不用）</td><td>找到就 <code>return i</code></td><td>走完還沒找到就 <code>return -1</code></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section aria-labelledby="decompose">
+    <h2 id="decompose">5. 拆解問題</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 210" role="img" aria-label="一週營業報表拆成四個小問題：用 sum 算總營業額，total 除以 len 算平均，indexOfMax 找最好的一天，countAtLeast 算達標天數">
+        <title>大問題拆成小函式</title>
+        <rect class="acc" x="150" y="14" width="180" height="44" rx="10"/>
+        <text class="small bold" x="240" y="41" text-anchor="middle">一週營業報表</text>
+        <path class="wire" d="M240 58 V86 M61 86 H415 M61 86 V112 M179 86 V112 M297 86 V112 M415 86 V112"/>
+        <rect class="soft" x="6" y="114" width="110" height="46" rx="8"/>
+        <rect class="soft" x="124" y="114" width="110" height="46" rx="8"/>
+        <rect class="soft" x="242" y="114" width="110" height="46" rx="8"/>
+        <rect class="soft" x="360" y="114" width="110" height="46" rx="8"/>
+        <text class="sm mono" x="61" y="142" text-anchor="middle">sum</text>
+        <text class="sm mono" x="179" y="142" text-anchor="middle">total / len</text>
+        <text class="sm mono" x="297" y="142" text-anchor="middle">indexOfMax</text>
+        <text class="sm mono" x="415" y="142" text-anchor="middle">countAtLeast</text>
+        <text class="sm" x="61" y="186" text-anchor="middle">總營業額</text>
+        <text class="sm" x="179" y="186" text-anchor="middle">平均每天</text>
+        <text class="sm" x="297" y="186" text-anchor="middle">最好的一天</text>
+        <text class="sm" x="415" y="186" text-anchor="middle">達標天數</text>
+      </svg>
+      <figcaption>一個看起來很大的問題，拆開來往往只是幾個基本演算法的組合。</figcaption>
+    </figure>
+    <p>便當店老闆想要一份一週營業報表：總營業額、平均每天多少、哪一天最好、有幾天達到 4500 元。第一次看到這種題目，很容易不知道從哪裡下手。拆解問題的步驟是：</p>
+    <ol class="notes">
+      <li><strong>用中文寫出要什麼</strong>：輸入是七天的營業額，輸出是四行報表。</li>
+      <li><strong>拆成小問題</strong>：每一行報表就是一個小問題。</li>
+      <li><strong>認出熟悉的形狀</strong>：總額是加總，達標天數是計數，最好的一天是找最大值，只是這次要的是「哪一天」，也就是最大值的索引。</li>
+      <li><strong>一個小問題寫一個函式</strong>，各自測試沒問題之後，再組合起來。</li>
+    </ol>
+    <pre class="code" data-src="chapters/pre-4-problems/report.go#indexOfMax,weeklyReport"><code>func indexOfMax(nums []int) int {
+	best := 0
+	for i := range nums {
+		if nums[i] &gt; nums[best] {
+			best = i
+		}
+	}
+	return best
+}
+
+func weeklyReport() {
+	sales := []int{3200, 4100, 2800, 5600, 4100, 6300, 5000}
+	days := []string{"一", "二", "三", "四", "五", "六", "日"}
+
+	total := sum(sales)
+	fmt.Println("總營業額：", total)
+	fmt.Println("平均每天：", total/len(sales))
+
+	d := indexOfMax(sales)
+	fmt.Println("最好的一天：星期"+days[d], sales[d])
+
+	fmt.Println("達到 4500 的天數：", countAtLeast(sales, 4500))
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/pre-4-problems#Example_weeklyReport"><code>總營業額： 31100
+平均每天： 4442
+最好的一天：星期六 6300
+達到 4500 的天數： 3</code></pre>
+    <ul class="notes">
+      <li>sum 和 countAtLeast 直接用第 4 節寫好的函式，不用重寫。</li>
+      <li>indexOfMax 和 maxOf 幾乎一樣，差別是它記住的是「最大的那一格的索引」best，比較時用 <code>nums[best]</code> 拿出那一格的值。知道索引，就能從另一份清單 days 拿到星期幾。</li>
+      <li>平均是 31100 / 7 = 4442.857…，整數除法丟掉了小數，得到 4442。要保留小數，就照先修 2 的做法先轉成 float64。</li>
+    </ul>
+    <p>weeklyReport 本身讀起來就像報表的大綱，每一行都很短。這是拆成函式最大的好處：每一層只需要看懂一件事。</p>
+  </section>
+
+  <section aria-labelledby="debug">
+    <h2 id="debug">6. 用 Println 除錯</h2>
+    <p>程式的結果不對，但看不出哪裡錯時，最簡單有效的方法是在中間加幾行 <code>fmt.Println</code>，把變數印出來，讓電腦替你填追蹤表。下面的函式想把 85、90、75 加起來，應該得到 250，結果卻是 165：</p>
+    <pre class="code" data-src="chapters/pre-4-problems/report.go#buggyTotal,debugDemo"><code>func buggyTotal(nums []int) int {
+	total := 0
+	for i := 1; i &lt; len(nums); i++ {
+		total += nums[i]
+		fmt.Println("i =", i, "total =", total)
+	}
+	return total
+}
+
+func debugDemo() {
+	fmt.Println(buggyTotal([]int{85, 90, 75}))
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/pre-4-problems#Example_debugDemo"><code>i = 1 total = 90
+i = 2 total = 165
+165</code></pre>
+    <p>印出來的第一行就是 <code>i = 1</code>，total 一開始就是 90：第一個元素 85 根本沒有被加到。回頭看迴圈，起點寫成了 <code>i := 1</code>，應該是 0。除錯的步驟可以整理成：</p>
+    <ol class="notes">
+      <li>先想好正確的答案（250），確認結果真的不對。</li>
+      <li>在迴圈裡、或可疑的那一行前後，印出相關的變數，並寫清楚印的是什麼（<code>"i ="</code>）。</li>
+      <li>把印出來的值和你腦中的追蹤表比對，找到<strong>第一個</strong>不一樣的地方。</li>
+      <li>修好之後，把除錯用的 Println 刪掉。</li>
+    </ol>
+    <p>這個方法看起來很原始，卻是有經驗的工程師每天都在用的技巧。以後你會學到更強的工具，但它們做的事情本質上一樣：看清楚程式每一步實際做了什麼。</p>
+  </section>
+
+  <section aria-labelledby="examples">
+    <h2 id="examples">7. 用範例驗證</h2>
+    <p>怎麼知道 maxOf 是對的？用幾個範例試試看：給它一份清單，看它交回的值是不是我們預期的。把這些範例寫成程式，就是<strong>測試</strong>（test）。下面是本章 maxOf 的測試，放在 <code>main_test.go</code>：</p>
+    <pre class="code" data-src="chapters/pre-4-problems/main_test.go#TestMaxOf"><code>func TestMaxOf(t *testing.T) {
+	tests := []struct {
+		name string
+		nums []int
+		want int
+	}{
+		{"一般", []int{3, 9, 4}, 9},
+		{"最大的在第一個", []int{9, 3, 4}, 9},
+		{"最大的在最後", []int{3, 4, 9}, 9},
+		{"只有一個", []int{7}, 7},
+		{"全是負數", []int{-3, -5, -1}, -1},
+		{"有一樣大的", []int{5, 5, 2}, 5},
+	}
+	for _, tt := range tests {
+		if got := maxOf(tt.nums); got != tt.want {
+			t.Errorf("%s：maxOf(%v) = %d, want %d", tt.name, tt.nums, got, tt.want)
+		}
+	}
+}</code></pre>
+    <p>現在不用看懂每個符號，只要知道：tests 是一份範例清單，每一行是「名稱、輸入、期望的答案」；下面的 for 一個一個拿出來執行 maxOf，答案不對就用 <code>t.Errorf</code> 報告。注意這些範例是怎麼挑的：一般的情況、最大值在最前面、在最後面、只有一個元素、全是負數、有一樣大的。很多 bug 都躲在這些邊緣的情況裡。如果把 maxOf 的起點改成 <code>best := 0</code>，執行 <code>go test -run TestMaxOf ./chapters/pre-4-problems</code> 會看到：</p>
+    <p class="label">輸出（節錄）</p>
+    <pre class="out err"><code>--- FAIL: TestMaxOf (0.00s)
+    main_test.go:142: 全是負數：maxOf([-3 -5 -1]) = 0, want -1
+FAIL</code></pre>
+    <p>其他五個範例都通過了，只有「全是負數」抓到了問題。如果當初只用 <code>[3 9 4]</code> 試，就永遠發現不了這個 bug。</p>
+    <p>這本手冊的每一題練習都附有這樣的測試，放在 <code>exercises_test.go</code>。卡住的時候，打開測試檔看看它用了哪些範例，常常就知道自己漏想了什麼情況。更好的習慣是<strong>先想範例、再寫程式</strong>：動手之前，先在紙上寫下三五組「輸入→答案」，包括空的清單、只有一個元素、邊界上的值。範例想清楚了，程式通常就不難寫了。</p>
+  </section>
+
+  <section aria-labelledby="pitfalls">
+    <h2 id="pitfalls">常見錯誤</h2>
+    <h3 id="pit-index">1. 索引從 1 開始算</h3>
+    <p>第一個元素是 <code>[0]</code>，最後一個是 <code>[len-1]</code>。迴圈條件寫成 <code>i &lt;= len(s)</code> 會多跑一圈而 panic；起點寫成 <code>i := 1</code> 會漏掉第一個（第 6 節）。不需要索引時用 range，就不會有這些問題。</p>
+
+    <h3 id="pit-append">2. append 沒有接回去</h3>
+    <pre class="code bad" data-compile-error><code>package main
+
+import "fmt"
+
+func main() {
+	prices := []int{85, 90, 75}
+	append(prices, 100)
+	fmt.Println(prices)
+}</code></pre>
+    <p class="label">編譯錯誤</p>
+    <pre class="out err"><code>./main.go:7:2: append(prices, 100) (value of type []int) is not used</code></pre>
+    <p>append 不會讓原本的清單變長，而是交回一份加好的清單。要寫成 <code>prices = append(prices, 100)</code>。</p>
+
+    <h3 id="pit-best-zero">3. 最大值、最小值從 0 開始比</h3>
+    <p>全是負數時找最大值、全是正數時找最小值，答案都會是 0。從清單的第一個值開始（第 4 節、練習 6）。</p>
+
+    <h3 id="pit-missing-return">4. 有些路沒有 return</h3>
+    <pre class="code bad" data-compile-error><code>package main
+
+import "fmt"
+
+func memberPrice(price int, member bool) int {
+	if member {
+		return price * 9 / 10
+	}
+}
+
+func main() {
+	fmt.Println(memberPrice(100, true))
+}</code></pre>
+    <p class="label">編譯錯誤</p>
+    <pre class="out err"><code>./main.go:9:1: missing return</code></pre>
+    <p>說好要回傳 int 的函式，每一條可能走到結尾的路都要有 return。不是會員時，這個函式走到最後一個 <code>}</code> 都沒有交回任何值。</p>
+
+    <h3 id="pit-param-copy">5. 以為函式改了參數，外面就會變</h3>
+    <p>參數是一份複本（第 1 節）。要讓外面拿到結果，就用 return 交回去，再由呼叫的人接住。</p>
+
+    <h3 id="pit-shadow-counter">6. 在迴圈裡又寫了一次 :=</h3>
+    <p>迴圈裡寫 <code>count := 0</code>，建立的是一個同名的新變數，每圈都從 0 開始，迴圈外的 count 一次都沒被加到。迴圈裡改值要用 <code>=</code> 或 <code>++</code>（練習 7）。</p>
+  </section>
+
+  <section aria-labelledby="exercises">
+    <h2 id="exercises">練習</h2>
+    <p>題目在 <code>exercises/pre-4-problems/exercises.go</code>。每一題都先在紙上寫幾個範例，再動手。</p>
+    <pre class="shell"><code>go test ./exercises/pre-4-problems/                        <span class="c"># 跑全部練習</span>
+go test ./exercises/pre-4-problems/ -run TestCartTotal     <span class="c"># 只跑一題</span>
+go test -tags solution ./exercises/pre-4-problems/         <span class="c"># 跑參考解答</span></code></pre>
+    <ol class="exercises">
+      <li>
+        <h3><span class="level l1">入門</span>練習 1：購物車總價</h3>
+        <p>兩份一樣長的清單：單價和數量。算出總價。</p>
+        <pre class="code" data-src="exercises/pre-4-problems/exercises.go#CartTotal"><code>func CartTotal(prices, qtys []int) int {
+	// TODO: 實作
+	return 0
+}</code></pre>
+        <p>測試：<code>TestCartTotal</code>。</p>
+        <details><summary>提示</summary><p>加總的變形：每一圈加的是 <code>prices[i] * qtys[i]</code>。兩份清單要用同一個索引 i，所以用 <code>for i := range prices</code>。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l1">入門</span>練習 2：菜單上有沒有</h3>
+        <p>回傳某道菜在不在菜單上。</p>
+        <pre class="code" data-src="exercises/pre-4-problems/exercises.go#Contains"><code>func Contains(menu []string, dish string) bool {
+	// TODO: 實作
+	return false
+}</code></pre>
+        <p>測試：<code>TestContains</code>。</p>
+        <details><summary>提示</summary><p>搜尋的變形：找到就 <code>return true</code>，迴圈走完還沒找到就 <code>return false</code>。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l2">進階</span>練習 3：最大漲幅</h3>
+        <p>找出相鄰兩天之間漲最多的金額。</p>
+        <pre class="code" data-src="exercises/pre-4-problems/exercises.go#BiggestJump"><code>func BiggestJump(prices []int) int {
+	// TODO: 實作
+	return 0
+}</code></pre>
+        <p>測試：<code>TestBiggestJump</code>。</p>
+        <details><summary>提示</summary><p>每一天都要和前一天比，所以用索引的寫法，i 從 1 開始：<code>prices[i] - prices[i-1]</code>。這次 best 從 0 開始反而是對的，因為題目說「沒漲就回傳 0」。不到兩天時迴圈一圈都不會跑。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l2">進階</span>練習 4：超過門檻的價格</h3>
+        <p>回傳一份新的清單，只留下大於 limit 的價格。</p>
+        <pre class="code" data-src="exercises/pre-4-problems/exercises.go#Above"><code>func Above(prices []int, limit int) []int {
+	// TODO: 實作
+	return nil
+}</code></pre>
+        <p>測試：<code>TestAbove</code>。</p>
+        <details><summary>提示</summary><p>從空的清單 <code>result := []int{}</code> 開始，條件成立就 <code>result = append(result, p)</code>。這也是累加器，只是累積的是一份清單。測試也會檢查你沒有改到傳進來的 prices。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l3">挑戰</span>練習 5：票選午餐</h3>
+        <p>大家投票決定午餐，找出得票最多的選項；平手時選比較早出現的。</p>
+        <pre class="code" data-src="exercises/pre-4-problems/exercises.go#MostVoted"><code>func MostVoted(votes []string) string {
+	// TODO: 實作
+	return ""
+}</code></pre>
+        <p>測試：<code>TestMostVoted</code>。</p>
+        <details><summary>提示</summary><p>這題是「計數」放進「找最大值」裡面。外層迴圈走過每一張票 v，內層迴圈數出 v 一共有幾票；再像找最大值一樣，記住目前票數最多的選項和它的票數。要讓平手時留下比較早出現的，換掉的條件要用 <code>&gt;</code> 而不是 <code>&gt;=</code>。（學到 <a href="07-maps.html">07 map</a> 之後，會有更快的做法。）</p></details>
+      </li>
+      <li>
+        <h3><span class="level fix">找錯</span>練習 6：最便宜的價格</h3>
+        <p>找最低價，但不管清單是什麼，答案都是 0。</p>
+        <pre class="code" data-src="exercises/pre-4-problems/exercises.go#CheapestPrice"><code>func CheapestPrice(prices []int) int {
+	best := 0
+	for _, p := range prices {
+		if p &lt; best {
+			best = p
+		}
+	}
+	return best
+}</code></pre>
+        <p>測試：<code>TestCheapestPrice</code>。</p>
+        <details><summary>提示</summary><p>和第 4 節的 wrongMax 是同一種 bug，方向相反：所有價格都大於 0，沒有一個會「比 0 小」。</p></details>
+      </li>
+      <li>
+        <h3><span class="level fix">找錯</span>練習 7：庫存不足</h3>
+        <p>數一數庫存低於門檻的品項，結果永遠是 0。</p>
+        <pre class="code" data-src="exercises/pre-4-problems/exercises.go#LowStock"><code>func LowStock(stock []int, limit int) int {
+	count := 0
+	for _, s := range stock {
+		count := 0
+		if s &lt; limit {
+			count++
+		}
+	}
+	return count
+}</code></pre>
+        <p>測試：<code>TestLowStock</code>。</p>
+        <details><summary>提示</summary><p>在迴圈裡加一行 <code>fmt.Println(count)</code>，再在 return 前面也印一次，比較兩個 count。迴圈裡那個 count 是從哪裡來的？見常見錯誤 6。</p></details>
+      </li>
+    </ol>
+    <p><a href="https://github.com/xinqilin/GO-Playground/blob/main/exercises/pre-4-problems/solution.go">參考解答</a>：先自己寫完再看。</p>
+  </section>
+
+  <section aria-labelledby="recap">
+    <h2 id="recap">重點回顧</h2>
+    <ul class="recap">
+      <li>函式有名字、參數和回傳值；<code>return</code> 交回結果並立刻結束函式。</li>
+      <li>參數是複本，函式裡改參數不影響外面；結果要用 return 交回去。</li>
+      <li>slice 是一份清單：索引從 0 開始，<code>len</code> 是長度，<code>append</code> 的結果要接回去。</li>
+      <li>用不存在的索引會 panic：<code>index out of range</code>。</li>
+      <li><code>for i, v := range s</code> 走過每一格；不要的值用 <code>_</code> 丟掉。</li>
+      <li>四個基本演算法：加總、計數、找最大值（從第一個值開始比）、搜尋（找到就 return，找不到回傳 -1）。</li>
+      <li>拆解問題：寫出要什麼、拆成小問題、認出熟悉的形狀、一個小問題一個函式。</li>
+      <li>結果不對時，用 Println 印出變數，找出第一個和預期不同的地方。</li>
+      <li>先想範例再寫程式，範例要包含空的、只有一個、邊界上的情況。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="next">
+    <h2 id="next">接下來</h2>
+    <p>先修系列到這裡結束。你已經會用變數、判斷、迴圈、函式和清單寫出完整的小程式，也會用追蹤表、Println 和測試找出錯誤。這些是所有程式語言共通的基礎。</p>
+    <p>接下來從 <a href="00-hello.html">00 第一支程式</a> 開始讀正文。正文假設讀者寫過程式，節奏會比較快，也會更深入：同樣的 if、for、函式、slice，會講到它們在 Go 裡的細節和陷阱。遇到看不懂的地方，回來翻先修是很正常的。正文裡偶爾會出現「從 Java 來的你」的對照表，那是寫給學過 Java 的讀者的，可以直接跳過。</p>
+  </section>
+
+  <section aria-labelledby="further">
+    <h2 id="further">延伸閱讀</h2>
+    <ul class="notes">
+      <li>Go 語言規格：<a href="https://go.dev/ref/spec#Function_declarations">Function declarations</a>、<a href="https://go.dev/ref/spec#Return_statements">Return statements</a>、<a href="https://go.dev/ref/spec#Slice_types">Slice types</a>、<a href="https://go.dev/ref/spec#Index_expressions">Index expressions</a>、<a href="https://go.dev/ref/spec#For_range">For statements with range clause</a>、<a href="https://go.dev/ref/spec#Appending_and_copying_slices">Appending to and copying slices</a>。</li>
+      <li>官方教學：<a href="https://go.dev/doc/tutorial/add-a-test">Add a test</a>（為函式寫測試）。</li>
+      <li>套件文件：<a href="https://pkg.go.dev/testing">testing</a>。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="run">
+    <h2 id="run">動手跑</h2>
+    <p class="label">在手冊的資料夾（GO-Playground）裡</p>
+    <pre class="shell"><code>go run ./chapters/pre-4-problems                <span class="c"># 執行本章所有示範</span>
+go run ./chapters/pre-4-problems/outofrange     <span class="c"># 看索引超出範圍</span>
+go test ./chapters/pre-4-problems               <span class="c"># 驗證頁面上的輸出和 maxOf 的測試</span>
+go test ./exercises/pre-4-problems/             <span class="c"># 做練習</span></code></pre>
+    <p><a href="https://github.com/xinqilin/GO-Playground/tree/main/chapters/pre-4-problems">在 GitHub 看本章完整程式碼</a>，或看<a href="https://github.com/xinqilin/GO-Playground/tree/main/exercises/pre-4-problems">練習題</a>。</p>
+  </section>
+</main>
+
+<nav class="pager" aria-label="章節導覽">
+  <a class="prev" href="pre-3-decisions.html">← 先修 3 判斷與重複</a>
+  <a class="home" href="index.html">目錄</a>
+  <a class="next" href="00-hello.html">00 第一支程式 →</a>
+</nav>
+</body>
+</html>
