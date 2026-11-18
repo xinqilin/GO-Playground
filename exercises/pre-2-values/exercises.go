@@ -2,11 +2,11 @@
 
 package values
 
-// Split 把 total 元平分給 people 個人，回傳每人拿到幾元、剩下幾元。
-// people 一定大於 0。例如 Split(100, 3) 回傳 33, 1。
-func Split(total, people int) (each, left int) {
+// Elapsed 回傳同一天裡，從 startH 點 startM 分到 endH 點 endM 分經過了幾分鐘。
+// 時間用 24 小時制，結束時間不會早於開始時間。例如 9 點 50 分到 11 點 5 分是 75 分鐘。
+func Elapsed(startH, startM, endH, endM int) int {
 	// TODO: 實作
-	return 0, 0
+	return 0
 }
 
 // WeeksAndDays 把天數換成幾週又幾天，例如 17 天是 2 週又 3 天。
@@ -54,9 +54,10 @@ func Rotate(a, b, c string) (string, string, string) {
 	return a, b, c
 }
 
-// AverageScore 回傳兩次分數的平均，要保留小數，例如 80 和 85 的平均是 82.5。
+// Attendance 回傳出席率（百分比）：出席 part 次、總共 total 次，要保留小數。
+// total 一定大於 0。例如 20 次出席 18 次是 90，8 次出席 3 次是 37.5。
 //
-// 找錯：80 和 85 算出來是 82。
-func AverageScore(a, b int) float64 {
-	return float64((a + b) / 2)
+// 找錯：除了全勤是 100 以外，算出來全部是 0。
+func Attendance(part, total int) float64 {
+	return float64(part / total * 100)
 }

@@ -2,16 +2,16 @@ package values
 
 import "testing"
 
-func TestSplit(t *testing.T) {
-	tests := []struct{ total, people, each, left int }{
-		{100, 3, 33, 1},
-		{90, 3, 30, 0},
-		{5, 8, 0, 5},
+func TestElapsed(t *testing.T) {
+	tests := []struct{ startH, startM, endH, endM, want int }{
+		{9, 50, 11, 5, 75},
+		{8, 0, 8, 45, 45},
+		{12, 30, 12, 30, 0},
+		{0, 0, 23, 59, 1439},
 	}
 	for _, tt := range tests {
-		each, left := Split(tt.total, tt.people)
-		if each != tt.each || left != tt.left {
-			t.Errorf("Split(%d, %d) = %d, %d, want %d, %d", tt.total, tt.people, each, left, tt.each, tt.left)
+		if got := Elapsed(tt.startH, tt.startM, tt.endH, tt.endM); got != tt.want {
+			t.Errorf("Elapsed(%d, %d, %d, %d) = %d, want %d", tt.startH, tt.startM, tt.endH, tt.endM, got, tt.want)
 		}
 	}
 }
@@ -82,18 +82,19 @@ func TestRotate(t *testing.T) {
 	}
 }
 
-func TestAverageScore(t *testing.T) {
+func TestAttendance(t *testing.T) {
 	tests := []struct {
-		a, b int
-		want float64
+		part, total int
+		want        float64
 	}{
-		{80, 85, 82.5},
-		{90, 90, 90},
-		{0, 1, 0.5},
+		{18, 20, 90},
+		{3, 8, 37.5},
+		{1, 4, 25},
+		{20, 20, 100},
 	}
 	for _, tt := range tests {
-		if got := AverageScore(tt.a, tt.b); got != tt.want {
-			t.Errorf("AverageScore(%d, %d) = %v, want %v", tt.a, tt.b, got, tt.want)
+		if got := Attendance(tt.part, tt.total); got != tt.want {
+			t.Errorf("Attendance(%d, %d) = %v, want %v", tt.part, tt.total, got, tt.want)
 		}
 	}
 }

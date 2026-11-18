@@ -2,8 +2,9 @@
 
 package values
 
-func Split(total, people int) (each, left int) {
-	return total / people, total % people
+// Elapsed 先把兩個時間都換成從 0 點開始算的第幾分鐘，再相減。
+func Elapsed(startH, startM, endH, endM int) int {
+	return (endH*60 + endM) - (startH*60 + startM)
 }
 
 func WeeksAndDays(days int) (weeks, rest int) {
@@ -36,7 +37,7 @@ func Rotate(a, b, c string) (string, string, string) {
 	return a, b, c
 }
 
-// AverageScore 要先轉成 float64 再除；先除再轉，小數早就被丟掉了。
-func AverageScore(a, b int) float64 {
-	return float64(a+b) / 2
+// Attendance 要先轉成 float64 再除；兩個整數先除，18 / 20 就已經是 0 了。
+func Attendance(part, total int) float64 {
+	return float64(part) * 100 / float64(total)
 }

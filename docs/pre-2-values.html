@@ -519,7 +519,7 @@ true</code></pre>
     <p>一個等號是指定（放進去），兩個等號才是比較。<code>count = count + 1</code> 是動作，不是等式；問「price 是不是 90」要寫 <code>price == 90</code>。</p>
 
     <h3 id="pit-intdiv">2. 忘了整數除法會丟掉小數</h3>
-    <p><code>7 / 2</code> 是 3，<code>(80 + 85) / 2</code> 是 82。需要小數時，先用 <code>float64(…)</code> 轉換<strong>再</strong>除；先除再轉換，小數早就被丟掉了。練習 7。</p>
+    <p><code>7 / 2</code> 是 3，<code>18 / 20</code> 是 0。需要小數時，先用 <code>float64(…)</code> 轉換<strong>再</strong>除；先除再轉換，小數早就被丟掉了。練習 7。</p>
 
     <h3 id="pit-text">3. 把文字的數字當成數字</h3>
     <p><code>"85" + "3"</code> 是 <code>"853"</code>。有雙引號的就是文字，不能拿來算數。</p>
@@ -538,19 +538,19 @@ true</code></pre>
     <h2 id="exercises">練習</h2>
     <p>題目在 <code>exercises/pre-2-values/exercises.go</code>，做法和<a href="pre-1-running.html#exercises">先修 1 的練習</a>一樣。</p>
     <pre class="shell"><code>go test ./exercises/pre-2-values/                    <span class="c"># 跑全部練習</span>
-go test ./exercises/pre-2-values/ -run TestSplit     <span class="c"># 只跑一題</span>
+go test ./exercises/pre-2-values/ -run TestElapsed   <span class="c"># 只跑一題</span>
 go test -tags solution ./exercises/pre-2-values/     <span class="c"># 跑參考解答</span></code></pre>
     <p>這幾題的函式會用 <code>return</code> 一次交回好幾個值，例如 <code>return 33, 1</code>，順序就是函式第一行括號裡寫的順序。函式的寫法在先修 4 會正式介紹。</p>
     <ol class="exercises">
       <li>
-        <h3><span class="level l1">入門</span>練習 1：平分</h3>
-        <p>把錢平分給幾個人，回傳每人幾元、剩下幾元。</p>
-        <pre class="code" data-src="exercises/pre-2-values/exercises.go#Split"><code>func Split(total, people int) (each, left int) {
+        <h3><span class="level l1">入門</span>練習 1：經過幾分鐘</h3>
+        <p>算出同一天裡兩個時間之間經過了幾分鐘。</p>
+        <pre class="code" data-src="exercises/pre-2-values/exercises.go#Elapsed"><code>func Elapsed(startH, startM, endH, endM int) int {
 	// TODO: 實作
-	return 0, 0
+	return 0
 }</code></pre>
-        <p>測試：<code>TestSplit</code>。</p>
-        <details><summary>提示</summary><p>一行就夠了：<code>return total / people, total % people</code>。</p></details>
+        <p>測試：<code>TestElapsed</code>。</p>
+        <details><summary>提示</summary><p>直接把小時減小時、分鐘減分鐘，遇到 50 分到 5 分就麻煩了。先把兩個時間都換成「從 0 點開始算的第幾分鐘」：小時乘以 60 再加分鐘，然後相減。可以先用兩個變數存起來，讓程式比較好讀。</p></details>
       </li>
       <li>
         <h3><span class="level l1">入門</span>練習 2：幾週又幾天</h3>
@@ -605,13 +605,13 @@ go test -tags solution ./exercises/pre-2-values/     <span class="c"># 跑參考
         <details><summary>提示</summary><p>畫追蹤表：執行到 <code>c = a</code> 時，a 裝的已經是誰了？可以先用 tmp 存起來，或用第 4 節一次指定的寫法。</p></details>
       </li>
       <li>
-        <h3><span class="level fix">找錯</span>練習 7：平均分數</h3>
-        <p>平均要保留小數，但 80 和 85 的平均算成了 82。</p>
-        <pre class="code" data-src="exercises/pre-2-values/exercises.go#AverageScore"><code>func AverageScore(a, b int) float64 {
-	return float64((a + b) / 2)
+        <h3><span class="level fix">找錯</span>練習 7：出席率</h3>
+        <p>出席率是出席次數除以總次數再乘 100，但除了全勤以外，算出來全部是 0。</p>
+        <pre class="code" data-src="exercises/pre-2-values/exercises.go#Attendance"><code>func Attendance(part, total int) float64 {
+	return float64(part / total * 100)
 }</code></pre>
-        <p>測試：<code>TestAverageScore</code>。</p>
-        <details><summary>提示</summary><p>括號裡的 <code>(a + b) / 2</code> 是兩個整數相除，算出來已經是 82 了，再轉成 float64 也只是 82.0。轉換要放在除法之前。</p></details>
+        <p>測試：<code>TestAttendance</code>。</p>
+        <details><summary>提示</summary><p>追蹤一次 <code>part / total * 100</code>：18 / 20 是兩個整數相除，得到 0，乘以 100 還是 0，最後轉成 float64 也只是 0.0。轉換要放在除法之前。</p></details>
       </li>
     </ol>
     <p><a href="https://github.com/xinqilin/GO-Playground/blob/main/exercises/pre-2-values/solution.go">參考解答</a>：先自己寫完再看。</p>

@@ -6,7 +6,7 @@
 //
 // 一開始全部是紅燈（FAIL），寫完一題就會綠一題。只想跑某一題時加上 -run：
 //
-//	go test ./exercises/pre-2-values/ -run TestSplit
+//	go test ./exercises/pre-2-values/ -run TestElapsed
 //
 // 參考解答在 solution.go，用 -tags solution 才會編譯它：
 //
