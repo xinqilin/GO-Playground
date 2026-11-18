@@ -1,0 +1,788 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>判斷與重複｜Go 圖解手冊</title>
+<meta name="description" content="給從來沒寫過程式的人：if 與 else、else if 的順序、用決策樹整理條件、for 迴圈的三個要素、計數器與累加器、break 與 continue、巢狀迴圈，以及無窮迴圈是怎麼發生的，附可執行的練習題。">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<header class="site">
+  <a href="index.html">Go 圖解手冊</a>
+  <span class="count">先修 3 / 4</span>
+</header>
+
+<main class="page long">
+  <header class="hero">
+    <div class="num" aria-hidden="true">P3</div>
+    <p class="eyebrow">先修 · 第 3 章</p>
+    <h1>判斷與重複</h1>
+    <p class="analogy">到目前為止，程式都是從頭到尾一路直走。這一章讓它學會兩件事：遇到岔路時看條件選一條走，以及同一段路重複走很多圈，直到條件不再成立。</p>
+  </header>
+
+  <nav class="toc-inline" aria-labelledby="toc-title">
+    <p class="label" id="toc-title">本章內容</p>
+    <ol>
+      <li><a href="#goals">本章你會學到</a></li>
+      <li><a href="#if">if 與 else：二選一</a></li>
+      <li><a href="#elseif">else if：多選一</a></li>
+      <li><a href="#tree">組合條件與決策樹</a></li>
+      <li><a href="#for">for：重複做</a></li>
+      <li><a href="#accumulate">計數器與累加器</a></li>
+      <li><a href="#while">只寫條件的 for、break 與 continue</a></li>
+      <li><a href="#nested">巢狀迴圈</a></li>
+      <li><a href="#forever">無窮迴圈</a></li>
+      <li><a href="#pitfalls">常見錯誤</a></li>
+      <li><a href="#exercises">練習</a></li>
+      <li><a href="#recap">重點回顧</a></li>
+      <li><a href="#further">延伸閱讀</a></li>
+    </ol>
+  </nav>
+
+  <section aria-labelledby="goals">
+    <h2 id="goals">本章你會學到</h2>
+    <ul class="notes">
+      <li>用 <code>if</code>、<code>else</code> 讓程式依條件走不同的路。</li>
+      <li>用 <code>else if</code> 從好幾個選項中選一個，以及為什麼條件的順序很重要。</li>
+      <li>把複雜的規則畫成決策樹，再翻成程式。</li>
+      <li>用 <code>for</code> 重複做事，認識迴圈的三個要素：起點、條件、更新。</li>
+      <li>兩個最常用的迴圈技巧：計數器和累加器。</li>
+      <li>用 <code>break</code> 提早離開、用 <code>continue</code> 跳過一圈，以及迴圈裡面再放迴圈。</li>
+      <li>認出無窮迴圈，知道它怎麼發生、怎麼停下來。</li>
+    </ul>
+    <p>先備：<a href="pre-2-values.html">先修 2 值、變數與運算</a>（變數、<code>=</code> 與 <code>==</code>、<code>&amp;&amp;</code> 與 <code>||</code>、追蹤表）。</p>
+  </section>
+
+  <section aria-labelledby="if">
+    <h2 id="if">1. if 與 else：二選一</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 250" role="img" aria-label="流程圖：先問 score >= 60 嗎。是就印及格，否就印不及格，兩條路最後會合，繼續往下一行">
+        <title>if 與 else 的流程</title>
+        <path class="soft" d="M240 24 L340 64 L240 104 L140 64 Z"/>
+        <text class="small mono" x="240" y="69" text-anchor="middle">score &gt;= 60</text>
+        <path class="wire acc-ln" d="M140 64 H80 V124"/>
+        <path class="tip acc-tip" d="M80 136 L73 123 L87 123 Z"/>
+        <path class="wire hot-ln" d="M340 64 H400 V124"/>
+        <path class="tip hot-tip" d="M400 136 L393 123 L407 123 Z"/>
+        <text class="sm t-acc" x="104" y="54" text-anchor="middle">是</text>
+        <text class="sm t-hot" x="376" y="54" text-anchor="middle">否</text>
+        <rect class="acc" x="20" y="138" width="120" height="44" rx="8"/>
+        <rect class="hot" x="340" y="138" width="120" height="44" rx="8"/>
+        <text class="small" x="80" y="165" text-anchor="middle">印「及格」</text>
+        <text class="small" x="400" y="165" text-anchor="middle">印「不及格」</text>
+        <path class="wire" d="M80 182 V202 H400 V182 M240 202 V212"/>
+        <path class="tip" d="M240 224 L233 211 L247 211 Z"/>
+        <text class="sm" x="240" y="244" text-anchor="middle">繼續往下一行</text>
+      </svg>
+      <figcaption>菱形是一個是非題。兩條路只會走其中一條，走完之後在下面會合，繼續執行後面的程式。</figcaption>
+    </figure>
+    <pre class="code" data-src="chapters/pre-3-decisions/if.go#passFail,passFailDemo"><code>func passFail(score int) {
+	if score &gt;= 60 {
+		fmt.Println(score, "分：及格")
+	} else {
+		fmt.Println(score, "分：不及格")
+	}
+}
+
+func passFailDemo() {
+	passFail(72)
+	passFail(59)
+	passFail(60)
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/pre-3-decisions#Example_passFailDemo"><code>72 分：及格
+59 分：不及格
+60 分：及格</code></pre>
+    <p><code>if</code> 後面接一個條件，也就是先修 2 學過、結果是 true 或 false 的比較。條件成立（true）就執行緊接著的大括號 <code>{ … }</code>；不成立（false）就執行 <code>else</code> 後面的大括號。兩邊只會執行其中一邊，不會兩邊都做，也不會兩邊都不做。</p>
+    <p>這裡第一次出現帶參數的函式：<code>passFail(72)</code> 把 72 交給 passFail，函式裡的 <code>score</code> 就是 72。同一段判斷用三個不同的分數各跑一次，就看得到三種結果。函式的寫法在先修 4 會詳細介紹，現在只要知道括號裡的值會放進 score 就好。</p>
+    <p>60 分剛好及格，因為條件是 <code>&gt;=</code>（大於或等於）。如果寫成 <code>&gt;</code>，60 分就不及格了。測試條件時，一定要試<strong>剛好在邊界上</strong>的值。</p>
+
+    <h3>只有 if，沒有 else</h3>
+    <pre class="code" data-src="chapters/pre-3-decisions/if.go#umbrella,umbrellaDemo"><code>func umbrella(rain bool) {
+	fmt.Println("準備出門")
+	if rain {
+		fmt.Println("帶傘")
+	}
+	fmt.Println("鎖門出發")
+}
+
+func umbrellaDemo() {
+	umbrella(true)
+	umbrella(false)
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/pre-3-decisions#Example_umbrellaDemo"><code>準備出門
+帶傘
+鎖門出發
+準備出門
+鎖門出發</code></pre>
+    <p>else 可以不寫。條件不成立時，就跳過整個大括號，直接執行下一行。下雨時多做一件事（帶傘），不下雨就什麼都不多做。<code>rain</code> 本身就是 bool，所以可以直接當條件，不用寫成 <code>rain == true</code>。</p>
+    <aside class="callout">
+      <span class="title">大括號的位置是規定</span>
+      <p>Go 規定 <code>{</code> 要和 <code>if</code> 寫在同一行，<code>else</code> 要和前一個 <code>}</code> 寫在同一行，寫成 <code>} else {</code>。把 else 換到下一行會得到編譯錯誤（常見錯誤 6）。存檔時讓編輯器自動排版（gofmt），就不用記這些細節。</p>
+    </aside>
+  </section>
+
+  <section aria-labelledby="elseif">
+    <h2 id="elseif">2. else if：多選一</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 264" role="img" aria-label="從上往下依序問：90 以上嗎，是就是優；否就問 80 以上嗎，是就是甲；接著問 70、60；都不是就是丁。第一個成立的條件決定結果">
+        <title>從上往下問</title>
+        <rect class="soft" x="40" y="14" width="160" height="34" rx="6"/>
+        <rect class="soft" x="40" y="66" width="160" height="34" rx="6"/>
+        <rect class="soft" x="40" y="118" width="160" height="34" rx="6"/>
+        <rect class="soft" x="40" y="170" width="160" height="34" rx="6"/>
+        <rect class="soft dash" x="40" y="222" width="160" height="34" rx="6"/>
+        <text class="small mono" x="120" y="36" text-anchor="middle">score &gt;= 90 ?</text>
+        <text class="small mono" x="120" y="88" text-anchor="middle">score &gt;= 80 ?</text>
+        <text class="small mono" x="120" y="140" text-anchor="middle">score &gt;= 70 ?</text>
+        <text class="small mono" x="120" y="192" text-anchor="middle">score &gt;= 60 ?</text>
+        <text class="small" x="120" y="244" text-anchor="middle">以上都不是</text>
+        <path class="wire" d="M120 48 V56 M120 100 V108 M120 152 V160 M120 204 V212"/>
+        <path class="tip" d="M120 66 L114 55 L126 55 Z"/>
+        <path class="tip" d="M120 118 L114 107 L126 107 Z"/>
+        <path class="tip" d="M120 170 L114 159 L126 159 Z"/>
+        <path class="tip" d="M120 222 L114 211 L126 211 Z"/>
+        <text class="sm" x="134" y="62">否</text>
+        <text class="sm" x="134" y="114">否</text>
+        <text class="sm" x="134" y="166">否</text>
+        <text class="sm" x="134" y="218">否</text>
+        <path class="wire acc-ln" d="M200 31 H286 M200 83 H286 M200 135 H286 M200 187 H286 M200 239 H286"/>
+        <path class="tip acc-tip" d="M298 31 L285 24 L285 38 Z"/>
+        <path class="tip acc-tip" d="M298 83 L285 76 L285 90 Z"/>
+        <path class="tip acc-tip" d="M298 135 L285 128 L285 142 Z"/>
+        <path class="tip acc-tip" d="M298 187 L285 180 L285 194 Z"/>
+        <path class="tip acc-tip" d="M298 239 L285 232 L285 246 Z"/>
+        <text class="sm t-acc" x="243" y="25" text-anchor="middle">是</text>
+        <rect class="acc" x="300" y="14" width="60" height="34" rx="6"/>
+        <rect class="acc" x="300" y="66" width="60" height="34" rx="6"/>
+        <rect class="acc" x="300" y="118" width="60" height="34" rx="6"/>
+        <rect class="acc" x="300" y="170" width="60" height="34" rx="6"/>
+        <rect class="acc" x="300" y="222" width="60" height="34" rx="6"/>
+        <text x="330" y="37" text-anchor="middle">優</text>
+        <text x="330" y="89" text-anchor="middle">甲</text>
+        <text x="330" y="141" text-anchor="middle">乙</text>
+        <text x="330" y="193" text-anchor="middle">丙</text>
+        <text x="330" y="245" text-anchor="middle">丁</text>
+        <text class="sm" x="422" y="128" text-anchor="middle">第一個成立的</text>
+        <text class="sm" x="422" y="148" text-anchor="middle">決定結果</text>
+      </svg>
+      <figcaption>else if 從上往下一個一個問，只要有一個成立，就執行那一個，後面的都不再問。全部不成立才執行最後的 else。</figcaption>
+    </figure>
+    <pre class="code" data-src="chapters/pre-3-decisions/if.go#grade,gradeDemo"><code>func grade(score int) {
+	level := ""
+	if score &gt;= 90 {
+		level = "優"
+	} else if score &gt;= 80 {
+		level = "甲"
+	} else if score &gt;= 70 {
+		level = "乙"
+	} else if score &gt;= 60 {
+		level = "丙"
+	} else {
+		level = "丁"
+	}
+	fmt.Println(score, level)
+}
+
+func gradeDemo() {
+	grade(95)
+	grade(83)
+	grade(61)
+	grade(40)
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/pre-3-decisions#Example_gradeDemo"><code>95 優
+83 甲
+61 丙
+40 丁</code></pre>
+    <p>83 分走到第二個條件 <code>score &gt;= 80</code> 就成立了，於是 level 是「甲」，後面的 70、60 都不會再問。注意第二個條件只寫 <code>score &gt;= 80</code>，不用寫 <code>score &gt;= 80 &amp;&amp; score &lt; 90</code>：能走到這裡，就代表第一個條件已經不成立，分數一定小於 90。</p>
+    <p><code>level := ""</code> 先建立一個空的變數，每個分支各自放進不同的值，最後統一印出。這是「依條件決定一個值」的常見寫法。</p>
+
+    <h3>順序寫反會怎樣</h3>
+    <pre class="code" data-src="chapters/pre-3-decisions/if.go#wrongGrade"><code>func wrongGrade(score int) {
+	level := ""
+	if score &gt;= 60 {
+		level = "丙"
+	} else if score &gt;= 70 {
+		level = "乙"
+	} else if score &gt;= 80 {
+		level = "甲"
+	} else if score &gt;= 90 {
+		level = "優"
+	} else {
+		level = "丁"
+	}
+	fmt.Println(score, level)
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/pre-3-decisions#Example_wrongGradeDemo"><code>95 丙</code></pre>
+    <p>95 分拿到「丙」。因為第一個問的是 <code>score &gt;= 60</code>，95 分當然成立，於是就停在這裡，後面的條件根本沒機會被問到。這種程式能編譯、能執行、沒有任何錯誤訊息，只是答案錯了，正是先修 1 說的邏輯錯誤。規則是：<strong>範圍大的條件會蓋住範圍小的</strong>，所以要從最嚴格的條件（90 以上）問起。</p>
+  </section>
+
+  <section aria-labelledby="tree">
+    <h2 id="tree">3. 組合條件與決策樹</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 260" role="img" aria-label="票價的決策樹：先問 age 小於 6 嗎，是就免費。否就問 age 小於 12 或大於等於 65 嗎，是就半票 60 元。否就問是學生嗎，是就學生票 90 元，否就全票 120 元">
+        <title>票價的決策樹</title>
+        <rect class="soft" x="170" y="14" width="140" height="40" rx="8"/>
+        <text class="small mono" x="240" y="39" text-anchor="middle">age &lt; 6 ?</text>
+        <path class="wire acc-ln" d="M170 34 H65 V72"/>
+        <path class="tip acc-tip" d="M65 82 L58 69 L72 69 Z"/>
+        <text class="sm t-acc" x="118" y="26" text-anchor="middle">是</text>
+        <rect class="acc" x="20" y="84" width="90" height="36" rx="8"/>
+        <text class="small" x="65" y="107" text-anchor="middle">免費</text>
+        <path class="wire" d="M240 54 V74"/>
+        <path class="tip" d="M240 84 L233 71 L247 71 Z"/>
+        <text class="sm" x="252" y="72">否</text>
+        <rect class="soft" x="130" y="86" width="210" height="34" rx="8"/>
+        <text class="sm mono" x="235" y="108" text-anchor="middle">age &lt; 12 || age &gt;= 65 ?</text>
+        <path class="wire acc-ln" d="M340 103 H362"/>
+        <path class="tip acc-tip" d="M372 103 L359 96 L359 110 Z"/>
+        <text class="sm t-acc" x="355" y="94" text-anchor="middle">是</text>
+        <rect class="acc" x="374" y="84" width="90" height="36" rx="8"/>
+        <text class="small" x="419" y="107" text-anchor="middle">半票 60</text>
+        <path class="wire" d="M240 120 V140"/>
+        <path class="tip" d="M240 150 L233 137 L247 137 Z"/>
+        <text class="sm" x="252" y="140">否</text>
+        <rect class="soft" x="180" y="152" width="120" height="36" rx="8"/>
+        <text class="small mono" x="240" y="175" text-anchor="middle">student ?</text>
+        <path class="wire acc-ln" d="M180 170 H80 V204"/>
+        <path class="tip acc-tip" d="M80 214 L73 201 L87 201 Z"/>
+        <text class="sm t-acc" x="130" y="162" text-anchor="middle">是</text>
+        <path class="wire" d="M300 170 H400 V204"/>
+        <path class="tip" d="M400 214 L393 201 L407 201 Z"/>
+        <text class="sm" x="350" y="162" text-anchor="middle">否</text>
+        <rect class="acc" x="20" y="216" width="120" height="36" rx="8"/>
+        <rect class="acc" x="340" y="216" width="120" height="36" rx="8"/>
+        <text class="small" x="80" y="239" text-anchor="middle">學生票 90</text>
+        <text class="small" x="400" y="239" text-anchor="middle">全票 120</text>
+      </svg>
+      <figcaption>先把規則畫成一棵樹：每個方框是一個問題，每片葉子是一個結果。從上往下的每個問題，就是程式裡的一個 if 或 else if。</figcaption>
+    </figure>
+    <p>真實的規則常常好幾個條件交錯在一起。例如某個展覽的票價：「未滿 6 歲免費；未滿 12 歲或 65 歲以上半票 60 元；其他人是學生的話學生票 90 元，否則全票 120 元。」直接寫程式很容易漏掉情況。比較穩的做法是先在紙上畫出<strong>決策樹</strong>（上圖），確認每一種人都會走到一片葉子，再照著樹寫程式：</p>
+    <pre class="code" data-src="chapters/pre-3-decisions/if.go#ticket,ticketDemo"><code>func ticket(age int, student bool) {
+	kind := ""
+	price := 0
+	if age &lt; 6 {
+		kind = "免費"
+		price = 0
+	} else if age &lt; 12 || age &gt;= 65 {
+		kind = "半票"
+		price = 60
+	} else if student {
+		kind = "學生票"
+		price = 90
+	} else {
+		kind = "全票"
+		price = 120
+	}
+	fmt.Println(age, "歲", kind, price, "元")
+}
+
+func ticketDemo() {
+	ticket(3, false)
+	ticket(8, false)
+	ticket(20, true)
+	ticket(20, false)
+	ticket(70, true)
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/pre-3-decisions#Example_ticketDemo"><code>3 歲 免費 0 元
+8 歲 半票 60 元
+20 歲 學生票 90 元
+20 歲 全票 120 元
+70 歲 半票 60 元</code></pre>
+    <ul class="notes">
+      <li>樹的每一層問題，依序變成 if、else if、else if；最後一片葉子變成 else。</li>
+      <li>第二個問題用 <code>||</code> 把兩種半票的情況合在一起：小孩或長者，任一種成立就是半票。</li>
+      <li>70 歲的學生買到的是半票，不是學生票，因為半票的問題排在前面。順序代表優先權：符合好幾種優待時，先問到的那一種勝出。規則的優先順序如果不同，就要調整問題的順序。</li>
+    </ul>
+    <p>檢查這類程式時，每一片葉子至少要試一個值，再試每個邊界的兩側：5 和 6 歲、11 和 12 歲、64 和 65 歲。練習 1 的運費和練習 4 的停車費都可以先畫樹再寫。</p>
+  </section>
+
+  <section aria-labelledby="for">
+    <h2 id="for">4. for：重複做</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 246" role="img" aria-label="for 迴圈的流程：起點 i := 3 只做一次；接著問條件 i >= 1，是就執行內容印出 i，再更新 i--，然後回到條件；條件不成立就離開迴圈">
+        <title>迴圈的三個要素</title>
+        <rect class="soft" x="170" y="12" width="140" height="36" rx="8"/>
+        <text class="small" x="240" y="35" text-anchor="middle">起點：i := 3</text>
+        <path class="wire" d="M240 48 V62"/>
+        <path class="tip" d="M240 72 L233 59 L247 59 Z"/>
+        <path class="acc" d="M240 72 L330 104 L240 136 L150 104 Z"/>
+        <text class="small mono" x="240" y="109" text-anchor="middle">i &gt;= 1 ?</text>
+        <path class="wire acc-ln" d="M240 136 V152"/>
+        <path class="tip acc-tip" d="M240 162 L233 149 L247 149 Z"/>
+        <text class="sm t-acc" x="252" y="152">是</text>
+        <rect class="soft" x="180" y="164" width="120" height="36" rx="8"/>
+        <text class="small" x="240" y="187" text-anchor="middle">內容：印出 i</text>
+        <path class="wire" d="M300 182 H342"/>
+        <path class="tip" d="M352 182 L339 175 L339 189 Z"/>
+        <rect class="soft" x="354" y="164" width="110" height="36" rx="8"/>
+        <text class="small" x="409" y="187" text-anchor="middle">更新：i--</text>
+        <path class="wire" d="M409 164 V104 H344"/>
+        <path class="tip" d="M332 104 L345 97 L345 111 Z"/>
+        <path class="wire hot-ln" d="M150 104 H71 V154"/>
+        <path class="tip hot-tip" d="M71 164 L64 151 L78 151 Z"/>
+        <text class="sm t-hot" x="110" y="96" text-anchor="middle">否</text>
+        <rect class="hot" x="16" y="166" width="110" height="36" rx="8"/>
+        <text class="small" x="71" y="189" text-anchor="middle">離開迴圈</text>
+        <text class="sm" x="240" y="234" text-anchor="middle">每一圈：檢查條件 → 執行內容 → 更新</text>
+      </svg>
+      <figcaption>起點只做一次。之後每一圈都先檢查條件，成立就執行內容、再更新，然後回到條件；條件不成立時才離開。</figcaption>
+    </figure>
+    <p>想印出 1 到 1000，不可能寫一千行 Println。<strong>迴圈</strong>（loop）讓同一段程式重複執行，Go 只有一種迴圈，就是 <code>for</code>：</p>
+    <pre class="code" data-src="chapters/pre-3-decisions/loop.go#countdown"><code>func countdown() {
+	for i := 3; i &gt;= 1; i-- {
+		fmt.Println(i)
+	}
+	fmt.Println("發射")
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/pre-3-decisions#Example_countdown"><code>3
+2
+1
+發射</code></pre>
+    <p><code>for</code> 後面用兩個分號隔成三段，就是迴圈的<strong>三個要素</strong>：</p>
+    <ol class="notes">
+      <li><strong>起點</strong> <code>i := 3</code>：建立一個變數，在迴圈開始前做一次。</li>
+      <li><strong>條件</strong> <code>i &gt;= 1</code>：每一圈開始前檢查，成立才執行大括號裡的內容，不成立就離開迴圈。</li>
+      <li><strong>更新</strong> <code>i--</code>：每一圈的內容執行完之後做，讓 i 往「條件不成立」的方向前進。</li>
+    </ol>
+    <p>追蹤一次：i 是 3，3 &gt;= 1 成立，印 3，i 變 2；2 &gt;= 1 成立，印 2，i 變 1；1 &gt;= 1 成立，印 1，i 變 0；0 &gt;= 1 不成立，離開迴圈，接著執行迴圈後面的「發射」。內容一共執行了 3 次，條件檢查了 4 次，最後一次是不成立的那次。</p>
+    <pre class="code" data-src="chapters/pre-3-decisions/loop.go#laps"><code>func laps() {
+	for lap := 1; lap &lt;= 5; lap++ {
+		fmt.Println("第", lap, "圈")
+	}
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/pre-3-decisions#Example_laps"><code>第 1 圈
+第 2 圈
+第 3 圈
+第 4 圈
+第 5 圈</code></pre>
+    <p>這是最常見的形式：從 1 數到 5。迴圈裡可以使用 lap，每一圈的值都不同。i、lap 這種用來數圈數的變數叫<strong>迴圈變數</strong>，它只在迴圈裡有效，迴圈結束後就不能用了。想跑 n 圈，可以寫 <code>lap := 1; lap &lt;= n</code>，也可以寫 <code>lap := 0; lap &lt; n</code>；兩種都對，但要搭配好，起點和條件差一就會多跑或少跑一圈。</p>
+  </section>
+
+  <section aria-labelledby="accumulate">
+    <h2 id="accumulate">5. 計數器與累加器</h2>
+    <p>迴圈最常見的用途，是一圈一圈「累積」出一個結果。有兩個固定的套路，學會了就能解決一大半的問題。</p>
+    <h3>累加器：把東西加起來</h3>
+    <pre class="code" data-src="chapters/pre-3-decisions/loop.go#sumTo100"><code>func sumTo100() {
+	total := 0
+	for i := 1; i &lt;= 100; i++ {
+		total += i
+	}
+	fmt.Println(total)
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/pre-3-decisions#Example_sumTo100"><code>5050</code></pre>
+    <p><strong>累加器</strong>（accumulator）是一個在迴圈<strong>之前</strong>建立、從 0 開始的變數，每一圈加上這一圈的值。用追蹤表看前幾圈：</p>
+    <div class="table-wrap">
+      <table class="vs">
+        <thead><tr><th scope="col">圈</th><th scope="col">i</th><th scope="col">total（這圈結束後）</th></tr></thead>
+        <tbody>
+          <tr><th scope="row">開始前</th><td></td><td>0</td></tr>
+          <tr><th scope="row">第 1 圈</th><td>1</td><td>1</td></tr>
+          <tr><th scope="row">第 2 圈</th><td>2</td><td>3</td></tr>
+          <tr><th scope="row">第 3 圈</th><td>3</td><td>6</td></tr>
+          <tr><th scope="row">…</th><td>…</td><td>…</td></tr>
+          <tr><th scope="row">第 100 圈</th><td>100</td><td>5050</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <h3>計數器：數一數有幾個</h3>
+    <pre class="code" data-src="chapters/pre-3-decisions/loop.go#countMultiples"><code>func countMultiples() {
+	count := 0
+	for i := 1; i &lt;= 30; i++ {
+		if i%3 == 0 {
+			count++
+		}
+	}
+	fmt.Println(count)
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/pre-3-decisions#Example_countMultiples"><code>10</code></pre>
+    <p><strong>計數器</strong>（counter）也是從 0 開始，但只在條件成立時加 1。這裡把迴圈和 if 組合起來：每一圈問「i 是 3 的倍數嗎」（除以 3 餘數是 0），是就 <code>count++</code>。1 到 30 裡有 3、6、9……30，一共 10 個。</p>
+    <h3>每一圈加的量也可以變</h3>
+    <pre class="code" data-src="chapters/pre-3-decisions/loop.go#savings"><code>func savings() {
+	daily := 10
+	total := 0
+	for day := 1; day &lt;= 10; day++ {
+		total += daily
+		daily += 10
+	}
+	fmt.Println(total)
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/pre-3-decisions#Example_savings"><code>550</code></pre>
+    <p>第 1 天存 10 元、第 2 天 20 元……第 10 天 100 元。daily 記住「今天要存多少」，每一圈先加進 total，再為明天多加 10 元。這兩行的順序很重要：反過來寫，第一天就會存成 20 元。</p>
+    <p>記住兩個套路的共同點：結果變數要在迴圈<strong>外面</strong>、迴圈<strong>之前</strong>建立。寫在迴圈裡面的話，每一圈都會重新變回 0（常見錯誤 3）。</p>
+  </section>
+
+  <section aria-labelledby="while">
+    <h2 id="while">6. 只寫條件的 for、break 與 continue</h2>
+    <p>有時候事先不知道要跑幾圈，只知道什麼時候該停。這時 for 後面只寫條件就好，其他語言把這種迴圈叫做 while：</p>
+    <pre class="code" data-src="chapters/pre-3-decisions/loop.go#bounce"><code>func bounce() {
+	height := 100
+	times := 0
+	for height &gt;= 5 {
+		height = height / 2
+		times++
+		fmt.Println("第", times, "次彈起", height, "公分")
+	}
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/pre-3-decisions#Example_bounce"><code>第 1 次彈起 50 公分
+第 2 次彈起 25 公分
+第 3 次彈起 12 公分
+第 4 次彈起 6 公分
+第 5 次彈起 3 公分</code></pre>
+    <p>球從 100 公分落下，每次彈回一半的高度。<code>for height &gt;= 5</code> 的意思是「高度還有 5 公分以上，就繼續」。起點（<code>height := 100</code>）寫在迴圈前面，更新（<code>height = height / 2</code>）寫在迴圈裡面，三個要素還是都在，只是位置不同。第 5 次彈起只剩 3 公分（6 / 2，整數除法），條件不成立，迴圈結束。</p>
+
+    <h3>break：找到了就離開</h3>
+    <pre class="code" data-src="chapters/pre-3-decisions/loop.go#firstMultiple"><code>func firstMultiple() {
+	for n := 51; n &lt;= 100; n++ {
+		if n%7 == 0 {
+			fmt.Println(n)
+			break
+		}
+	}
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/pre-3-decisions#Example_firstMultiple"><code>56</code></pre>
+    <p><code>break</code> 立刻結束整個迴圈，不管條件還成不成立。找東西的時候，找到第一個就不必再找下去了。n 從 51 開始一個一個試，試到 56 是 7 的倍數，印出來後 break，57 到 100 都不會再試。</p>
+
+    <h3>continue：跳過這一圈</h3>
+    <pre class="code" data-src="chapters/pre-3-decisions/loop.go#openDays"><code>func openDays() {
+	for day := 1; day &lt;= 7; day++ {
+		if day == 3 {
+			continue
+		}
+		fmt.Println("第", day, "天營業")
+	}
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/pre-3-decisions#Example_openDays"><code>第 1 天營業
+第 2 天營業
+第 4 天營業
+第 5 天營業
+第 6 天營業
+第 7 天營業</code></pre>
+    <p><code>continue</code> 跳過這一圈剩下的內容，直接進入下一圈（會先做更新 <code>day++</code>）。第 3 天公休，所以「第 3 天營業」沒有印出來，但迴圈沒有結束，第 4 天照常。break 是「整個不做了」，continue 是「這次不做了」。</p>
+  </section>
+
+  <section aria-labelledby="nested">
+    <h2 id="nested">7. 巢狀迴圈</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 222" role="img" aria-label="3 排、每排 4 個座位。外層迴圈 row 從 1 到 3 往下走，每一排裡內層迴圈 seat 從 1 到 4 往右走，一共 12 次">
+        <title>外層一排一排，內層一個一個</title>
+        <path class="wire acc-ln" d="M140 26 H440"/>
+        <path class="tip acc-tip" d="M452 26 L439 19 L439 33 Z"/>
+        <text class="sm t-acc" x="290" y="16" text-anchor="middle">內層：seat 從 1 到 4</text>
+        <path class="wire hot-ln" d="M118 46 V184"/>
+        <path class="tip hot-tip" d="M118 196 L111 183 L125 183 Z"/>
+        <text class="sm mono t-hot" x="16" y="65">row=1</text>
+        <text class="sm mono t-hot" x="16" y="121">row=2</text>
+        <text class="sm mono t-hot" x="16" y="177">row=3</text>
+        <rect class="acc" x="140" y="40" width="70" height="40" rx="4"/>
+        <rect class="soft" x="220" y="40" width="70" height="40" rx="4"/>
+        <rect class="soft" x="300" y="40" width="70" height="40" rx="4"/>
+        <rect class="soft" x="380" y="40" width="70" height="40" rx="4"/>
+        <rect class="soft" x="140" y="96" width="70" height="40" rx="4"/>
+        <rect class="soft" x="220" y="96" width="70" height="40" rx="4"/>
+        <rect class="soft" x="300" y="96" width="70" height="40" rx="4"/>
+        <rect class="soft" x="380" y="96" width="70" height="40" rx="4"/>
+        <rect class="soft" x="140" y="152" width="70" height="40" rx="4"/>
+        <rect class="soft" x="220" y="152" width="70" height="40" rx="4"/>
+        <rect class="soft" x="300" y="152" width="70" height="40" rx="4"/>
+        <rect class="soft" x="380" y="152" width="70" height="40" rx="4"/>
+        <text class="small mono" x="175" y="65" text-anchor="middle">1-1</text>
+        <text class="small mono" x="255" y="65" text-anchor="middle">1-2</text>
+        <text class="small mono" x="335" y="65" text-anchor="middle">1-3</text>
+        <text class="small mono" x="415" y="65" text-anchor="middle">1-4</text>
+        <text class="small mono" x="175" y="121" text-anchor="middle">2-1</text>
+        <text class="small mono" x="255" y="121" text-anchor="middle">2-2</text>
+        <text class="small mono" x="335" y="121" text-anchor="middle">2-3</text>
+        <text class="small mono" x="415" y="121" text-anchor="middle">2-4</text>
+        <text class="small mono" x="175" y="177" text-anchor="middle">3-1</text>
+        <text class="small mono" x="255" y="177" text-anchor="middle">3-2</text>
+        <text class="small mono" x="335" y="177" text-anchor="middle">3-3</text>
+        <text class="small mono" x="415" y="177" text-anchor="middle">3-4</text>
+        <text class="sm" x="295" y="214" text-anchor="middle">外層 3 圈 × 內層 4 圈 = 12 次</text>
+      </svg>
+      <figcaption>外層迴圈每走一圈，內層迴圈就從頭到尾完整跑一次。外層走到下一排時，內層又從 1 開始。</figcaption>
+    </figure>
+    <p>迴圈的大括號裡可以再放一個迴圈，叫做<strong>巢狀迴圈</strong>（nested loop）。處理「列和欄」「排和座位」這類二維的東西時一定會用到：</p>
+    <pre class="code" data-src="chapters/pre-3-decisions/loop.go#seats"><code>func seats() {
+	for row := 1; row &lt;= 3; row++ {
+		for seat := 1; seat &lt;= 4; seat++ {
+			if seat &gt; 1 {
+				fmt.Print(" ")
+			}
+			fmt.Print(row, "-", seat)
+		}
+		fmt.Println()
+	}
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/pre-3-decisions#Example_seats"><code>1-1 1-2 1-3 1-4
+2-1 2-2 2-3 2-4
+3-1 3-2 3-3 3-4</code></pre>
+    <p>外層的 row 是第幾排，內層的 seat 是第幾個座位。<code>fmt.Print</code> 和 Println 一樣會印出東西，但最後不換行，所以同一排的座位會印在同一行；內層迴圈結束後的 <code>fmt.Println()</code> 只負責換行。<code>if seat &gt; 1</code> 讓座位之間有空白，但第一個座位前面沒有。</p>
+    <p>內層迴圈的條件也可以用到外層的變數，畫出形狀：</p>
+    <pre class="code" data-src="chapters/pre-3-decisions/loop.go#triangle"><code>func triangle() {
+	for row := 1; row &lt;= 4; row++ {
+		for col := 1; col &lt;= row; col++ {
+			fmt.Print("*")
+		}
+		fmt.Println()
+	}
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/pre-3-decisions#Example_triangle"><code>*
+**
+***
+****</code></pre>
+    <p>內層的條件是 <code>col &lt;= row</code>：第 1 列印 1 顆、第 2 列印 2 顆，以此類推。巢狀迴圈的總圈數是相乘的，外層 1000 圈、內層 1000 圈就是一百萬次，資料多的時候要留意速度。練習 5 要畫一個靠右對齊的三角形。</p>
+  </section>
+
+  <section aria-labelledby="forever">
+    <h2 id="forever">8. 無窮迴圈</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 210" role="img" aria-label="條件 cups < 3 永遠成立，因為迴圈內容裡忘了 cups++。程式不斷回到條件，出口「倒好了」永遠到不了">
+        <title>停不下來的迴圈</title>
+        <path class="soft" d="M180 30 L270 70 L180 110 L90 70 Z"/>
+        <text class="small mono" x="180" y="75" text-anchor="middle">cups &lt; 3 ?</text>
+        <path class="wire" d="M270 70 H312"/>
+        <path class="tip" d="M322 70 L309 63 L309 77 Z"/>
+        <text class="sm" x="291" y="62" text-anchor="middle">是</text>
+        <text class="sm t-hot" x="392" y="40" text-anchor="middle">忘了 cups++</text>
+        <rect class="hot" x="324" y="50" width="136" height="40" rx="8"/>
+        <text class="small" x="392" y="75" text-anchor="middle">印「倒一杯」</text>
+        <path class="wire hot-ln" d="M392 90 V140 H180 V124"/>
+        <path class="tip hot-tip" d="M180 112 L173 125 L187 125 Z"/>
+        <text class="sm t-hot" x="286" y="160" text-anchor="middle">cups 還是 0，條件還是成立</text>
+        <path class="wire faint dash" d="M90 70 H40 V176"/>
+        <text class="sm" x="90" y="198" text-anchor="middle">倒好了：永遠到不了</text>
+      </svg>
+      <figcaption>迴圈裡沒有任何東西讓條件變成 false，程式就會在這個圈圈裡永遠繞下去。</figcaption>
+    </figure>
+    <p>條件永遠成立的迴圈叫<strong>無窮迴圈</strong>（infinite loop）。最常見的原因是忘了更新：</p>
+    <pre class="code" data-src="chapters/pre-3-decisions/forever/main.go#main"><code>func main() {
+	cups := 0
+	for cups &lt; 3 {
+		fmt.Println("倒一杯，目前有", cups, "杯")
+	}
+	fmt.Println("倒好了")
+}</code></pre>
+    <p>cups 一直是 0，<code>cups &lt; 3</code> 永遠成立，程式會不停地印同一行。這支程式放在獨立的資料夾裡，你可以自己執行看看。下面用 <code>head -3</code> 只看前三行（macOS、Linux 才有這個指令）：</p>
+    <pre class="shell"><code>go run ./chapters/pre-3-decisions/forever | head -3</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out"><code>倒一杯，目前有 0 杯
+倒一杯，目前有 0 杯
+倒一杯，目前有 0 杯</code></pre>
+    <p>直接執行的話，畫面會一直捲動停不下來。這時按 <strong>Ctrl-C</strong>（按住 Ctrl 再按 C），終端機就會強制停止程式。程式「卡住」、沒有反應、也沒有結束的時候，第一個要懷疑的就是無窮迴圈。</p>
+
+    <h3>另一種：條件永遠等不到</h3>
+    <pre class="code" data-src="chapters/pre-3-decisions/loop.go#neverTen"><code>func neverTen() {
+	rounds := 0
+	for n := 1; n != 10; n += 2 {
+		fmt.Print(n, " ")
+		rounds++
+		if rounds == 8 {
+			fmt.Println("… 已經跑了 8 圈，n 永遠不會剛好等於 10")
+			break
+		}
+	}
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/pre-3-decisions#Example_neverTen"><code>1 3 5 7 9 11 13 15 … 已經跑了 8 圈，n 永遠不會剛好等於 10</code></pre>
+    <p>這次有更新（<code>n += 2</code>），n 也一直在變，但 n 是 1、3、5、7、9、11……全是奇數，永遠不會<strong>剛好</strong>等於 10，<code>n != 10</code> 就永遠成立。為了不讓示範停不下來，這裡加了一個「跑到第 8 圈就 break」的保護。如果條件寫成 <code>n &lt; 10</code>，n 變成 11 時條件就不成立了。迴圈條件盡量用 <code>&lt;</code>、<code>&lt;=</code> 這種「越過就停」的比較，少用 <code>!=</code> 這種「剛好才停」的比較。</p>
+    <p>寫完迴圈之後，用這兩個問題檢查：</p>
+    <ul class="notes">
+      <li>條件裡用到的變數，每一圈都會改變嗎？</li>
+      <li>它是往「讓條件不成立」的方向改變嗎？例如條件是 <code>i &gt;= 1</code>，更新卻寫成 <code>i++</code>，i 就會越來越大，永遠不會小於 1。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="pitfalls">
+    <h2 id="pitfalls">常見錯誤</h2>
+    <h3 id="pit-order">1. else if 的順序寫反</h3>
+    <p>範圍大的條件放前面，範圍小的永遠輪不到（第 2 節）。從最嚴格的條件開始問。</p>
+
+    <h3 id="pit-boundary">2. 邊界差一</h3>
+    <p><code>&lt;</code> 和 <code>&lt;=</code> 只差一個符號，結果就多一圈或少一圈、多算一天或少算一天。寫完後用邊界上的值追蹤一次：剛好 60 分、剛好存到目標金額、只有一個數的範圍。練習 6、7 都是這類 bug。</p>
+
+    <h3 id="pit-reset">3. 累加器寫在迴圈裡面</h3>
+    <p>把 <code>total := 0</code> 放進 for 的大括號裡，每一圈都會重新建立一個 0，最後只剩最後一圈的值，而且迴圈結束後還用不到它。結果變數要寫在迴圈之前。</p>
+
+    <h3 id="pit-forever">4. 忘了更新，或更新方向相反</h3>
+    <p>條件永遠成立就停不下來（第 8 節）。按 Ctrl-C 停止，再檢查條件裡的變數有沒有朝正確的方向改變。</p>
+
+    <h3 id="pit-assign">5. 在條件裡把 == 寫成 =</h3>
+    <pre class="code bad" data-compile-error><code>package main
+
+import "fmt"
+
+func main() {
+	score := 60
+	if score = 60 {
+		fmt.Println("剛好及格")
+	}
+}</code></pre>
+    <p class="label">編譯錯誤</p>
+    <pre class="out err"><code>./main.go:7:11: syntax error: cannot use assignment score = 60 as value</code></pre>
+    <p>一個等號是指定，不是比較，不能當成條件。改成 <code>score == 60</code>。</p>
+
+    <h3 id="pit-else">6. 把 else 換到下一行</h3>
+    <pre class="code bad" data-compile-error><code>package main
+
+import "fmt"
+
+func main() {
+	score := 72
+	if score >= 60 {
+		fmt.Println("及格")
+	}
+	else {
+		fmt.Println("不及格")
+	}
+}</code></pre>
+    <p class="label">編譯錯誤</p>
+    <pre class="out err"><code>./main.go:10:2: syntax error: unexpected keyword else, expected }</code></pre>
+    <p>Go 會在 <code>}</code> 後面換行的地方自動當成一行結束，下一行的 else 就接不上了。要寫成 <code>} else {</code>。</p>
+  </section>
+
+  <section aria-labelledby="exercises">
+    <h2 id="exercises">練習</h2>
+    <p>題目在 <code>exercises/pre-3-decisions/exercises.go</code>，做法和前兩章一樣。</p>
+    <pre class="shell"><code>go test ./exercises/pre-3-decisions/                          <span class="c"># 跑全部練習</span>
+go test ./exercises/pre-3-decisions/ -run TestShippingFee     <span class="c"># 只跑一題</span>
+go test -tags solution ./exercises/pre-3-decisions/           <span class="c"># 跑參考解答</span></code></pre>
+    <ol class="exercises">
+      <li>
+        <h3><span class="level l1">入門</span>練習 1：運費</h3>
+        <p>會員免運；不是會員時，滿 499 元免運，否則 60 元。</p>
+        <pre class="code" data-src="exercises/pre-3-decisions/exercises.go#ShippingFee"><code>func ShippingFee(total int, member bool) int {
+	// TODO: 實作
+	return 0
+}</code></pre>
+        <p>測試：<code>TestShippingFee</code>。</p>
+        <details><summary>提示</summary><p>先畫決策樹。兩種免運的情況可以用 <code>||</code> 合成一個條件。在函式裡，<code>return</code> 會立刻交回結果並結束函式，所以 <code>if … { return 0 }</code> 後面直接寫 <code>return 60</code> 就好，不需要 else。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l1">入門</span>練習 2：奇數的和</h3>
+        <p>把 1 到 n 之間所有的奇數加起來。</p>
+        <pre class="code" data-src="exercises/pre-3-decisions/exercises.go#SumOdd"><code>func SumOdd(n int) int {
+	// TODO: 實作
+	return 0
+}</code></pre>
+        <p>測試：<code>TestSumOdd</code>。</p>
+        <details><summary>提示</summary><p>累加器加上 if：<code>i % 2 == 1</code> 時才加。另一個寫法是讓 i 從 1 開始、每圈 <code>i += 2</code>，就只會走過奇數。n 小於 1 時迴圈一圈都不會跑，total 自然是 0。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l2">進階</span>練習 3：幾位數</h3>
+        <p>數一數一個整數有幾位數。</p>
+        <pre class="code" data-src="exercises/pre-3-decisions/exercises.go#CountDigits"><code>func CountDigits(n int) int {
+	// TODO: 實作
+	return 0
+}</code></pre>
+        <p>測試：<code>TestCountDigits</code>。</p>
+        <details><summary>提示</summary><p>每除以 10，就少掉最後一位：2026、202、20、2。用只寫條件的 for，一邊除一邊數。小心 0：它是 1 位數，但「除到變成 0 為止」的寫法會數出 0 位。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l2">進階</span>練習 4：停車費</h3>
+        <p>前 30 分鐘免費，之後每 30 分鐘 20 元（不足 30 分鐘也算 30 分鐘），一次最多 200 元。</p>
+        <pre class="code" data-src="exercises/pre-3-decisions/exercises.go#ParkingFee"><code>func ParkingFee(minutes int) int {
+	// TODO: 實作
+	return 0
+}</code></pre>
+        <p>測試：<code>TestParkingFee</code>。</p>
+        <details><summary>提示</summary><p>分三步：先處理 30 分鐘以內；再算超過的分鐘數要收幾個 30 分鐘（「不足也算」就是無條件進位，可以用迴圈每次扣 30 來數，或用 <code>(超過的分鐘 + 29) / 30</code>）；最後如果超過 200 就改成 200。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l3">挑戰</span>練習 5：靠右的三角形</h3>
+        <p>畫出靠右對齊的星號三角形，結果是一個字串。</p>
+        <pre class="code" data-src="exercises/pre-3-decisions/exercises.go#RightTriangle"><code>func RightTriangle(n int) string {
+	// TODO: 實作
+	return ""
+}</code></pre>
+        <p>測試：<code>TestRightTriangle</code>。</p>
+        <details><summary>提示</summary><p>第 row 列（共 n 列）先有 <code>n - row</code> 個空白，再有 <code>row</code> 顆星。外層迴圈走每一列，裡面放兩個內層迴圈：一個加空白、一個加星號。用一個字串變數當累加器，<code>s += "*"</code> 把字接上去。換行 <code>"\n"</code> 加在每一列的前面（第一列除外），最後一列後面就不會多一個換行。</p></details>
+      </li>
+      <li>
+        <h3><span class="level fix">找錯</span>練習 6：區間的和</h3>
+        <p>從 from 加到 to，但總是少加了最後一個數。</p>
+        <pre class="code" data-src="exercises/pre-3-decisions/exercises.go#SumRange"><code>func SumRange(from, to int) int {
+	total := 0
+	for i := from; i &lt; to; i++ {
+		total += i
+	}
+	return total
+}</code></pre>
+        <p>測試：<code>TestSumRange</code>。</p>
+        <details><summary>提示</summary><p>用 SumRange(5, 5) 追蹤一次：i 從 5 開始，條件 <code>i &lt; to</code> 是 5 &lt; 5，一圈都沒跑。</p></details>
+      </li>
+      <li>
+        <h3><span class="level fix">找錯</span>練習 7：存錢要幾天</h3>
+        <p>剛好存到目標金額的那一天，程式卻多算了一天。</p>
+        <pre class="code" data-src="exercises/pre-3-decisions/exercises.go#DaysToSave"><code>func DaysToSave(target, daily int) int {
+	days := 0
+	total := 0
+	for total &lt;= target {
+		days++
+		total += daily
+	}
+	return days
+}</code></pre>
+        <p>測試：<code>TestDaysToSave</code>。</p>
+        <details><summary>提示</summary><p>用目標 100、每天 50 畫追蹤表：第 2 天結束時 total 是 100，這時條件 <code>total &lt;= target</code> 成立嗎？迴圈的條件應該是「還沒達到目標」。</p></details>
+      </li>
+    </ol>
+    <p><a href="https://github.com/xinqilin/GO-Playground/blob/main/exercises/pre-3-decisions/solution.go">參考解答</a>：先自己寫完再看。</p>
+  </section>
+
+  <section aria-labelledby="recap">
+    <h2 id="recap">重點回顧</h2>
+    <ul class="recap">
+      <li><code>if</code> 條件成立執行第一個大括號，否則執行 <code>else</code>；沒有 else 就直接往下走。</li>
+      <li><code>else if</code> 從上往下問，第一個成立的就決定結果，所以要從最嚴格的條件問起。</li>
+      <li>規則複雜時先畫決策樹，每片葉子和每個邊界都要測試。</li>
+      <li><code>for</code> 的三個要素：起點只做一次，每圈先檢查條件，內容執行完再更新。</li>
+      <li>累加器和計數器都在迴圈之前從 0 開始；累加器加上值，計數器在條件成立時加 1。</li>
+      <li>不知道要跑幾圈時，for 後面只寫條件。</li>
+      <li><code>break</code> 結束整個迴圈，<code>continue</code> 只跳過這一圈。</li>
+      <li>巢狀迴圈：外層每走一圈，內層就完整跑一次，總次數是相乘。</li>
+      <li>條件永遠成立就是無窮迴圈：檢查更新的方向，少用 <code>!=</code> 當條件，卡住時按 Ctrl-C。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="further">
+    <h2 id="further">延伸閱讀</h2>
+    <ul class="notes">
+      <li>Go 語言規格：<a href="https://go.dev/ref/spec#If_statements">If statements</a>、<a href="https://go.dev/ref/spec#For_statements">For statements</a>、<a href="https://go.dev/ref/spec#Break_statements">Break statements</a>、<a href="https://go.dev/ref/spec#Continue_statements">Continue statements</a>。</li>
+      <li>寫過其他語言、或讀完先修之後，<a href="03-control-flow.html">03 流程控制</a>會更深入地介紹 if、for、range、switch 和標籤。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="run">
+    <h2 id="run">動手跑</h2>
+    <p class="label">在手冊的資料夾（GO-Playground）裡</p>
+    <pre class="shell"><code>go run ./chapters/pre-3-decisions             <span class="c"># 執行本章所有示範</span>
+go run ./chapters/pre-3-decisions/forever     <span class="c"># 無窮迴圈，按 Ctrl-C 停止</span>
+go test ./chapters/pre-3-decisions            <span class="c"># 驗證頁面上的每一段輸出</span>
+go test ./exercises/pre-3-decisions/          <span class="c"># 做練習</span></code></pre>
+    <p><a href="https://github.com/xinqilin/GO-Playground/tree/main/chapters/pre-3-decisions">在 GitHub 看本章完整程式碼</a>，或看<a href="https://github.com/xinqilin/GO-Playground/tree/main/exercises/pre-3-decisions">練習題</a>。</p>
+  </section>
+</main>
+
+<nav class="pager" aria-label="章節導覽">
+  <a class="prev" href="pre-2-values.html">← 先修 2 值、變數與運算</a>
+  <a class="home" href="index.html">目錄</a>
+  <a class="next" href="00-hello.html">00 第一支程式 →</a>
+</nav>
+</body>
+</html>
