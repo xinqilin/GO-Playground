@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>channel｜Go 圖解手冊</title>
-<meta name="description" content="Go 的 channel：無緩衝與有緩衝的差別、close 與 range，以及用 channel 接成管線。">
+<meta name="description" content="Go 的 channel：無緩衝與有緩衝、用 channel 等待與通知、close 與 range、nil 與已關閉 channel 的行為、方向型別、管線、fan-out 與 fan-in、死結與 goroutine 洩漏，以及用 testing/synctest 抓洩漏，附可執行的練習題。">
 <link rel="stylesheet" href="assets/style.css">
 </head>
 <body>
@@ -13,110 +13,581 @@
   <span class="count">15 / 24</span>
 </header>
 
-<main class="page">
+<main class="page long">
   <header class="hero">
     <div class="num" aria-hidden="true">15</div>
     <p class="eyebrow">Part 3 · 並行 · 第 15 章</p>
     <h1>channel</h1>
-    <p class="analogy">channel 是 goroutine 之間的輸送帶：一邊放、一邊拿。</p>
+    <p class="analogy">channel 是廚房和櫃台之間的出餐口：廚房把便當放上去，櫃台從另一邊拿走。出餐口有多大、放滿了怎麼辦、什麼時候收攤，都是這一章的內容。</p>
   </header>
 
-  <section aria-labelledby="look">
-    <h2 id="look">看圖</h2>
-    <div class="figs">
-      <figure class="fig">
-        <svg viewBox="0 0 480 170" role="img" aria-label="無緩衝 channel 要送的人和收的人同時到場直接交手；有緩衝 channel 像有兩格的信箱，滿了才要等">
-          <title>無緩衝與有緩衝</title>
-          <path class="wire faint" d="M240 12 V160"/>
-          <text class="small mono" x="117" y="28" text-anchor="middle">make(chan int)</text>
-          <rect class="soft" x="20" y="76" width="60" height="40" rx="6"/>
-          <rect class="soft" x="154" y="76" width="60" height="40" rx="6"/>
-          <text x="50" y="102" text-anchor="middle">送</text>
-          <text x="184" y="102" text-anchor="middle">收</text>
-          <path class="wire" d="M80 96 H140"/>
-          <path class="tip" d="M152 96 L140 90 L140 102 Z"/>
-          <text class="sm" x="117" y="84" text-anchor="middle">直接交手</text>
-          <text class="small t-hot" x="117" y="148" text-anchor="middle">對方沒到，就停下來等</text>
+  <nav class="toc-inline" aria-labelledby="toc-title">
+    <p class="label" id="toc-title">本章內容</p>
+    <ol>
+      <li><a href="#goals">本章你會學到</a></li>
+      <li><a href="#unbuffered">送與收：無緩衝的 channel</a></li>
+      <li><a href="#buffered">有緩衝的 channel</a></li>
+      <li><a href="#close">close 與 range</a></li>
+      <li><a href="#direction">方向</a></li>
+      <li><a href="#pipeline">管線</a></li>
+      <li><a href="#fan">fan-out 與 fan-in</a></li>
+      <li><a href="#deadlock">死結與洩漏</a></li>
+      <li><a href="#pitfalls">常見錯誤</a></li>
+      <li><a href="#java">從 Java 來的你</a></li>
+      <li><a href="#exercises">練習</a></li>
+      <li><a href="#recap">重點回顧</a></li>
+      <li><a href="#further">延伸閱讀</a></li>
+    </ol>
+  </nav>
 
-          <text class="small mono" x="363" y="28" text-anchor="middle">make(chan int, 2)</text>
-          <rect class="soft" x="252" y="76" width="50" height="40" rx="6"/>
-          <text x="277" y="102" text-anchor="middle">送</text>
-          <path class="wire" d="M302 96 H312"/>
-          <path class="tip" d="M322 96 L312 90 L312 102 Z"/>
-          <rect class="acc" x="324" y="76" width="36" height="40"/>
-          <rect class="acc" x="360" y="76" width="36" height="40"/>
-          <text class="bold" x="342" y="102" text-anchor="middle">1</text>
-          <text class="bold" x="378" y="102" text-anchor="middle">2</text>
-          <path class="wire" d="M396 96 H408"/>
-          <path class="tip" d="M418 96 L408 90 L408 102 Z"/>
-          <rect class="soft" x="420" y="76" width="50" height="40" rx="6"/>
-          <text x="445" y="102" text-anchor="middle">收</text>
-          <text class="sm" x="360" y="66" text-anchor="middle">信箱</text>
-          <text class="small t-hot" x="363" y="148" text-anchor="middle">信箱滿了才要等</text>
-        </svg>
-        <figcaption>無緩衝的 channel，送的人和收的人要同時到場才能交接；有緩衝的像信箱，放得下就先放，滿了才要等。</figcaption>
-      </figure>
-
-      <figure class="fig">
-        <svg viewBox="0 0 480 196" role="img" aria-label="管線：produce 送出 1 到 4，square 算成 1、4、9、16，sum 加總得到 30；上游送完就 close，close 一路往下傳">
-          <title>用 channel 接成管線</title>
-          <rect class="acc" x="16" y="60" width="104" height="56" rx="8"/>
-          <rect class="acc" x="188" y="60" width="104" height="56" rx="8"/>
-          <rect class="acc" x="360" y="60" width="104" height="56" rx="8"/>
-          <text class="small mono" x="68" y="93" text-anchor="middle">produce</text>
-          <text class="small mono" x="240" y="93" text-anchor="middle">square</text>
-          <text class="small mono" x="412" y="93" text-anchor="middle">sum</text>
-          <rect class="soft" x="120" y="78" width="68" height="20"/>
-          <rect class="soft" x="292" y="78" width="68" height="20"/>
-          <path class="tip" d="M186 88 L176 82 L176 94 Z"/>
-          <path class="tip" d="M358 88 L348 82 L348 94 Z"/>
-          <text class="sm mono" x="154" y="70" text-anchor="middle">1 2 3 4</text>
-          <text class="sm mono" x="326" y="70" text-anchor="middle">1 4 9 16</text>
-          <text class="sm t-hot" x="154" y="128" text-anchor="middle">送完就 close</text>
-          <text class="sm t-hot" x="326" y="128" text-anchor="middle">close 往下傳</text>
-          <path class="wire" d="M412 116 V140"/>
-          <path class="tip" d="M412 150 L405 137 L419 137 Z"/>
-          <text class="bold t-acc" x="412" y="176" text-anchor="middle">30</text>
-        </svg>
-        <figcaption>每一站從上一個 channel 收、處理完送到下一個。上游送完就 close，下游的 range 收完就自動結束，close 一路往下傳。</figcaption>
-      </figure>
-    </div>
+  <section aria-labelledby="goals">
+    <h2 id="goals">本章你會學到</h2>
+    <ul class="notes">
+      <li>用 channel 在 goroutine 之間傳值，無緩衝和有緩衝的差別。</li>
+      <li>用 channel 等一個 goroutine 做完，以及為什麼收到之後一定看得到對方寫的東西。</li>
+      <li>close 與 range：誰負責 close、close 之後收會拿到什麼、哪些操作會 panic。</li>
+      <li>用方向型別 <code>chan&lt;-</code>、<code>&lt;-chan</code> 讓編譯器幫你檢查誰送誰收。</li>
+      <li>把 goroutine 用 channel 接成管線，以及 fan-out、fan-in。</li>
+      <li>死結和 goroutine 洩漏是怎麼發生的，以及用 <code>testing/synctest</code> 在測試裡抓洩漏。</li>
+    </ul>
+    <p>先備：<a href="14-goroutines.html">14 goroutine</a>，尤其是 <a href="14-goroutines.html#waitgroup">WaitGroup</a> 和 <a href="14-goroutines.html#panic">goroutine 洩漏</a>。</p>
   </section>
 
-  <section aria-labelledby="code">
-    <h2 id="code">最小範例</h2>
-    <pre class="code"><code>func produce(n int) &lt;-chan int {
-	out := make(chan int)
+  <section aria-labelledby="unbuffered">
+    <h2 id="unbuffered">1. 送與收：無緩衝的 channel</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 196" role="img" aria-label="無緩衝的 channel 是沒有檯面的出餐口：廚師要等到櫃台的人伸手來接，便當才算交出去；雙方在這一刻碰面，之後各自繼續">
+        <title>無緩衝：一手交一手</title>
+        <rect class="soft" x="16" y="56" width="140" height="80" rx="10"/>
+        <text class="small bold" x="86" y="88" text-anchor="middle">廚房 goroutine</text>
+        <text class="sm mono" x="86" y="114" text-anchor="middle">window &lt;- "排骨飯"</text>
+        <rect class="acc" x="324" y="56" width="140" height="80" rx="10"/>
+        <text class="small bold" x="394" y="88" text-anchor="middle">main</text>
+        <text class="sm mono" x="394" y="114" text-anchor="middle">&lt;-window</text>
+        <rect class="box" x="206" y="78" width="68" height="36" rx="6"/>
+        <text class="small" x="240" y="101" text-anchor="middle">便當</text>
+        <path class="wire acc-ln" d="M156 96 H200 M280 96 H318"/>
+        <path class="tip acc-tip" d="M326 96 L314 90 L314 102 Z"/>
+        <text class="sm" x="240" y="44" text-anchor="middle">沒有檯面：雙方都到了才交得出去</text>
+        <text class="sm" x="86" y="160" text-anchor="middle">對方沒來就一直等</text>
+        <text class="sm" x="394" y="160" text-anchor="middle">沒東西就一直等</text>
+      </svg>
+      <figcaption>無緩衝的 channel 沒有存放空間。送的一方會等到收的一方來拿，收的一方會等到有人送；交接的那一刻，雙方同步。</figcaption>
+    </figure>
+    <p><strong>channel</strong> 是一條有型別的管道：一個 goroutine 送值進去，另一個 goroutine 從另一端收。用 <code>make(chan T)</code> 建立，用 <code>&lt;-</code> 送和收：</p>
+    <ul class="notes">
+      <li><code>ch &lt;- v</code>：把 v 送進 ch。箭頭指向 channel。</li>
+      <li><code>v := &lt;-ch</code>：從 ch 收一個值。箭頭從 channel 指出來。</li>
+    </ul>
+    <pre class="code" data-src="chapters/15-channels/handoff.go#handoffDemo"><code>func handoffDemo() {
+	window := make(chan string)
 	go func() {
-		defer close(out) <span class="c">// 送完就關，range 才會結束</span>
-		for i := 1; i &lt;= n; i++ {
-			out &lt;- i
+		window &lt;- "排骨飯"
+		window &lt;- "雞腿飯"
+	}()
+	fmt.Println("拿到", &lt;-window)
+	fmt.Println("拿到", &lt;-window)
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/15-channels#Example_handoffDemo"><code>拿到 排骨飯
+拿到 雞腿飯</code></pre>
+    <p><code>make(chan string)</code> 建立的是<strong>無緩衝</strong>（unbuffered）的 channel，裡面沒有任何存放空間。廚房送出排骨飯時，如果 main 還沒來收，廚房就停在那一行等；main 收的時候，如果還沒有人送，main 也停著等。兩邊都到了，值才交出去，雙方再各自往下走。所以無緩衝的 channel 不只傳值，也是一個<strong>同步點</strong>。</p>
+    <p>利用這一點，channel 可以取代 WaitGroup，等一個 goroutine 做完：</p>
+    <pre class="code" data-src="chapters/15-channels/handoff.go#doneDemo"><code>func doneDemo() {
+	done := make(chan struct{})
+	var receipt string
+	go func() {
+		receipt = "排骨飯 x2，NT$170"
+		close(done)
+	}()
+	&lt;-done
+	fmt.Println(receipt)
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/15-channels#Example_doneDemo"><code>排骨飯 x2，NT$170</code></pre>
+    <ul class="notes">
+      <li><code>chan struct{}</code> 的元素型別是空的 struct，不佔記憶體，表示「這個 channel 只用來通知，不傳任何資料」。</li>
+      <li>goroutine 寫好 receipt 之後 close(done)；main 的 <code>&lt;-done</code> 一直等到 done 被 close 才返回（下一節會講 close）。</li>
+      <li>Go 的記憶體模型保證：close 之前寫的東西，在「因為 close 而返回的收」之後一定看得到。送也一樣：送之前寫的，收到之後看得到。所以 main 讀 receipt 是安全的，不是 data race。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="buffered">
+    <h2 id="buffered">2. 有緩衝的 channel</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 186" role="img" aria-label="有緩衝的 channel 是有三個格子的號碼牌架：先放的先拿；格子滿了再放就要等，空了再拿也要等">
+        <title>有緩衝：先放到架子上</title>
+        <rect class="box" x="140" y="60" width="200" height="56" rx="8"/>
+        <rect class="acc" x="150" y="68" width="56" height="40" rx="6"/>
+        <text class="small mono" x="178" y="94" text-anchor="middle">17</text>
+        <rect class="acc" x="212" y="68" width="56" height="40" rx="6"/>
+        <text class="small mono" x="240" y="94" text-anchor="middle">18</text>
+        <rect class="acc" x="274" y="68" width="56" height="40" rx="6"/>
+        <text class="small mono" x="302" y="94" text-anchor="middle">19</text>
+        <path class="wire" d="M376 88 H350"/>
+        <path class="tip" d="M342 88 L354 82 L354 94 Z"/>
+        <text class="sm" x="410" y="84" text-anchor="middle">送進來</text>
+        <text class="sm t-hot" x="410" y="104" text-anchor="middle">滿了就等</text>
+        <path class="wire" d="M140 88 H104"/>
+        <path class="tip" d="M94 88 L106 82 L106 94 Z"/>
+        <text class="sm" x="62" y="84" text-anchor="middle">先放的</text>
+        <text class="sm" x="62" y="104" text-anchor="middle">先拿走</text>
+        <text class="sm mono" x="240" y="146" text-anchor="middle">make(chan int, 3)</text>
+        <text class="sm" x="240" y="170" text-anchor="middle">len = 3，cap = 3</text>
+        <text class="sm" x="240" y="40" text-anchor="middle">空了再拿也要等</text>
+      </svg>
+      <figcaption>有緩衝的 channel 有固定數量的格子。還有空格就能直接放，不必等人來拿；滿了才要等。</figcaption>
+    </figure>
+    <p>make 的第二個參數是容量：<code>make(chan int, 3)</code> 是一個可以先放三個值的 channel，像一個有三格的號碼牌架：</p>
+    <pre class="code" data-src="chapters/15-channels/buffered.go#bufferDemo"><code>func bufferDemo() {
+	tickets := make(chan int, 3)
+	tickets &lt;- 17
+	tickets &lt;- 18
+	tickets &lt;- 19
+	fmt.Println(len(tickets), cap(tickets))
+
+	fmt.Println("叫號", &lt;-tickets)
+	tickets &lt;- 20
+	fmt.Println(len(tickets), cap(tickets))
+
+	fmt.Println("叫號", &lt;-tickets, &lt;-tickets, &lt;-tickets)
+	fmt.Println(len(tickets), cap(tickets))
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/15-channels#Example_bufferDemo"><code>3 3
+叫號 17
+3 3
+叫號 18 19 20
+0 3</code></pre>
+    <ul class="notes">
+      <li>連放三個都沒有卡住，因為還有空格。整個示範都在同一個 goroutine 裡，這在無緩衝的 channel 上是做不到的。</li>
+      <li>值是先進先出：先放的 17 先被拿走。</li>
+      <li><code>len(ch)</code> 是目前放了幾個，<code>cap(ch)</code> 是容量。無緩衝的 channel 兩個都是 0。</li>
+      <li>放滿了再送，送的一方就要等，等到有人拿走一個；空了再收，收的一方就要等。</li>
+    </ul>
+    <p>容量要多大？大部分時候用無緩衝就好，它的行為最好推理：送出去了，就代表對方已經收到。只有在你說得出理由時才加緩衝，例如「一共會有 n 個結果，讓 n 個 goroutine 都能放下結果就結束，不必等人來收」（練習 5），或是吸收短暫的流量高峰。把緩衝加大來「修好」卡住的程式，通常只是把問題延後（常見錯誤 6）。</p>
+    <p>不要用 len 來判斷「現在能不能收」：你檢查完到真的去收之間，別的 goroutine 可能已經把值拿走了。len 和 cap 只適合拿來觀察和除錯。</p>
+  </section>
+
+  <section aria-labelledby="close">
+    <h2 id="close">3. close 與 range</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 176" role="img" aria-label="送的一方送出三份訂單之後 close；range 收完三份，看到 channel 已經 close 而且空了，迴圈就結束">
+        <title>close 告訴收的一方：沒有了</title>
+        <rect class="soft" x="16" y="50" width="120" height="70" rx="10"/>
+        <text class="small bold" x="76" y="80" text-anchor="middle">送的一方</text>
+        <text class="sm mono" x="76" y="104" text-anchor="middle">defer close</text>
+        <rect class="box" x="160" y="68" width="48" height="34" rx="6"/>
+        <text class="sm" x="184" y="90" text-anchor="middle">排骨</text>
+        <rect class="box" x="214" y="68" width="48" height="34" rx="6"/>
+        <text class="sm" x="238" y="90" text-anchor="middle">雞腿</text>
+        <rect class="box" x="268" y="68" width="48" height="34" rx="6"/>
+        <text class="sm" x="292" y="90" text-anchor="middle">魚排</text>
+        <rect class="hot" x="322" y="68" width="22" height="34" rx="4"/>
+        <text class="sm t-hot" x="333" y="132" text-anchor="middle">close</text>
+        <path class="wire acc-ln" d="M350 85 H366"/>
+        <path class="tip acc-tip" d="M376 85 L364 79 L364 91 Z"/>
+        <rect class="acc" x="378" y="50" width="86" height="70" rx="10"/>
+        <text class="small bold" x="421" y="80" text-anchor="middle">range</text>
+        <text class="sm" x="421" y="104" text-anchor="middle">收完就結束</text>
+        <text class="sm" x="240" y="164" text-anchor="middle">close 之後，還沒收的照樣收得到；收完了，range 才結束</text>
+      </svg>
+      <figcaption>close 是送的一方給收的一方的訊號：「不會再有新的值了」。range 收完剩下的值之後自動結束。</figcaption>
+    </figure>
+    <p>收的一方怎麼知道沒有更多的值了？靠送的一方 <code>close(ch)</code>。<code>for v := range ch</code> 會一直收，直到 channel 被 close、而且裡面的值都收完：</p>
+    <pre class="code" data-src="chapters/15-channels/close.go#orders,rangeDemo"><code>func orders(items ...string) &lt;-chan string {
+	out := make(chan string)
+	go func() {
+		defer close(out)
+		for _, it := range items {
+			out &lt;- it
 		}
 	}()
 	return out
 }
 
-func main() {
-	for v := range produce(3) {
-		fmt.Println("收到", v)
+func rangeDemo() {
+	for o := range orders("排骨飯", "雞腿飯", "魚排飯") {
+		fmt.Println("出餐", o)
 	}
 }</code></pre>
     <p class="label">輸出</p>
-    <pre class="out"><code>收到 1
-收到 2
-收到 3</code></pre>
+    <pre class="out" data-example="chapters/15-channels#Example_rangeDemo"><code>出餐 排骨飯
+出餐 雞腿飯
+出餐 魚排飯</code></pre>
+    <p>orders 是很常見的寫法：函式裡建立 channel，開一個 goroutine 去送，把 channel 回傳給呼叫的人。goroutine 用 <code>defer close(out)</code>，送完就 close。如果忘了 close，range 會在收完三份之後永遠等下去（練習 6）。</p>
+    <p>不用 range 時，可以用和 map 一樣的 comma-ok 寫法，分辨「收到一個零值」和「channel 已經 close 了」：</p>
+    <pre class="code" data-src="chapters/15-channels/close.go#closedDemo"><code>func closedDemo() {
+	c := make(chan int, 2)
+	c &lt;- 17
+	c &lt;- 18
+	close(c)
+	for range 4 {
+		v, ok := &lt;-c
+		fmt.Println(v, ok)
+	}
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/15-channels#Example_closedDemo"><code>17 true
+18 true
+0 false
+0 false</code></pre>
+    <p>close 不會丟掉已經在緩衝裡的值，17 和 18 照樣收得到，ok 是 true。收完之後，每一次收都<strong>立刻</strong>返回零值和 false，不會卡住。這也是為什麼 close 可以當「廣播」用：所有在等這個 channel 的 goroutine 會同時被叫醒；而一次送出只會叫醒一個收的人。</p>
+    <p>close 有三條規則，違反了就 panic：</p>
+    <pre class="code" data-src="chapters/15-channels/close.go#try,closePanicDemo"><code>func try(f func()) {
+	defer func() {
+		fmt.Println("panic:", recover())
+	}()
+	f()
+}
+
+func closePanicDemo() {
+	c := make(chan int, 1)
+	close(c)
+	try(func() { c &lt;- 1 })
+	try(func() { close(c) })
+	var never chan int
+	try(func() { close(never) })
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/15-channels#Example_closePanicDemo"><code>panic: send on closed channel
+panic: close of closed channel
+panic: close of nil channel</code></pre>
+    <p>所以有一條簡單的規則：<strong>由送的一方 close，而且只 close 一次</strong>。收的一方不知道還有沒有人要送，它 close 了，送的一方一送就 panic。有好幾個送的 goroutine 時，誰都不該自己 close，要等全部送完再由一個人 close（第 6 節的 kitchen）。也不是每個 channel 都要 close：沒有人在 range 它、也沒有人在等「結束」的訊號時，不 close 也沒關係，channel 會跟其他值一樣被垃圾回收。</p>
+    <p>不同狀態的 channel，三種操作的結果整理如下：</p>
+    <div class="table-wrap">
+      <table class="vs">
+        <thead><tr><th scope="col">操作</th><th scope="col">nil channel</th><th scope="col">開著的 channel</th><th scope="col">已 close 的 channel</th></tr></thead>
+        <tbody>
+          <tr><th scope="row">送 <code>ch &lt;- v</code></th><td>永遠卡住</td><td>有人收、或還有空格時完成</td><td>panic</td></tr>
+          <tr><th scope="row">收 <code>&lt;-ch</code></th><td>永遠卡住</td><td>有值時完成</td><td>先收完剩下的值，之後立刻得到零值和 false</td></tr>
+          <tr><th scope="row"><code>close(ch)</code></th><td>panic</td><td>成功</td><td>panic</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <section class="deep" aria-labelledby="nil">
+      <p class="tag">深入：第一次讀可以先跳過</p>
+      <h3 id="nil">3.1 nil channel</h3>
+      <p>channel 的零值是 nil：<code>var ch chan int</code> 沒有 make，就是 nil channel。對它送或收都會永遠卡住，這通常是 bug，例如 struct 裡有一個 channel 欄位卻忘了在建構函式裡 make。</p>
+      <p>但「永遠卡住」也有用處：在下一章的 <a href="16-select.html">select</a> 裡，把某個 channel 變數設成 nil，就等於關掉那一個分支，select 再也不會選它。這是 select 常用的技巧。</p>
+    </section>
   </section>
 
-  <section aria-labelledby="notes">
-    <h2 id="notes">工程師筆記</h2>
+  <section aria-labelledby="direction">
+    <h2 id="direction">4. 方向</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 170" role="img" aria-label="同一個 channel 交給 announce 時型別是 chan<- int，只能送；交給 display 時型別是 <-chan int，只能收">
+        <title>同一個 channel，兩種視角</title>
+        <rect class="soft" x="16" y="50" width="140" height="64" rx="10"/>
+        <text class="small bold" x="86" y="78" text-anchor="middle">announce</text>
+        <text class="sm mono" x="86" y="100" text-anchor="middle">chan&lt;- int</text>
+        <rect class="acc" x="196" y="60" width="88" height="44" rx="8"/>
+        <text class="small mono" x="240" y="88" text-anchor="middle">chan int</text>
+        <rect class="soft" x="324" y="50" width="140" height="64" rx="10"/>
+        <text class="small bold" x="394" y="78" text-anchor="middle">display</text>
+        <text class="sm mono" x="394" y="100" text-anchor="middle">&lt;-chan int</text>
+        <path class="wire acc-ln" d="M156 82 H186 M284 82 H314"/>
+        <path class="tip acc-tip" d="M196 82 L184 76 L184 88 Z M324 82 L312 76 L312 88 Z"/>
+        <text class="sm" x="86" y="140" text-anchor="middle">只能送、可以 close</text>
+        <text class="sm" x="394" y="140" text-anchor="middle">只能收</text>
+        <text class="sm" x="240" y="36" text-anchor="middle">make 出來的是雙向的</text>
+      </svg>
+      <figcaption>雙向的 channel 傳給參數時，可以自動變成只能送或只能收的型別，反過來不行。</figcaption>
+    </figure>
+    <p>channel 型別可以加上方向：<code>chan&lt;- T</code> 只能送，<code>&lt;-chan T</code> 只能收。把函式參數或回傳值寫成有方向的型別，誰送誰收就寫在簽名裡，用錯了編譯器會擋：</p>
+    <pre class="code" data-src="chapters/15-channels/direction.go#announce,display,directionDemo"><code>func announce(nums []int, out chan&lt;- int) {
+	for _, n := range nums {
+		out &lt;- n
+	}
+	close(out)
+}
+
+func display(in &lt;-chan int) {
+	for n := range in {
+		fmt.Println("請", n, "號")
+	}
+}
+
+func directionDemo() {
+	ch := make(chan int)
+	go announce([]int{17, 18, 19}, ch)
+	display(ch)
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/15-channels#Example_directionDemo"><code>請 17 號
+請 18 號
+請 19 號</code></pre>
+    <p>main 裡 make 出來的 ch 是雙向的 <code>chan int</code>，傳給 announce 時自動轉成 <code>chan&lt;- int</code>，傳給 display 時自動轉成 <code>&lt;-chan int</code>。第 3 節的 orders 回傳 <code>&lt;-chan string</code> 也是一樣的道理：呼叫的人只能收，不能送，也不能 close，close 的責任留在 orders 裡面。</p>
+    <p>在只能送的 channel 上收、或 close 一個只能收的 channel，都是編譯錯誤：</p>
+    <pre class="code bad" data-compile-error><code>package main
+
+import "fmt"
+
+func announce(nums []int, out chan&lt;- int) {
+	for _, n := range nums {
+		out &lt;- n
+	}
+	fmt.Println("還有剩嗎？", &lt;-out)
+}
+
+func display(in &lt;-chan int) {
+	for n := range in {
+		fmt.Println("請", n, "號")
+	}
+	close(in)
+}
+
+func main() {
+	ch := make(chan int)
+	go announce([]int{17, 18, 19}, ch)
+	display(ch)
+}</code></pre>
+    <p class="label">編譯錯誤</p>
+    <pre class="out err"><code>./main.go:9:35: invalid operation: cannot receive from send-only channel chan&lt;- int out (variable of type chan&lt;- int)
+./main.go:16:8: invalid operation: cannot close receive-only channel in (variable of type &lt;-chan int)</code></pre>
+    <p>「只能收的一方不能 close」由編譯器強制，正好對上第 3 節「由送的一方 close」的規則。回傳 channel 的函式，回傳型別幾乎都應該寫成 <code>&lt;-chan T</code>。</p>
+  </section>
+
+  <section aria-labelledby="pipeline">
+    <h2 id="pipeline">5. 管線</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 170" role="img" aria-label="orders、cook、pack 三站各是一個 goroutine，用 channel 接起來；同一時間，pack 在裝第一份，cook 在做第二份">
+        <title>三站各自工作</title>
+        <rect class="soft" x="8" y="50" width="96" height="56" rx="8"/>
+        <text class="small mono" x="56" y="83" text-anchor="middle">orders</text>
+        <rect class="box" x="134" y="50" width="96" height="56" rx="8"/>
+        <text class="small mono" x="182" y="83" text-anchor="middle">cook</text>
+        <rect class="box" x="260" y="50" width="96" height="56" rx="8"/>
+        <text class="small mono" x="308" y="83" text-anchor="middle">pack</text>
+        <rect class="acc" x="386" y="50" width="86" height="56" rx="8"/>
+        <text class="small mono" x="429" y="83" text-anchor="middle">main</text>
+        <path class="wire" d="M104 78 H124 M230 78 H250 M356 78 H376"/>
+        <path class="tip" d="M134 78 L122 72 L122 84 Z M260 78 L248 72 L248 84 Z M386 78 L374 72 L374 84 Z"/>
+        <text class="sm" x="182" y="130" text-anchor="middle">正在做雞腿飯</text>
+        <text class="sm" x="308" y="130" text-anchor="middle">正在裝排骨飯</text>
+        <text class="sm" x="240" y="32" text-anchor="middle">每一站一個 goroutine，各自 close 自己的輸出</text>
+        <text class="sm" x="240" y="160" text-anchor="middle">close 從第一站一路傳到最後</text>
+      </svg>
+      <figcaption>管線的每一站從上一站收、處理、送到下一站。不同的站同時在處理不同的訂單。</figcaption>
+    </figure>
+    <p>每一站都是「收一個 channel、回傳一個 channel」的函式，就能一站接一站串起來：</p>
+    <pre class="code" data-src="chapters/15-channels/pipeline.go#cook,pack,pipelineDemo"><code>func cook(in &lt;-chan string) &lt;-chan string {
+	out := make(chan string)
+	go func() {
+		defer close(out)
+		for o := range in {
+			out &lt;- o + "（熱）"
+		}
+	}()
+	return out
+}
+
+func pack(in &lt;-chan string) &lt;-chan string {
+	out := make(chan string)
+	go func() {
+		defer close(out)
+		for m := range in {
+			out &lt;- "外帶袋[" + m + "]"
+		}
+	}()
+	return out
+}
+
+func pipelineDemo() {
+	for bag := range pack(cook(orders("排骨飯", "雞腿飯"))) {
+		fmt.Println(bag)
+	}
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/15-channels#Example_pipelineDemo"><code>外帶袋[排骨飯（熱）]
+外帶袋[雞腿飯（熱）]</code></pre>
     <ul class="notes">
-      <li>送到已關閉的 channel 會 panic，關閉已關閉的 channel 也會 panic。慣例是送的一方負責 close。</li>
-      <li>從已關閉的 channel 收，會先收完剩下的值，之後馬上拿到零值和 <code>ok == false</code>。</li>
-      <li>不是每個 channel 都要 close；只有收的一方需要知道「沒有了」（例如用 range 收）時才要關。</li>
-      <li>對 nil channel 送或收會永遠卡住。</li>
-      <li>所有 goroutine 都卡住時，runtime 會直接結束程式：<code>fatal error: all goroutines are asleep - deadlock!</code></li>
-      <li>參數寫成 <code>chan&lt;- T</code>（只能送）或 <code>&lt;-chan T</code>（只能收），編譯器會擋下方向用錯的程式碼。</li>
+      <li>每一站都用同一個形狀：建立自己的 out，開 goroutine，<code>for v := range in</code> 處理每個值，<code>defer close(out)</code>。</li>
+      <li>close 會一路往下傳：orders 送完 close，cook 的 range 結束，cook 也 close，pack 跟著結束，最後 main 的 range 結束。每一站只 close 自己的輸出，不碰別人的。</li>
+      <li>三站同時在跑：pack 在裝第一份排骨飯的時候，cook 已經在做第二份雞腿飯了。</li>
     </ul>
+    <p>這和 <a href="13-iterators.html#pipeline">13 章用疊代器串的管線</a>看起來很像，差別在於疊代器的管線全部在同一個 goroutine 裡，一次只做一件事；channel 的管線每一站是一個 goroutine，真的同時執行，但每傳一個值都要同步一次，成本比函式呼叫高得多。每一站做的是很快的計算時，用疊代器或一個普通的迴圈；某一站要等網路、等磁碟，或計算量大到值得分給好幾個核心時，channel 的管線才划得來。</p>
+  </section>
+
+  <section aria-labelledby="fan">
+    <h2 id="fan">6. fan-out 與 fan-in</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 210" role="img" aria-label="一個 orders channel 分給三位廚師同時搶單，三位廚師把做好的便當都送到同一個 out channel；另一個 goroutine 等三位都結束才 close out">
+        <title>分出去，再收回來</title>
+        <rect class="soft" x="12" y="84" width="90" height="44" rx="8"/>
+        <text class="small mono" x="57" y="111" text-anchor="middle">orders</text>
+        <rect class="box" x="186" y="20" width="100" height="40" rx="8"/>
+        <text class="small" x="236" y="45" text-anchor="middle">廚師 1</text>
+        <rect class="box" x="186" y="86" width="100" height="40" rx="8"/>
+        <text class="small" x="236" y="111" text-anchor="middle">廚師 2</text>
+        <rect class="box" x="186" y="152" width="100" height="40" rx="8"/>
+        <text class="small" x="236" y="177" text-anchor="middle">廚師 3</text>
+        <path class="wire" d="M102 106 H140 V40 H176 M140 106 H176 M140 106 V172 H176"/>
+        <path class="tip" d="M186 40 L174 34 L174 46 Z M186 106 L174 100 L174 112 Z M186 172 L174 166 L174 178 Z"/>
+        <path class="wire acc-ln" d="M286 40 H330 V106 H366 M286 106 H366 M286 172 H330 V106"/>
+        <path class="tip acc-tip" d="M376 106 L364 100 L364 112 Z"/>
+        <rect class="acc" x="378" y="84" width="90" height="44" rx="8"/>
+        <text class="small mono" x="423" y="111" text-anchor="middle">out</text>
+        <text class="sm" x="120" y="204" text-anchor="middle">fan-out：搶同一個</text>
+        <text class="sm" x="400" y="160" text-anchor="middle">fan-in：</text>
+        <text class="sm" x="400" y="180" text-anchor="middle">送到同一個</text>
+      </svg>
+      <figcaption>好幾個 goroutine 從同一個 channel 收，工作就分出去了；它們都送到同一個 channel，結果就收回來了。</figcaption>
+    </figure>
+    <p>某一站特別慢時，可以開好幾個 goroutine 一起做那一站：</p>
+    <ul class="notes">
+      <li><strong>fan-out</strong>：好幾個 goroutine 從同一個 channel 收。每個值只會被其中一個收走，工作自然就分攤了。</li>
+      <li><strong>fan-in</strong>：好幾個 goroutine 送到同一個 channel，讓下游只需要收一個地方。</li>
+    </ul>
+    <pre class="code" data-src="chapters/15-channels/pipeline.go#kitchen,fanDemo"><code>func kitchen(in &lt;-chan string, cooks int) &lt;-chan string {
+	out := make(chan string)
+	var wg sync.WaitGroup
+	for range cooks {
+		wg.Go(func() {
+			for o := range in {
+				out &lt;- o + "好了"
+			}
+		})
+	}
+	go func() {
+		wg.Wait()
+		close(out)
+	}()
+	return out
+}
+
+func fanDemo() {
+	var done []string
+	for m := range kitchen(orders("排骨飯", "雞腿飯", "魚排飯", "滷肉飯", "控肉飯"), 3) {
+		done = append(done, m)
+	}
+	slices.Sort(done)
+	fmt.Println(len(done), done)
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/15-channels#Example_fanDemo"><code>5 [排骨飯好了 控肉飯好了 滷肉飯好了 雞腿飯好了 魚排飯好了]</code></pre>
+    <p>難的是 out 要由誰、在什麼時候 close：</p>
+    <ul class="notes">
+      <li>不能讓每位廚師做完就 close：第一位 close 之後，第二位一送就 panic。</li>
+      <li>不能在 kitchen 裡 <code>wg.Wait()</code> 完才回傳：out 是無緩衝的，在有人收之前廚師全都卡在送出，Wait 永遠等不到，這就是死結。</li>
+      <li>所以另外開一個 goroutine，專門等所有廚師結束再 close。kitchen 馬上回傳 out，呼叫的人開始收，廚師才送得出去。</li>
+    </ul>
+    <p>哪位廚師做哪一份、哪一份先好，每次執行都不一樣，順序沒有保證。需要固定順序時，要嘛像這裡收完再排序，要嘛像 <a href="14-goroutines.html#results">14 章</a>那樣讓每個值帶著自己的索引，寫進對應的格子。限制同時有幾位廚師、讓整條管線可以中途取消，是「<a href="19-concurrency-patterns.html">並行模式</a>」那一章的主題。</p>
+  </section>
+
+  <section aria-labelledby="deadlock">
+    <h2 id="deadlock">7. 死結與洩漏</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 190" role="img" aria-label="左邊：main 送出時沒有任何人在收，所有 goroutine 都卡住，runtime 報告死結；右邊：收的一方提早離開，送的 goroutine 卡在送出，程式其他部分繼續跑，這個 goroutine 永遠不會結束">
+        <title>死結和洩漏</title>
+        <text class="small bold" x="110" y="24" text-anchor="middle">死結：所有人都卡住</text>
+        <rect class="hot" x="40" y="44" width="140" height="56" rx="10"/>
+        <text class="small" x="110" y="68" text-anchor="middle">main</text>
+        <text class="sm mono" x="110" y="90" text-anchor="middle">window &lt;- …</text>
+        <text class="sm" x="110" y="128" text-anchor="middle">沒有任何人會來收</text>
+        <text class="sm t-hot" x="110" y="152" text-anchor="middle">runtime：fatal error</text>
+        <path class="wire faint" d="M240 16 V176"/>
+        <text class="small bold" x="360" y="24" text-anchor="middle">洩漏：只有它卡住</text>
+        <rect class="soft" x="290" y="44" width="140" height="56" rx="10"/>
+        <text class="small" x="360" y="68" text-anchor="middle">main</text>
+        <text class="sm" x="360" y="90" text-anchor="middle">找到就走了</text>
+        <rect class="hot" x="290" y="116" width="140" height="44" rx="10"/>
+        <text class="sm mono" x="360" y="143" text-anchor="middle">out &lt;- 魚排飯</text>
+        <text class="sm t-hot" x="360" y="182" text-anchor="middle">程式照跑，它永遠不會結束</text>
+      </svg>
+      <figcaption>所有 goroutine 都卡住是死結，runtime 會直接讓程式結束；只有一部分卡住是洩漏，沒有任何訊息，記憶體越用越多。</figcaption>
+    </figure>
+    <p>channel 的兩大問題都來自同一件事：<strong>送的一方等不到收的一方</strong>，或反過來。最直接的情況是在同一個 goroutine 裡對無緩衝的 channel 送值：</p>
+    <pre class="code" data-src="chapters/15-channels/deadlock/main.go#main"><code>func main() {
+	window := make(chan string)
+	window &lt;- "排骨飯" // 沒有其他 goroutine 會來收：main 永遠卡在這一行
+	fmt.Println(&lt;-window)
+}</code></pre>
+    <p class="label">輸出（<code>go run ./chapters/15-channels/deadlock</code>，後面的 stack trace 省略）</p>
+    <pre class="out err"><code>fatal error: all goroutines are asleep - deadlock!
+
+goroutine 1 [chan send]:
+main.main()</code></pre>
+    <p>main 在送出那一行等人來收，可是程式裡沒有其他 goroutine，永遠不會有人來。runtime 發現<strong>所有</strong> goroutine 都卡住了，就以 fatal error 結束程式，訊息會告訴你卡在哪裡（<code>chan send</code>）。這不是 panic，recover 接不到。要注意 runtime 只在所有 goroutine 都卡住時才看得出來；伺服器程式裡總有其他 goroutine 在跑，同樣的錯誤只會讓那一部分安靜地停住。</p>
+    <p>比較隱蔽的是<strong>洩漏</strong>：收的一方提早不收了，送的一方就卡在下一次送出，永遠不會結束：</p>
+    <div class="compare">
+      <p class="label bad">錯：找到就 return，orders 裡的 goroutine 卡在送下一份</p>
+      <pre class="code bad" data-src="chapters/15-channels/leak.go#findLeaky"><code>func findLeaky(items []string, want string) int {
+	i := 0
+	for o := range orders(items...) {
+		if o == want {
+			return i
+		}
+		i++
+	}
+	return -1
+}</code></pre>
+      <p class="label good">對：return 之前由 defer 把剩下的收完，送的一方才能送完、close、結束</p>
+      <pre class="code good" data-src="chapters/15-channels/leak.go#find"><code>func find(items []string, want string) int {
+	ch := orders(items...)
+	defer func() {
+		for range ch {
+		}
+	}()
+	i := 0
+	for o := range ch {
+		if o == want {
+			return i
+		}
+		i++
+	}
+	return -1
+}</code></pre>
+    </div>
+    <p class="label">輸出（find）</p>
+    <pre class="out" data-example="chapters/15-channels#Example_findDemo"><code>1</code></pre>
+    <p>findLeaky 的回傳值完全正確，測試只看結果的話永遠抓不到這個 bug。Go 1.25 起，標準庫的 <code>testing/synctest</code> 可以在測試裡抓洩漏：<code>synctest.Test</code> 把測試放進一個「泡泡」，裡面開的 goroutine 都屬於這個泡泡；測試函式結束時，如果泡泡裡還有 goroutine 卡著、而且泡泡裡沒有人能叫醒它，測試就失敗：</p>
+    <pre class="code" data-src="chapters/15-channels/main_test.go#TestFindNoLeak"><code>func TestFindNoLeak(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		if got := find([]string{"排骨飯", "雞腿飯", "魚排飯"}, "雞腿飯"); got != 1 {
+			t.Errorf("find = %d, want 1", got)
+		}
+	})
+}</code></pre>
+    <p>這個測試對 find 會通過。把裡面的 find 換成 findLeaky 再跑一次，輸出如下（stack trace 省略）：</p>
+    <pre class="out err"><code>--- FAIL: TestFindNoLeak (0.00s)
+panic: deadlock: main bubble goroutine has exited but blocked goroutines remain [recovered, repanicked]
+…
+goroutine 38 [chan send (durable), synctest bubble 1]:
+github.com/xinqilin/GO-Playground/chapters/15-channels.orders.func1()</code></pre>
+    <p>訊息直接指出卡住的 goroutine 是 orders 裡開的那一個，停在 <code>chan send</code>。synctest 還能控制時間，寫有 time.Sleep 的測試也不必真的等，詳見「<a href="21-testing.html">測試</a>」那一章。</p>
+    <p>修好洩漏有三種方向：</p>
+    <ul class="notes">
+      <li><strong>收的一方收完</strong>：像 find 一樣把剩下的收掉。簡單，但送的一方產生剩下的值都白做了。</li>
+      <li><strong>讓送的一方不會卡住</strong>：已知一共會送幾個時，給 channel 足夠的緩衝，每個人都能放下就走（練習 5）。</li>
+      <li><strong>通知送的一方停下來</strong>：送的一方同時等「有人收」和「不用送了」兩件事，這要用下一章的 <a href="16-select.html">select</a>，或「<a href="18-context.html">context</a>」那一章的取消。</li>
+    </ul>
+    <p>另外，像 find 這種「在同一個流程裡一個一個看、可能提早停」的需求，其實用 <a href="13-iterators.html">疊代器</a>更合適：break 就會通知產生值的一方停下來，不需要額外的 goroutine。</p>
+  </section>
+
+  <section aria-labelledby="pitfalls">
+    <h2 id="pitfalls">常見錯誤</h2>
+    <h3 id="pit-no-receiver">1. 送了卻沒有人收</h3>
+    <p>在同一個 goroutine 裡對無緩衝的 channel 送值，或所有收的 goroutine 都已經結束，送的一方就永遠卡住（第 7 節）。送之前想清楚：誰會來收？</p>
+
+    <h3 id="pit-close-wrong">2. 收的一方 close，或 close 兩次</h3>
+    <p>送的一方一送就 panic，close 兩次也 panic（第 3 節）。規則：由送的一方 close，只 close 一次；好幾個送的 goroutine 時，等全部送完再由一個人 close。</p>
+
+    <h3 id="pit-forget-close">3. 忘了 close</h3>
+    <p>range 收完所有的值之後會永遠等下去。在送值的 goroutine 裡第一行就寫 <code>defer close(out)</code>。</p>
+
+    <h3 id="pit-leak">4. 不收了，送的 goroutine 就洩漏了</h3>
+    <p>提早 return、只要第一個結果，剩下的送出就沒有人收（第 7 節）。用 synctest 寫測試抓出來，再選一種修法。</p>
+
+    <h3 id="pit-nil">5. 忘了 make</h3>
+    <p><code>var ch chan int</code> 是 nil channel，送和收都永遠卡住，close 會 panic。struct 裡的 channel 欄位，要在建構函式裡 make。</p>
+
+    <h3 id="pit-bigger-buffer">6. 把緩衝加大來「修」卡住的程式</h3>
+    <p>容量 10 的時候卡住，改成 100 就不卡了，直到某天進來 101 個。先找出為什麼沒有人收，緩衝只在你說得出容量的理由時才用。</p>
+
+    <h3 id="pit-len">7. 用 len 判斷能不能收</h3>
+    <p>檢查和收之間，別的 goroutine 可能已經把值拿走了，收的時候還是會卡住。要「有就收、沒有就算了」，用下一章 select 的 default。</p>
   </section>
 
   <section aria-labelledby="java">
@@ -125,22 +596,128 @@ func main() {
       <table class="vs">
         <thead><tr><th scope="col">主題</th><th scope="col">Java</th><th scope="col">Go</th></tr></thead>
         <tbody>
-          <tr><th scope="row">執行緒間傳資料</th><td class="java"><code>BlockingQueue</code></td><td>channel</td></tr>
+          <tr><th scope="row">執行緒間傳資料</th><td class="java"><code>BlockingQueue</code></td><td>channel，是語言內建的型別和運算子</td></tr>
           <tr><th scope="row">沒有容量的交接</th><td class="java"><code>SynchronousQueue</code></td><td>無緩衝 channel</td></tr>
           <tr><th scope="row">有容量</th><td class="java"><code>ArrayBlockingQueue(n)</code></td><td><code>make(chan T, n)</code></td></tr>
-          <tr><th scope="row">結束訊號</th><td class="java">自己送一個特殊訊息（poison pill）</td><td><code>close(ch)</code>，<code>range</code> 自動結束</td></tr>
-          <tr><th scope="row">方向限制</th><td class="java">沒有</td><td><code>chan&lt;- T</code> 只能送、<code>&lt;-chan T</code> 只能收</td></tr>
+          <tr><th scope="row">結束訊號</th><td class="java">自己送一個特殊訊息（poison pill）</td><td><code>close(ch)</code>，range 自動結束；所有等待的人都會被叫醒</td></tr>
+          <tr><th scope="row">方向限制</th><td class="java">沒有，同一個佇列誰都能放能拿</td><td><code>chan&lt;- T</code> 只能送、<code>&lt;-chan T</code> 只能收，編譯時檢查</td></tr>
+          <tr><th scope="row">等一件事完成</th><td class="java"><code>CountDownLatch(1)</code>、<code>CompletableFuture</code></td><td><code>chan struct{}</code>，做完時 close</td></tr>
+          <tr><th scope="row">同時等好幾個佇列</th><td class="java">沒有直接對應的寫法</td><td><a href="16-select.html">select</a>（下一章）</td></tr>
         </tbody>
       </table>
     </div>
   </section>
 
+  <section aria-labelledby="exercises">
+    <h2 id="exercises">練習</h2>
+    <p>題目在 <code>exercises/15-channels/exercises.go</code>。回傳 channel 的題目，題目檔先回傳一個已經 close 的 channel，讓測試不會卡住；測試收 channel 時有一秒的逾時保護。</p>
+    <pre class="shell"><code>go test ./exercises/15-channels/                      <span class="c"># 跑全部練習</span>
+go test ./exercises/15-channels/ -run TestTickets     <span class="c"># 只跑一題</span>
+go test -race ./exercises/15-channels/                <span class="c"># 檢查 data race</span>
+go test -tags solution ./exercises/15-channels/       <span class="c"># 跑參考解答</span></code></pre>
+    <ol class="exercises">
+      <li>
+        <h3><span class="level l1">入門</span>練習 1：發號碼牌</h3>
+        <p>在另一個 goroutine 裡從 from 發到 to，發完就 close。</p>
+        <pre class="code" data-src="exercises/15-channels/exercises.go#Tickets"><code>func Tickets(from, to int) &lt;-chan int {
+	// TODO: 實作
+	return closed[int]()
+}</code></pre>
+        <p>測試：<code>TestTickets</code>。</p>
+        <details><summary>提示</summary><p>照第 3 節的 orders：make、開 goroutine、第一行 <code>defer close(out)</code>、迴圈送值，最後回傳 out。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l1">入門</span>練習 2：全部收下來</h3>
+        <p>收到 channel 被 close 為止，回傳收到的所有值。</p>
+        <pre class="code" data-src="exercises/15-channels/exercises.go#Collect"><code>func Collect[T any](ch &lt;-chan T) []T {
+	// TODO: 實作
+	return nil
+}</code></pre>
+        <p>測試：<code>TestCollect</code>。</p>
+        <details><summary>提示</summary><p>一個 range 迴圈，每收到一個就 append。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l2">進階</span>練習 3：管線的一站</h3>
+        <p>寫一個通用的管線站：收一個值、處理、往下送。</p>
+        <pre class="code" data-src="exercises/15-channels/exercises.go#Stage"><code>func Stage[T, U any](in &lt;-chan T, f func(T) U) &lt;-chan U {
+	// TODO: 實作
+	return closed[U]()
+}</code></pre>
+        <p>測試：<code>TestStage</code>。</p>
+        <details><summary>提示</summary><p>和第 5 節的 cook 一模一樣，只是處理的部分換成 f，型別換成型別參數。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l2">進階</span>練習 4：兩家分店的訂單匯到總店</h3>
+        <p>把好幾個 channel 的值匯到同一個 channel。</p>
+        <pre class="code" data-src="exercises/15-channels/exercises.go#FanIn"><code>func FanIn[T any](chs ...&lt;-chan T) &lt;-chan T {
+	// TODO: 實作
+	return closed[T]()
+}</code></pre>
+        <p>測試：<code>TestFanIn</code>。</p>
+        <details><summary>提示</summary><p>每個輸入一個 goroutine，把收到的值轉送到 out。什麼時候 close out？和第 6 節的 kitchen 一樣：另外一個 goroutine 等 WaitGroup，再 close。沒有輸入時，Wait 立刻返回，out 馬上被 close。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l3">挑戰</span>練習 5：哪家外送先接單</h3>
+        <p>同時問好幾家外送平台，用第一家成功的；全部失敗就把錯誤依序合起來。不可以留下卡住的 goroutine。</p>
+        <pre class="code" data-src="exercises/15-channels/exercises.go#FirstOK"><code>func FirstOK(tries ...func() (string, error)) (string, error) {
+	// TODO: 實作
+	return "", nil
+}</code></pre>
+        <p>測試用 synctest 的假時間決定誰先完成，並檢查洩漏。測試：<code>TestFirstOK</code>。</p>
+        <details><summary>提示</summary><p>結果 channel 的容量設成 <code>len(tries)</code>：FirstOK 拿到第一個成功就回傳，之後沒有人收，但每個 goroutine 都還放得下自己的結果，不會卡住（第 7 節）。送進 channel 的值要帶著索引，錯誤才能放回 <code>errs[i]</code>，最後 errors.Join。</p></details>
+      </li>
+      <li>
+        <h3><span class="level fix">找錯</span>練習 6：永遠等不到最後一份</h3>
+        <p>值都收得到，但 range 這個 channel 的人永遠等不到結束。</p>
+        <pre class="code" data-src="exercises/15-channels/exercises.go#Receipts"><code>func Receipts(amounts []int) &lt;-chan string {
+	out := make(chan string)
+	go func() {
+		for _, a := range amounts {
+			out &lt;- fmt.Sprintf("NT$%d", a)
+		}
+	}()
+	return out
+}</code></pre>
+        <p>測試：<code>TestReceipts</code>。</p>
+        <details><summary>提示</summary><p>常見錯誤 3。</p></details>
+      </li>
+    </ol>
+    <p><a href="https://github.com/xinqilin/GO-Playground/blob/main/exercises/15-channels/solution.go">參考解答</a>：先自己寫完再看。測試通過、而且 <code>-race</code> 沒有警告的寫法都是對的。</p>
+  </section>
+
+  <section aria-labelledby="recap">
+    <h2 id="recap">重點回顧</h2>
+    <ul class="recap">
+      <li><code>ch &lt;- v</code> 送、<code>&lt;-ch</code> 收；無緩衝的 channel 要雙方都到才交接，也是同步點。</li>
+      <li>送之前寫的東西，收到之後一定看得到；<code>chan struct{}</code> 加上 close 可以用來等一件事完成。</li>
+      <li><code>make(chan T, n)</code> 有 n 個格子，滿了送要等、空了收要等；沒有理由就用無緩衝。</li>
+      <li>由送的一方 close，只 close 一次；range 收完剩下的值就結束，comma-ok 可以分辨 close。</li>
+      <li>對已 close 的 channel 送、close 兩次、close nil channel 都會 panic；nil channel 的送收永遠卡住。</li>
+      <li>參數和回傳值寫成 <code>chan&lt;- T</code>、<code>&lt;-chan T</code>，讓編譯器檢查誰送誰收。</li>
+      <li>管線的每一站收一個 channel、回傳一個 channel，close 一路往下傳。</li>
+      <li>fan-out 讓好幾個 goroutine 搶同一個 channel；fan-in 時用 WaitGroup 等全部送完，再由另一個 goroutine close。</li>
+      <li>所有 goroutine 都卡住是死結；只有一部分卡住是洩漏，用 <code>testing/synctest</code> 在測試裡抓出來。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="further">
+    <h2 id="further">延伸閱讀</h2>
+    <ul class="notes">
+      <li>Go 語言規格：<a href="https://go.dev/ref/spec#Channel_types">Channel types</a>、<a href="https://go.dev/ref/spec#Send_statements">Send statements</a>、<a href="https://go.dev/ref/spec#Receive_operator">Receive operator</a>、<a href="https://go.dev/ref/spec#Close">Close</a>、<a href="https://go.dev/ref/spec#Length_and_capacity">Length and capacity</a>。</li>
+      <li><a href="https://go.dev/ref/mem#chan">The Go Memory Model：Channel communication</a>（送、收、close 保證了什麼）。</li>
+      <li>套件文件：<a href="https://pkg.go.dev/testing/synctest">testing/synctest</a>。</li>
+      <li>Go blog：<a href="https://go.dev/blog/pipelines">Go Concurrency Patterns: Pipelines and cancellation</a>、<a href="https://go.dev/blog/synctest">Testing concurrent code with testing/synctest</a>。</li>
+    </ul>
+  </section>
+
   <section aria-labelledby="run">
     <h2 id="run">動手跑</h2>
     <p class="label">在 repo 根目錄</p>
-    <pre class="shell"><code>go run ./chapters/15-channels
-go test -race ./chapters/15-channels</code></pre>
-    <p><a href="https://github.com/xinqilin/GO-Playground/tree/main/chapters/15-channels">在 GitHub 看完整程式碼</a></p>
+    <pre class="shell"><code>go run ./chapters/15-channels                 <span class="c"># 執行本章的示範</span>
+go run ./chapters/15-channels/deadlock        <span class="c"># 死結：fatal error</span>
+go test -race ./chapters/15-channels          <span class="c"># 驗證頁面上的每一段輸出和洩漏測試</span>
+go test ./exercises/15-channels/              <span class="c"># 做練習</span></code></pre>
+    <p><a href="https://github.com/xinqilin/GO-Playground/tree/main/chapters/15-channels">在 GitHub 看本章完整程式碼</a>，或看<a href="https://github.com/xinqilin/GO-Playground/tree/main/exercises/15-channels">練習題</a>。</p>
   </section>
 </main>
 
