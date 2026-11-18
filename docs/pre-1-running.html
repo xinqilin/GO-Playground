@@ -207,7 +207,7 @@
     <pre class="out" data-example="chapters/pre-1-running#Example_cookRice"><code>1. 量米
 2. 洗米
 3. 按下煮飯鍵</code></pre>
-    <p>這聽起來理所當然，卻是寫程式最重要的觀念之一：<strong>電腦不會自己調整順序</strong>。如果把「按下煮飯鍵」寫在「量米」前面，電腦就會先按鍵，鍋子裡什麼都沒有，它也不會覺得奇怪。先修 2 的「追蹤表」就是一行一行模擬電腦的做法，用來找出這類問題。練習 5 是一個順序寫錯的泡茶程式。</p>
+    <p>這聽起來理所當然，卻是寫程式最重要的觀念之一：<strong>電腦不會自己調整順序</strong>。如果把「按下煮飯鍵」寫在「量米」前面，電腦就會先按鍵，鍋子裡什麼都沒有，它也不會覺得奇怪。<a href="pre-2-values.html#trace">先修 2 的「追蹤表」</a>就是一行一行模擬電腦的做法，用來找出這類問題。練習 5 是一個順序寫錯的泡茶程式。</p>
 
     <h3>讓電腦算數學</h3>
     <pre class="code" data-src="chapters/pre-1-running/main.go#calculate"><code>func calculate() {
@@ -258,7 +258,7 @@ func main() {
         <tbody>
           <tr><th scope="row"><code>undefined: …</code></th><td>不認識這個名字</td><td>打錯字、大小寫錯、忘了 import</td></tr>
           <tr><th scope="row"><code>syntax error: …</code></th><td>文法錯誤，看不懂這一行</td><td>少了括號、引號、逗號</td></tr>
-          <tr><th scope="row"><code>declared and not used: …</code></th><td>宣告了卻沒用到</td><td>寫到一半的程式（先修 2）</td></tr>
+          <tr><th scope="row"><code>declared and not used: …</code></th><td>宣告了卻沒用到</td><td>寫到一半的程式（<a href="pre-2-values.html#variables">先修 2</a>）</td></tr>
           <tr><th scope="row"><code>newline in string</code></th><td>字串還沒結束就換行了</td><td>少了結尾的雙引號</td></tr>
         </tbody>
       </table>
@@ -485,7 +485,7 @@ go test ./exercises/pre-1-running/         <span class="c"># 做練習</span></c
 <nav class="pager" aria-label="章節導覽">
   <span></span>
   <a class="home" href="index.html">目錄</a>
-  <a class="next" href="00-hello.html">00 第一支程式 →</a>
+  <a class="next" href="pre-2-values.html">先修 2 值、變數與運算 →</a>
 </nav>
 </body>
 </html>
