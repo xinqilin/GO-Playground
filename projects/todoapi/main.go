@@ -2,7 +2,7 @@
 //
 // 只用標準庫做出一個可以上線的小服務：路由、JSON、驗證、log、panic 防護，以及優雅關機。
 // 用到：struct 與 interface（第 09、10 章）、錯誤處理（第 11 章）、Mutex（第 17 章）、
-// context（第 18 章）、測試（第 21 章）、net/http（第 23 章）。
+// context（第 18 章）、測試（第 30 章）、net/http（第 26 章）。
 //
 // 執行：go run ./projects/todoapi，按 Ctrl-C 會等進行中的請求做完才結束。
 package main

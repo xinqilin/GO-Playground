@@ -1,10 +1,10 @@
-// 第 24 章：工具鏈。
+// 第 32 章：工具鏈。
 //
 // go 指令是一整套工具：格式化、檢查、文件、測試、交叉編譯、效能分析都在裡面。
-// 執行：go run ./chapters/24-toolchain
+// 執行：go run ./chapters/32-toolchain
 //
-//	go run -tags pro ./chapters/24-toolchain
-//	go build -ldflags "-X main.version=1.2.3" -o bin/app ./chapters/24-toolchain
+//	go run -tags pro ./chapters/32-toolchain
+//	go build -ldflags "-X main.version=1.2.3" -o bin/app ./chapters/32-toolchain
 package main
 
 import (

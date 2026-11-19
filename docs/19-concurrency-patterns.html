@@ -10,7 +10,7 @@
 <body>
 <header class="site">
   <a href="index.html">Go 圖解手冊</a>
-  <span class="count">19 / 24</span>
+  <span class="count">19 / 33</span>
 </header>
 
 <main class="page long">
@@ -524,7 +524,7 @@ func groupDemo() {
       <li>Wait 先等所有工作結束，<strong>才</strong>回傳。即使有人失敗，也不會留下還在跑的 goroutine。Wait 最後也取消 ctx，釋放它的資源。</li>
       <li>工作一定要聽 ctx（這裡是 <code>&lt;-ctx.Done()</code>），否則取消了它也照樣做完，Wait 就得等它。</li>
     </ul>
-    <p>這個模式太常用了，Go 團隊維護的 <code>golang.org/x/sync/errgroup</code> 提供了幾乎一樣的 API：<code>errgroup.WithContext(ctx)</code> 回傳 Group 和 ctx，再用 <code>Go</code>、<code>Wait</code>；還多了 <code>SetLimit(n)</code> 限制同時的數量（練習 4 就是自己做出它）。它不在標準庫，要用 go get 加進專案（「<a href="20-packages-modules.html">package 與 module</a>」那一章）。這本手冊只用標準庫，所以自己寫，順便看清楚它裡面在做什麼。</p>
+    <p>這個模式太常用了，Go 團隊維護的 <code>golang.org/x/sync/errgroup</code> 提供了幾乎一樣的 API：<code>errgroup.WithContext(ctx)</code> 回傳 Group 和 ctx，再用 <code>Go</code>、<code>Wait</code>；還多了 <code>SetLimit(n)</code> 限制同時的數量（練習 4 就是自己做出它）。它不在標準庫，要用 go get 加進專案（「<a href="29-packages-modules.html">package 與 module</a>」那一章）。這本手冊只用標準庫，所以自己寫，順便看清楚它裡面在做什麼。</p>
   </section>
 
   <section aria-labelledby="rate">
@@ -833,7 +833,7 @@ go test -race ./exercises/19-concurrency-patterns/     <span class="c"># 做練�
 <nav class="pager" aria-label="章節導覽">
   <a class="prev" href="18-context.html">← 18 context</a>
   <a class="home" href="index.html">目錄</a>
-  <a class="next" href="20-packages-modules.html">20 package 與 module →</a>
+  <a class="next" href="22-stdlib.html">22 標準庫精選 →</a>
 </nav>
 </body>
 </html>

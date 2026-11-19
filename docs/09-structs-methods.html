@@ -10,7 +10,7 @@
 <body>
 <header class="site">
   <a href="index.html">Go 圖解手冊</a>
-  <span class="count">09 / 24</span>
+  <span class="count">09 / 33</span>
 </header>
 
 <main class="page long">
@@ -517,7 +517,7 @@ func zeroValueDemo() {
 1 true 1
 0 false</code></pre>
     <p>排隊叫號機的兩個計數都從 0 開始，正好就是 int 的零值，所以 <code>var q Queue</code> 宣告完就能用，不需要任何初始化。這是 Go 很推崇的設計：<code>bytes.Buffer</code>、<code>strings.Builder</code>、<code>sync.Mutex</code> 的零值都能直接用。設計型別時，先想想「零值代表什麼」，讓它是一個合理的初始狀態。</p>
-    <p>欄位用小寫開頭（<code>next</code>、<code>serving</code>），其他 package 就讀不到也改不到，只能透過 Take、Call 操作，叫號機的狀態不會被弄亂。大寫開頭才會被匯出，這條規則在<a href="20-packages-modules.html">package 與 module</a> 那一章會詳細說明。</p>
+    <p>欄位用小寫開頭（<code>next</code>、<code>serving</code>），其他 package 就讀不到也改不到，只能透過 Take、Call 操作，叫號機的狀態不會被弄亂。大寫開頭才會被匯出，這條規則在<a href="29-packages-modules.html">package 與 module</a> 那一章會詳細說明。</p>
     <p>欄位是 map 時，零值是 nil map，讀取沒問題，寫入會 panic（<a href="07-maps.html#pit-nil-write">07 章</a>）。讓零值也能用的技巧是第一次寫入時才建立：</p>
     <pre class="code" data-src="chapters/09-structs-methods/ctor.go#Tally,Tally.Add,Tally.Count,tallyDemo"><code>type Tally struct {
 	counts map[string]int

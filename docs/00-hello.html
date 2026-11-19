@@ -10,7 +10,7 @@
 <body>
 <header class="site">
   <a href="index.html">Go 圖解手冊</a>
-  <span class="count">00 / 24</span>
+  <span class="count">00 / 33</span>
 </header>
 
 <main class="page long">
@@ -143,7 +143,7 @@ go 1.27.4</code></pre>
       <li><code>module example.com/hello</code> 是 module 的路徑，也就是它的全名。別人要用你的程式碼時，import 的就是這個路徑開頭的名字。只在自己電腦上練習的話，名字隨便取都可以；要放上 GitHub 讓別人用的話，習慣寫成 <code>github.com/你的帳號/repo 名稱</code>。</li>
       <li><code>go 1.27.4</code> 表示這個 module 至少需要哪個版本的 Go。<code>go mod init</code> 會填入你目前用的版本。它也決定了語言的行為：例如第 <a href="03-control-flow.html">03 章</a>提到的「每一圈都是新的迴圈變數」，只在這一行寫 1.22 以上時才生效。</li>
     </ul>
-    <p>以後用到第三方套件時，go.mod 會多出 <code>require</code> 區塊，旁邊也會出現記錄檢查碼的 <code>go.sum</code>，<a href="20-packages-modules.html">package 與 module</a> 那一章會詳細介紹。現在只用標準庫，go.mod 就保持這兩行。</p>
+    <p>以後用到第三方套件時，go.mod 會多出 <code>require</code> 區塊，旁邊也會出現記錄檢查碼的 <code>go.sum</code>，<a href="29-packages-modules.html">package 與 module</a> 那一章會詳細介紹。現在只用標準庫，go.mod 就保持這兩行。</p>
   </section>
 
   <section aria-labelledby="anatomy">
@@ -303,7 +303,7 @@ go run main.go    <span class="c"># 只編譯 main.go 這一個檔案</span></co
     <ul class="notes">
       <li><strong>編譯很快</strong>：go 指令有 build cache，沒改過的 package 不會重新編譯，所以 <code>go run</code> 第二次之後幾乎是立刻執行。</li>
       <li><strong>產物是單一執行檔</strong>：在大多數情況下，Go 會把程式需要的東西全部打包進一個執行檔，目標機器不需要安裝 Go，也不需要額外的 runtime。部署就是把這個檔案複製過去。</li>
-      <li><strong>交叉編譯只要設兩個環境變數</strong>：在 Mac 上執行 <code>GOOS=linux GOARCH=amd64 go build</code>，就能產生 Linux 伺服器用的執行檔，<a href="24-toolchain.html">工具鏈</a>那一章會細講。</li>
+      <li><strong>交叉編譯只要設兩個環境變數</strong>：在 Mac 上執行 <code>GOOS=linux GOARCH=amd64 go build</code>，就能產生 Linux 伺服器用的執行檔，<a href="32-toolchain.html">工具鏈</a>那一章會細講。</li>
       <li><strong>路徑寫法</strong>：<code>.</code> 是目前資料夾，<code>./chapters/00-hello</code> 是相對路徑；<code>./...</code> 代表目前資料夾和底下所有子資料夾，例如 <code>go build ./...</code> 會檢查整個 repo 都能編譯。</li>
     </ul>
   </section>
@@ -500,7 +500,7 @@ FAIL</code></pre>
     <p>main.go 寫 <code>package main</code>，greet.go 卻寫了 <code>package hello</code>：</p>
     <p class="label">go run . 的輸出</p>
     <pre class="out err"><code>found packages hello (greet.go) and main (main.go) in …/mixed</code></pre>
-    <p>一個資料夾只能有一個 package，所有檔案的 package 名稱必須一致（測試檔的 <code>_test</code> 後綴是唯一的例外，<a href="21-testing.html">測試</a>那一章會介紹）。</p>
+    <p>一個資料夾只能有一個 package，所有檔案的 package 名稱必須一致（測試檔的 <code>_test</code> 後綴是唯一的例外，<a href="30-testing.html">測試</a>那一章會介紹）。</p>
 
     <h3>3. 用 go run main.go 漏掉其他檔案</h3>
     <p>package 拆成好幾個檔案之後，<code>go run main.go</code> 只會編譯 main.go，其他檔案定義的名字都會變成 undefined。改用 <code>go run .</code>，見第 4 節。</p>

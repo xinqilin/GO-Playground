@@ -20,26 +20,29 @@
     <p class="lede">每一章先用大圖把觀念講懂，再附上可以執行、有測試的程式碼，並對照 Java 的寫法。</p>
     <a class="start" href="00-hello.html">從第 00 章開始 →</a>
     <figure class="fig route">
-      <svg viewBox="0 0 480 110" role="img" aria-label="學習路線：開始 00，基礎 01 到 08，型別 09 到 13，並行 14 到 19，實務 20 到 24，最後是專題">
+      <svg viewBox="0 0 480 110" role="img" aria-label="學習路線：開始 00，基礎 01 到 08，型別 09 到 13，並行 14 到 19，標準庫 20 到 28，實務 29 到 33，最後是專題">
         <title>學習路線</title>
         <path class="wire faint" d="M30 40 H450"/>
         <circle class="acc" cx="30" cy="40" r="10"/>
-        <circle class="acc" cx="114" cy="40" r="10"/>
-        <circle class="acc" cx="198" cy="40" r="10"/>
-        <circle class="acc" cx="282" cy="40" r="10"/>
-        <circle class="acc" cx="366" cy="40" r="10"/>
+        <circle class="acc" cx="100" cy="40" r="10"/>
+        <circle class="acc" cx="170" cy="40" r="10"/>
+        <circle class="acc" cx="240" cy="40" r="10"/>
+        <circle class="acc" cx="310" cy="40" r="10"/>
+        <circle class="acc" cx="380" cy="40" r="10"/>
         <circle class="hot" cx="450" cy="40" r="12"/>
         <text class="small bold" x="30" y="76" text-anchor="middle">開始</text>
-        <text class="small bold" x="114" y="76" text-anchor="middle">基礎</text>
-        <text class="small bold" x="198" y="76" text-anchor="middle">型別</text>
-        <text class="small bold" x="282" y="76" text-anchor="middle">並行</text>
-        <text class="small bold" x="366" y="76" text-anchor="middle">實務</text>
+        <text class="small bold" x="100" y="76" text-anchor="middle">基礎</text>
+        <text class="small bold" x="170" y="76" text-anchor="middle">型別</text>
+        <text class="small bold" x="240" y="76" text-anchor="middle">並行</text>
+        <text class="small bold" x="310" y="76" text-anchor="middle">標準庫</text>
+        <text class="small bold" x="380" y="76" text-anchor="middle">實務</text>
         <text class="small bold t-hot" x="450" y="76" text-anchor="middle">專題</text>
         <text class="sm mono" x="30" y="98" text-anchor="middle">00</text>
-        <text class="sm mono" x="114" y="98" text-anchor="middle">01–08</text>
-        <text class="sm mono" x="198" y="98" text-anchor="middle">09–13</text>
-        <text class="sm mono" x="282" y="98" text-anchor="middle">14–19</text>
-        <text class="sm mono" x="366" y="98" text-anchor="middle">20–24</text>
+        <text class="sm mono" x="100" y="98" text-anchor="middle">01–08</text>
+        <text class="sm mono" x="170" y="98" text-anchor="middle">09–13</text>
+        <text class="sm mono" x="240" y="98" text-anchor="middle">14–19</text>
+        <text class="sm mono" x="310" y="98" text-anchor="middle">20–28</text>
+        <text class="sm mono" x="380" y="98" text-anchor="middle">29–33</text>
         <text class="sm mono" x="450" y="98" text-anchor="middle">P1–P4</text>
       </svg>
       <figcaption>照順序讀最順；每一章也都能單獨讀。</figcaption>
@@ -119,13 +122,20 @@
 
   <section aria-labelledby="p4">
     <p class="part-label">Part 4</p>
-    <h2 id="p4">工程實務</h2>
+    <h2 id="p4">標準庫實戰</h2>
     <ul class="toc">
-      <li><a href="20-packages-modules.html"><span class="n">20</span><span class="t">package 與 module</span><span class="d">匯出、internal、go.mod</span></a></li>
-      <li><a href="21-testing.html"><span class="n">21</span><span class="t">測試</span><span class="d">table-driven、benchmark、fuzz</span></a></li>
       <li><a href="22-stdlib.html"><span class="n">22</span><span class="t">標準庫精選</span><span class="d">time、json、slog、uuid</span></a></li>
-      <li><a href="23-http.html"><span class="n">23</span><span class="t">HTTP 服務</span><span class="d">路由、middleware、httptest</span></a></li>
-      <li><a href="24-toolchain.html"><span class="n">24</span><span class="t">工具鏈</span><span class="d">vet、fix、build tag、交叉編譯</span></a></li>
+      <li><a href="26-http.html"><span class="n">26</span><span class="t">HTTP 服務</span><span class="d">路由、middleware、httptest</span></a></li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="p5">
+    <p class="part-label">Part 5</p>
+    <h2 id="p5">工程實務</h2>
+    <ul class="toc">
+      <li><a href="29-packages-modules.html"><span class="n">29</span><span class="t">package 與 module</span><span class="d">匯出、internal、go.mod</span></a></li>
+      <li><a href="30-testing.html"><span class="n">30</span><span class="t">測試</span><span class="d">table-driven、benchmark、fuzz</span></a></li>
+      <li><a href="32-toolchain.html"><span class="n">32</span><span class="t">工具鏈</span><span class="d">vet、fix、build tag、交叉編譯</span></a></li>
     </ul>
   </section>
 

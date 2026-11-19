@@ -10,7 +10,7 @@
 <body>
 <header class="site">
   <a href="index.html">Go 圖解手冊</a>
-  <span class="count">17 / 24</span>
+  <span class="count">17 / 33</span>
 </header>
 
 <main class="page long">
@@ -350,7 +350,7 @@ func menuDemo() {
     <ul class="notes">
       <li>不能升級：拿著讀鎖時呼叫 Lock，會等所有讀的人離開，包括你自己，永遠等不到。也不能從寫鎖降級成讀鎖。</li>
       <li>不能重複拿讀鎖：有人在等寫鎖時，新的 RLock 會先等寫的人做完，避免寫的人一直等不到。所以同一個 goroutine 拿著讀鎖再 RLock 一次，可能和等待中的寫入卡成死結。</li>
-      <li>不一定比較快：RWMutex 本身要記的狀態比 Mutex 多。讀的區間很短、或寫入其實很頻繁時，換成 RWMutex 沒有好處。先用 Mutex，等 benchmark（「<a href="21-testing.html">測試</a>」那一章）證明鎖的競爭真的是瓶頸，再考慮換。</li>
+      <li>不一定比較快：RWMutex 本身要記的狀態比 Mutex 多。讀的區間很短、或寫入其實很頻繁時，換成 RWMutex 沒有好處。先用 Mutex，等 benchmark（「<a href="30-testing.html">測試</a>」那一章）證明鎖的競爭真的是瓶頸，再考慮換。</li>
     </ul>
   </section>
 

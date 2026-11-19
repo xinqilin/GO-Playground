@@ -67,15 +67,20 @@ go test -race -tags solution ./...          # 全部測試，練習題改用參�
 | 18 | context | [看圖](https://bill-lin.dev/GO-Playground/18-context.html) | [chapters/18-context](chapters/18-context) |
 | 19 | 並行模式 | [看圖](https://bill-lin.dev/GO-Playground/19-concurrency-patterns.html) | [chapters/19-concurrency-patterns](chapters/19-concurrency-patterns) |
 
-### Part 4 工程實務
+### Part 4 標準庫實戰
 
 | 章 | 主題 | 圖解 | 程式碼 |
 |---|---|---|---|
-| 20 | package 與 module | [看圖](https://bill-lin.dev/GO-Playground/20-packages-modules.html) | [chapters/20-packages-modules](chapters/20-packages-modules) |
-| 21 | 測試 | [看圖](https://bill-lin.dev/GO-Playground/21-testing.html) | [chapters/21-testing](chapters/21-testing) |
 | 22 | 標準庫精選 | [看圖](https://bill-lin.dev/GO-Playground/22-stdlib.html) | [chapters/22-stdlib](chapters/22-stdlib) |
-| 23 | HTTP 服務 | [看圖](https://bill-lin.dev/GO-Playground/23-http.html) | [chapters/23-http](chapters/23-http) |
-| 24 | 工具鏈 | [看圖](https://bill-lin.dev/GO-Playground/24-toolchain.html) | [chapters/24-toolchain](chapters/24-toolchain) |
+| 26 | HTTP 服務 | [看圖](https://bill-lin.dev/GO-Playground/26-http.html) | [chapters/26-http](chapters/26-http) |
+
+### Part 5 工程實務
+
+| 章 | 主題 | 圖解 | 程式碼 |
+|---|---|---|---|
+| 29 | package 與 module | [看圖](https://bill-lin.dev/GO-Playground/29-packages-modules.html) | [chapters/29-packages-modules](chapters/29-packages-modules) |
+| 30 | 測試 | [看圖](https://bill-lin.dev/GO-Playground/30-testing.html) | [chapters/30-testing](chapters/30-testing) |
+| 32 | 工具鏈 | [看圖](https://bill-lin.dev/GO-Playground/32-toolchain.html) | [chapters/32-toolchain](chapters/32-toolchain) |
 
 ### 專題
 

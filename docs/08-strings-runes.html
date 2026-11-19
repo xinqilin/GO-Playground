@@ -10,7 +10,7 @@
 <body>
 <header class="site">
   <a href="index.html">Go 圖解手冊</a>
-  <span class="count">08 / 24</span>
+  <span class="count">08 / 33</span>
 </header>
 
 <main class="page long">
@@ -510,7 +510,7 @@ func concatBuilder(parts []string) string {
 	}
 	return b.String()
 }</code></pre>
-    <p>每次 <code>s += p</code> 都要配置一個新字串，把目前為止的內容整個複製過去，串接 n 次的總複製量會隨 n 的平方成長。本章的測試檔有兩個 benchmark（<a href="21-testing.html">測試</a>那一章會正式介紹），各把 1,000 段「便當」串起來：</p>
+    <p>每次 <code>s += p</code> 都要配置一個新字串，把目前為止的內容整個複製過去，串接 n 次的總複製量會隨 n 的平方成長。本章的測試檔有兩個 benchmark（<a href="30-testing.html">測試</a>那一章會正式介紹），各把 1,000 段「便當」串起來：</p>
     <pre class="shell"><code>go test -run='^$' -bench=Concat -benchmem ./chapters/08-strings-runes</code></pre>
     <p class="label">輸出（節錄；數字依機器而不同）</p>
     <pre class="out"><code>BenchmarkConcatPlus-10       	    3402	    335814 ns/op	 3212610 B/op	     999 allocs/op

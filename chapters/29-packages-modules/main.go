@@ -1,15 +1,15 @@
-// 第 20 章：package 與 module。
+// 第 29 章：package 與 module。
 //
 // module 是一整個專案（一個 go.mod），package 是裡面的一個資料夾。
 // import 路徑 = module 路徑 + 資料夾路徑。
-// 執行：go run ./chapters/20-packages-modules
+// 執行：go run ./chapters/29-packages-modules
 package main
 
 import (
 	"fmt"
 
-	"github.com/xinqilin/GO-Playground/chapters/20-packages-modules/greet"
-	"github.com/xinqilin/GO-Playground/chapters/20-packages-modules/internal/counter"
+	"github.com/xinqilin/GO-Playground/chapters/29-packages-modules/greet"
+	"github.com/xinqilin/GO-Playground/chapters/29-packages-modules/internal/counter"
 )
 
 // init 在 main 之前自動執行，每個檔案可以有多個。適合做簡單的初始化，不要放太多邏輯。

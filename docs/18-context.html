@@ -10,7 +10,7 @@
 <body>
 <header class="site">
   <a href="index.html">Go 圖解手冊</a>
-  <span class="count">18 / 24</span>
+  <span class="count">18 / 33</span>
 </header>
 
 <main class="page long">
@@ -402,7 +402,7 @@ func tallyDemo() {
     <p class="label">輸出</p>
     <pre class="out" data-example="chapters/18-context#Example_tallyDemo"><code>12502500 &lt;nil&gt;
 0 context canceled</code></pre>
-    <p>不用每一圈都檢查：ctx.Err() 本身有成本，每一千筆看一次，取消之後最多多算一千筆，已經夠快了。第三種是<strong>呼叫別人</strong>：把 ctx 原封不動傳下去，或從它衍生一個加了期限的。標準庫裡會等待的 API 大多有收 ctx 的版本，例如 <code>http.NewRequestWithContext</code>、<code>(*sql.DB).QueryContext</code>；HTTP 伺服器的 handler 用 <code>r.Context()</code> 拿到這個請求的 ctx，客戶端斷線時它就會被取消（「<a href="23-http.html">HTTP 服務</a>」那一章）。</p>
+    <p>不用每一圈都檢查：ctx.Err() 本身有成本，每一千筆看一次，取消之後最多多算一千筆，已經夠快了。第三種是<strong>呼叫別人</strong>：把 ctx 原封不動傳下去，或從它衍生一個加了期限的。標準庫裡會等待的 API 大多有收 ctx 的版本，例如 <code>http.NewRequestWithContext</code>、<code>(*sql.DB).QueryContext</code>；HTTP 伺服器的 handler 用 <code>r.Context()</code> 拿到這個請求的 ctx，客戶端斷線時它就會被取消（「<a href="26-http.html">HTTP 服務</a>」那一章）。</p>
     <p>ctx 在 API 裡的慣例，<a href="https://pkg.go.dev/context">context 套件文件</a>寫得很清楚：</p>
     <ul class="notes">
       <li>ctx 是函式的<strong>第一個參數</strong>，名字叫 <code>ctx</code>：<code>func Deliver(ctx context.Context, o Order) error</code>。</li>

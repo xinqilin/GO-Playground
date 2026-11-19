@@ -1,4 +1,4 @@
-// Package textutil 是第 21 章用來寫測試的小套件。
+// Package textutil 是第 30 章用來寫測試的小套件。
 package textutil
 
 import "strings"

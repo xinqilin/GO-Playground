@@ -10,7 +10,7 @@
 <body>
 <header class="site">
   <a href="index.html">Go 圖解手冊</a>
-  <span class="count">10 / 24</span>
+  <span class="count">10 / 33</span>
 </header>
 
 <main class="page long">
@@ -545,7 +545,7 @@ true
           <tr><th scope="row"><code>io.Reader</code></th><td><code>Read(p []byte) (n int, err error)</code></td><td>bufio.Scanner、io.Copy、json.Decoder…</td></tr>
           <tr><th scope="row"><code>io.Writer</code></th><td><code>Write(p []byte) (n int, err error)</code></td><td>fmt.Fprintf、io.Copy、log…</td></tr>
           <tr><th scope="row"><code>sort.Interface</code></th><td><code>Len</code>、<code>Less</code>、<code>Swap</code></td><td>sort.Sort</td></tr>
-          <tr><th scope="row"><code>http.Handler</code></th><td><code>ServeHTTP(w, r)</code></td><td>HTTP 伺服器（<a href="23-http.html">HTTP 服務</a>那一章）</td></tr>
+          <tr><th scope="row"><code>http.Handler</code></th><td><code>ServeHTTP(w, r)</code></td><td>HTTP 伺服器（<a href="26-http.html">HTTP 服務</a>那一章）</td></tr>
         </tbody>
       </table>
     </div>
@@ -723,7 +723,7 @@ func TestRemindAll(t *testing.T) {
 		t.Errorf("收到 %q, want %q", r.msgs, want)
 	}
 }</code></pre>
-    <p>這是 Go 測試最常用的手法：<strong>依賴 interface，測試時換成假的實作</strong>。不需要任何 mock 框架，一個 struct 加一個方法就夠了（完整的測試技巧在<a href="21-testing.html">測試</a>那一章）。</p>
+    <p>這是 Go 測試最常用的手法：<strong>依賴 interface，測試時換成假的實作</strong>。不需要任何 mock 框架，一個 struct 加一個方法就夠了（完整的測試技巧在<a href="30-testing.html">測試</a>那一章）。</p>
     <p>注意 interface 由誰定義。在 Java，通常是提供功能的一方先寫好 interface，實作類別再宣告 implements。Go 是隱式實作，提供功能的一方不需要知道 interface 的存在，所以慣例反過來：<strong>使用的一方</strong>依照自己需要的方法定義 interface，提供的一方回傳具體的型別就好。常聽到的說法是「接受 interface，回傳 struct」。</p>
     <p>也因此，不要替每一個 struct 都先配一個 interface。等到真的有第二種實作，或者測試需要換成假的時候，再在使用的地方定義一個剛好夠用的 interface，這時候它的方法清單才會是對的。</p>
   </section>

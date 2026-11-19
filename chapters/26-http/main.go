@@ -1,7 +1,7 @@
-// 第 23 章：HTTP 服務。
+// 第 26 章：HTTP 服務。
 //
 // HTTP server 像一間餐廳：路由（mux）是帶位的服務生，handler 是廚師，middleware 是門口的登記簿。
-// 執行：go run ./chapters/23-http，再開另一個終端機用 curl 測試。
+// 執行：go run ./chapters/26-http，再開另一個終端機用 curl 測試。
 package main
 
 import (

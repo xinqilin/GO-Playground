@@ -10,7 +10,7 @@
 <body>
 <header class="site">
   <a href="index.html">Go 圖解手冊</a>
-  <span class="count">15 / 24</span>
+  <span class="count">15 / 33</span>
 </header>
 
 <main class="page long">
@@ -556,7 +556,7 @@ panic: deadlock: main bubble goroutine has exited but blocked goroutines remain 
 …
 goroutine 38 [chan send (durable), synctest bubble 1]:
 github.com/xinqilin/GO-Playground/chapters/15-channels.orders.func1()</code></pre>
-    <p>訊息直接指出卡住的 goroutine 是 orders 裡開的那一個，停在 <code>chan send</code>。synctest 還能控制時間，寫有 time.Sleep 的測試也不必真的等，詳見「<a href="21-testing.html">測試</a>」那一章。</p>
+    <p>訊息直接指出卡住的 goroutine 是 orders 裡開的那一個，停在 <code>chan send</code>。synctest 還能控制時間，寫有 time.Sleep 的測試也不必真的等，詳見「<a href="30-testing.html">測試</a>」那一章。</p>
     <p>修好洩漏有三種方向：</p>
     <ul class="notes">
       <li><strong>收的一方收完</strong>：像 find 一樣把剩下的收掉。簡單，但送的一方產生剩下的值都白做了。</li>
