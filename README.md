@@ -73,6 +73,7 @@ go test -race -tags solution ./...          # 全部測試，練習題改用參�
 |---|---|---|---|
 | 20 | 檔案與 I/O | [看圖](https://bill-lin.dev/GO-Playground/20-files.html) | [chapters/20-files](chapters/20-files) |
 | 21 | 命令列工具 | [看圖](https://bill-lin.dev/GO-Playground/21-cli.html) | [chapters/21-cli](chapters/21-cli) |
+| 22 | 時間 | [看圖](https://bill-lin.dev/GO-Playground/22-time.html) | [chapters/22-time](chapters/22-time) |
 | 22 | 標準庫精選 | [看圖](https://bill-lin.dev/GO-Playground/22-stdlib.html) | [chapters/22-stdlib](chapters/22-stdlib) |
 | 26 | HTTP 服務 | [看圖](https://bill-lin.dev/GO-Playground/26-http.html) | [chapters/26-http](chapters/26-http) |
 
