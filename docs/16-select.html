@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>select｜Go 圖解手冊</title>
-<meta name="description" content="Go 的 select：同時等多個 channel、用 time.After 做逾時、用 default 做非阻塞，以及用 nil channel 停用 case。">
+<meta name="description" content="Go 的 select：同時等好幾個 channel、隨機挑選、time.After 逾時與整段期限、Go 1.23 起的計時器、default 做不等待的收送、for-select 與 nil channel、用 done 叫送的一方停下來、讓某個分支優先，附用 synctest 假時間測試的練習題。">
 <link rel="stylesheet" href="assets/style.css">
 </head>
 <body>
@@ -13,100 +13,505 @@
   <span class="count">16 / 24</span>
 </header>
 
-<main class="page">
+<main class="page long">
   <header class="hero">
     <div class="num" aria-hidden="true">16</div>
     <p class="eyebrow">Part 3 · 並行 · 第 16 章</p>
     <h1>select</h1>
-    <p class="analogy">select 是同時盯著好幾個窗口的櫃檯：哪一個先有人，就先處理哪一個。</p>
+    <p class="analogy">select 是同時顧好幾個窗口的店員：內用、外帶、外送哪一邊先有人，就先處理哪一邊；等太久就去做別的，老闆說打烊就收工。</p>
   </header>
 
-  <section aria-labelledby="look">
-    <h2 id="look">看圖</h2>
-    <div class="figs">
-      <figure class="fig">
-        <svg viewBox="0 0 480 206" role="img" aria-label="select 同時等結果、計時器和取消訊號三個 channel；計時器先準備好，所以回傳逾時">
-          <title>select 同時盯好幾個 channel</title>
-          <rect class="soft" x="16" y="30" width="150" height="40" rx="6"/>
-          <rect class="hot" x="16" y="90" width="150" height="40" rx="6"/>
-          <rect class="soft" x="16" y="150" width="150" height="40" rx="6"/>
-          <text class="small mono" x="91" y="55" text-anchor="middle">&lt;-result</text>
-          <text class="small mono t-hot" x="91" y="115" text-anchor="middle">&lt;-time.After(1s)</text>
-          <text class="small mono" x="91" y="175" text-anchor="middle">&lt;-ctx.Done()</text>
-          <path class="wire" d="M166 50 H200 V170 H166 M166 110 H220"/>
-          <path class="tip" d="M232 110 L220 104 L220 116 Z"/>
-          <rect class="acc" x="232" y="78" width="100" height="64" rx="10"/>
-          <text class="mono bold" x="282" y="116" text-anchor="middle">select</text>
-          <path class="wire hot-ln" d="M332 110 H392"/>
-          <path class="tip hot-tip" d="M404 110 L392 104 L392 116 Z"/>
-          <text class="sm t-hot" x="368" y="96" text-anchor="middle">先到先處理</text>
-          <text class="bold t-hot" x="440" y="116" text-anchor="middle">逾時</text>
-        </svg>
-        <figcaption>select 同時盯著好幾個 channel，哪一個先準備好就處理哪一個；這裡是計時器先響，所以回傳逾時。</figcaption>
-      </figure>
+  <nav class="toc-inline" aria-labelledby="toc-title">
+    <p class="label" id="toc-title">本章內容</p>
+    <ol>
+      <li><a href="#goals">本章你會學到</a></li>
+      <li><a href="#select">同時等好幾個 channel</a></li>
+      <li><a href="#timeout">逾時</a></li>
+      <li><a href="#default">default：不等</a></li>
+      <li><a href="#loop">for-select 與 nil channel</a></li>
+      <li><a href="#done">叫送的一方停下來</a></li>
+      <li><a href="#priority">優先順序</a></li>
+      <li><a href="#pitfalls">常見錯誤</a></li>
+      <li><a href="#java">從 Java 來的你</a></li>
+      <li><a href="#exercises">練習</a></li>
+      <li><a href="#recap">重點回顧</a></li>
+      <li><a href="#further">延伸閱讀</a></li>
+    </ol>
+  </nav>
 
-      <figure class="fig">
-        <svg viewBox="0 0 480 180" role="img" aria-label="加了 default 的 select：channel 是空的就走 default，馬上離開；channel 裡有 5 就收到 5">
-          <title>default：不等就走</title>
-          <text class="sm mono" x="50" y="28" text-anchor="middle">ch</text>
-          <rect class="soft dash" x="20" y="36" width="60" height="40" rx="6"/>
-          <path class="wire" d="M80 56 H128"/>
-          <path class="tip" d="M138 56 L126 50 L126 62 Z"/>
-          <rect class="acc" x="140" y="36" width="100" height="40" rx="8"/>
-          <text class="small mono" x="190" y="61" text-anchor="middle">select</text>
-          <path class="wire hot-ln" d="M240 56 H298"/>
-          <path class="tip hot-tip" d="M310 56 L298 50 L298 62 Z"/>
-          <text class="small t-hot" x="316" y="61">default：現在沒有</text>
-
-          <text class="sm mono" x="50" y="108" text-anchor="middle">ch</text>
-          <rect class="acc" x="20" y="116" width="60" height="40" rx="6"/>
-          <text class="bold" x="50" y="142" text-anchor="middle">5</text>
-          <path class="wire" d="M80 136 H128"/>
-          <path class="tip" d="M138 136 L126 130 L126 142 Z"/>
-          <rect class="acc" x="140" y="116" width="100" height="40" rx="8"/>
-          <text class="small mono" x="190" y="141" text-anchor="middle">select</text>
-          <path class="wire acc-ln" d="M240 136 H298"/>
-          <path class="tip acc-tip" d="M310 136 L298 130 L298 142 Z"/>
-          <text class="small t-acc" x="316" y="141">case：收到 5</text>
-        </svg>
-        <figcaption>加了 <code>default</code>，select 就不會卡住：沒有東西可收時直接走 default。</figcaption>
-      </figure>
-    </div>
+  <section aria-labelledby="goals">
+    <h2 id="goals">本章你會學到</h2>
+    <ul class="notes">
+      <li>用 select 同時等好幾個 channel 的送或收，以及好幾個同時準備好時怎麼挑。</li>
+      <li>用 <code>time.After</code> 加上逾時，分清楚「每一次等待的逾時」和「整段工作的期限」。</li>
+      <li>用 default 做不等待的收和送。</li>
+      <li>用 for-select 持續處理好幾個 channel，並用 nil channel 關掉已經結束的那一邊。</li>
+      <li>用一個 done channel 叫送的一方停下來，這是 context 取消的基礎。</li>
+      <li>select 沒有優先順序時，怎麼讓急件先處理。</li>
+    </ul>
+    <p>先備：<a href="15-channels.html">15 channel</a>，尤其是 <a href="15-channels.html#close">close</a>、<a href="15-channels.html#nil">nil channel</a> 和 <a href="15-channels.html#deadlock">死結與洩漏</a>。</p>
   </section>
 
-  <section aria-labelledby="code">
-    <h2 id="code">最小範例</h2>
-    <pre class="code"><code>func main() {
-	slow := make(chan string) <span class="c">// 永遠不會有人送</span>
-	select {
-	case v := &lt;-slow:
-		fmt.Println(v)
-	case &lt;-time.After(50 * time.Millisecond):
-		fmt.Println("逾時")
-	}
+  <section aria-labelledby="select">
+    <h2 id="select">1. 同時等好幾個 channel</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 200" role="img" aria-label="店員面前有外帶和外送兩個窗口，select 同時盯著兩個；外送窗口有一張單，店員就處理外送單">
+        <title>select 同時盯著好幾個窗口</title>
+        <rect class="soft" x="24" y="30" width="150" height="50" rx="8"/>
+        <text class="small" x="99" y="52" text-anchor="middle">外帶窗口</text>
+        <text class="sm" x="99" y="70" text-anchor="middle">沒有人</text>
+        <rect class="acc" x="24" y="110" width="150" height="50" rx="8"/>
+        <text class="small" x="99" y="132" text-anchor="middle">外送窗口</text>
+        <text class="sm mono" x="99" y="150" text-anchor="middle">A-07</text>
+        <path class="wire faint dash" d="M174 55 H300"/>
+        <path class="wire acc-ln" d="M174 135 H230 V96 H290"/>
+        <path class="tip acc-tip" d="M300 96 L288 90 L288 102 Z"/>
+        <rect class="box" x="300" y="66" width="156" height="60" rx="10"/>
+        <text class="small bold" x="378" y="92" text-anchor="middle">select</text>
+        <text class="sm" x="378" y="114" text-anchor="middle">誰先有就處理誰</text>
+        <text class="sm" x="240" y="186" text-anchor="middle">兩邊都沒有：等；兩邊都有：隨機挑一個</text>
+      </svg>
+      <figcaption>select 一次等好幾個 channel 操作，哪一個先能進行，就執行那一個 case。</figcaption>
+    </figure>
+    <p>上一章的收和送，一次只能等一個 channel。<strong>select</strong> 長得像 switch，但每個 case 都是一個 channel 的送或收，它會等到其中一個能進行，然後只執行那一個：</p>
+    <pre class="code" data-src="chapters/16-select/select.go#readyDemo"><code>func readyDemo() {
+	pickup := make(chan string, 1)
+	delivery := make(chan string, 1)
+	delivery &lt;- "外送單 A-07"
 
-	ready := make(chan int, 1)
 	select {
-	case v := &lt;-ready:
-		fmt.Println(v)
-	default:
-		fmt.Println("現在沒有，先做別的")
+	case o := &lt;-pickup:
+		fmt.Println("外帶", o)
+	case o := &lt;-delivery:
+		fmt.Println("處理", o)
 	}
 }</code></pre>
     <p class="label">輸出</p>
-    <pre class="out"><code>逾時
-現在沒有，先做別的</code></pre>
+    <pre class="out" data-example="chapters/16-select#Example_readyDemo"><code>處理 外送單 A-07</code></pre>
+    <ul class="notes">
+      <li>case 可以是收（<code>v := &lt;-ch</code>、<code>v, ok := &lt;-ch</code>、<code>&lt;-ch</code>），也可以是送（<code>ch &lt;- v</code>）。</li>
+      <li>沒有任何一個能進行時，select 就等，直到有一個能進行為止。</li>
+      <li>只執行被選中的那一個 case，沒有被選中的 case 什麼都不會發生，那個 channel 上的值也不會被拿走。</li>
+      <li>沒有 case 的 <code>select {}</code> 會永遠等下去，偶爾用在「main 不要結束」的程式。</li>
+    </ul>
+    <p>和 switch 最大的不同：好幾個 case <strong>同時</strong>能進行時，select 不是挑最上面那個，而是<strong>隨機</strong>挑一個：</p>
+    <pre class="code" data-src="chapters/16-select/select.go#fairDemo"><code>func fairDemo() {
+	a := make(chan struct{})
+	b := make(chan struct{})
+	close(a)
+	close(b)
+
+	na, nb := 0, 0
+	for range 1000 {
+		select {
+		case &lt;-a:
+			na++
+		case &lt;-b:
+			nb++
+		}
+	}
+	fmt.Println(na &gt; 0, nb &gt; 0, na+nb)
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/16-select#Example_fairDemo"><code>true true 1000</code></pre>
+    <p>兩個已經 close 的 channel 每一次都收得到東西，跑一千次，兩邊都被選到過。規格規定的是「均勻的偽隨機」，所以不會有哪一邊永遠搶不到。這是刻意的設計，避免某一個 channel 一直很忙時，另一個永遠輪不到。反過來說，<strong>你不能靠 case 的順序決定優先順序</strong>，需要優先順序要另外寫（第 6 節）。</p>
   </section>
 
-  <section aria-labelledby="notes">
-    <h2 id="notes">工程師筆記</h2>
+  <section aria-labelledby="timeout">
+    <h2 id="timeout">2. 逾時</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 190" role="img" aria-label="select 同時等廚房的結果和一個計時器；誰先到就用誰：結果先到就拿到排骨飯，計時器先響就回報逾時">
+        <title>結果和計時器賽跑</title>
+        <rect class="soft" x="16" y="34" width="140" height="44" rx="8"/>
+        <text class="small" x="86" y="61" text-anchor="middle">廚房的結果</text>
+        <rect class="hot" x="16" y="112" width="140" height="44" rx="8"/>
+        <text class="small mono" x="86" y="139" text-anchor="middle">time.After</text>
+        <path class="wire" d="M156 56 H220 V84 H280"/>
+        <path class="wire hot-ln" d="M156 134 H220 V106 H280"/>
+        <path class="tip" d="M290 95 L278 89 L278 101 Z"/>
+        <rect class="box" x="290" y="64" width="174" height="62" rx="10"/>
+        <text class="small bold" x="377" y="90" text-anchor="middle">select</text>
+        <text class="sm" x="377" y="112" text-anchor="middle">先到的那一個贏</text>
+        <text class="sm" x="86" y="22" text-anchor="middle">先到：拿到 排骨飯</text>
+        <text class="sm t-hot" x="86" y="178" text-anchor="middle">先響：逾時</text>
+      </svg>
+      <figcaption>time.After 回傳一個時間到才收得到值的 channel，把它放進 select，就是逾時。</figcaption>
+    </figure>
+    <p><code>time.After(d)</code> 回傳一個 channel，過了 d 之後會收到一個值。把它和要等的 channel 放在同一個 select 裡，誰先到就用誰：</p>
+    <pre class="code" data-src="chapters/16-select/timeout.go#ready,never,waitFor,timeoutDemo"><code>func ready(v string) &lt;-chan string {
+	ch := make(chan string, 1)
+	ch &lt;- v
+	return ch
+}
+
+func never() &lt;-chan string {
+	return make(chan string)
+}
+
+func waitFor(ch &lt;-chan string, limit time.Duration) string {
+	select {
+	case v := &lt;-ch:
+		return "拿到 " + v
+	case &lt;-time.After(limit):
+		return "逾時"
+	}
+}
+
+func timeoutDemo() {
+	fmt.Println(waitFor(ready("排骨飯"), time.Second))
+	fmt.Println(waitFor(never(), 10*time.Millisecond))
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/16-select#Example_timeoutDemo"><code>拿到 排骨飯
+逾時</code></pre>
+    <p>ready 的 channel 一開始就有值，select 立刻拿到；never 的 channel 永遠不會有值，10 毫秒後計時器先到，回報逾時。真實的程式裡，結果通常來自另一個 goroutine。注意那個 goroutine 送結果用的 channel 要有一格緩衝：逾時之後就沒有人會收了，無緩衝的話，它會永遠卡在送出（<a href="15-channels.html#deadlock">15 章的洩漏</a>）。</p>
+    <p>逾時有兩種意思，寫法不一樣：</p>
     <ul class="notes">
-      <li>好幾個 case 同時準備好時，select 隨機挑一個，不是由上往下。</li>
-      <li><code>time.After</code> 每次呼叫都建一個新的計時器。Go 1.23 起沒人用的計時器會被回收，在迴圈裡用也不會洩漏；熱點迴圈改用 <code>time.NewTimer</code> 搭配 <code>Reset</code> 比較省。</li>
-      <li><code>default</code> 讓 select 不阻塞；但在迴圈裡只有 default 沒有任何等待，會變成空轉吃滿 CPU。</li>
-      <li>把 channel 變數設成 nil 可以停用某個 case：從 nil channel 收會永遠卡住，select 就不會選它。</li>
-      <li>需要等待時，通常同時盯著 <code>ctx.Done()</code>，上層取消時才能馬上離開（第 18 章）。</li>
+      <li><strong>每一次等待的逾時</strong>：每次等都最多等 d。像 waitFor 一樣，把 <code>time.After(d)</code> 直接寫在 select 裡，每次執行 select 都建立一個新的計時器。</li>
+      <li><strong>整段工作的期限</strong>：從開始算起，總共最多 d。計時器要在迴圈<strong>外面</strong>建立一次，迴圈裡的每一次 select 都等同一個計時器：</li>
     </ul>
+    <pre class="code" data-src="chapters/16-select/timeout.go#collectUntil,deadlineDemo"><code>func collectUntil(ch &lt;-chan string, limit time.Duration) []string {
+	var got []string
+	deadline := time.After(limit)
+	for {
+		select {
+		case v, ok := &lt;-ch:
+			if !ok {
+				return got
+			}
+			got = append(got, v)
+		case &lt;-deadline:
+			return got
+		}
+	}
+}
+
+func deadlineDemo() {
+	ch := make(chan string, 3)
+	ch &lt;- "排骨飯"
+	ch &lt;- "雞腿飯"
+	fmt.Println(collectUntil(ch, 20*time.Millisecond))
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/16-select#Example_deadlineDemo"><code>[排骨飯 雞腿飯]</code></pre>
+    <p>channel 裡的兩份收完之後，ch 沒有 close、也沒有新的值，select 只剩 deadline 能等，20 毫秒一到就回傳。如果把 <code>time.After(limit)</code> 寫進 select 裡，每收到一份就重新計時，只要來源一直有新的值進來，就永遠不會因為時間到而停下來（練習 7）。</p>
+    <p>和時間有關的行為，用真的時間測試又慢又不穩定。上一章用過的 <code>testing/synctest</code> 在泡泡裡提供<strong>假時間</strong>：time.Sleep、time.After 都不會真的等，只要泡泡裡所有的 goroutine 都在等，時間就直接跳到下一個計時器響的時刻，結果每次都一樣：</p>
+    <pre class="code" data-src="chapters/16-select/main_test.go#TestCollectUntilIsOverallDeadline"><code>func TestCollectUntilIsOverallDeadline(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ch := make(chan string, 10)
+		go func() {
+			for _, o := range []string{"a", "b", "c", "d", "e"} {
+				time.Sleep(time.Second)
+				ch &lt;- o
+			}
+			close(ch)
+		}()
+		start := time.Now()
+		got := collectUntil(ch, 3500*time.Millisecond)
+		if !slices.Equal(got, []string{"a", "b", "c"}) || time.Since(start) != 3500*time.Millisecond {
+			t.Errorf("collectUntil = %q，花了 %v；want [a b c]，3.5s", got, time.Since(start))
+		}
+		for range ch {
+		}
+	})
+}</code></pre>
+    <p>這個測試模擬「每秒來一份、期限 3.5 秒」，實際執行不到一毫秒，而且可以精確地檢查花了 3.5 秒。最後要把剩下的收完：測試函式一結束，泡泡裡的時間就停止前進，送的 goroutine 如果還在 Sleep，就永遠醒不來，synctest 會把它當成卡住的 goroutine，整個測試 panic。</p>
+
+    <section class="deep" aria-labelledby="timers">
+      <p class="tag">深入：第一次讀可以先跳過</p>
+      <h3 id="timers">2.1 time.After、Timer 與 Go 1.23</h3>
+      <p>Go 1.23 以前，用 time.After 建立、還沒響的計時器，要等到它響了才會被回收，所以在跑很多圈的迴圈裡用 time.After，會累積大量的計時器，官方文件當時建議改用 <code>time.NewTimer</code>，不用時呼叫 Stop。Go 1.23 起，沒有人再參考的計時器就算沒有 Stop 也會被回收，time.After 的文件改成「沒有理由在 time.After 夠用時改用 NewTimer」。這個新行為只在 go.mod 寫 go 1.23 以上時生效，舊文章裡的警告是寫給以前的版本看的。</p>
+      <p>需要重複使用同一個計時器時，用 <code>t := time.NewTimer(d)</code>，在 select 裡等 <code>t.C</code>，要重新計時就呼叫 <code>t.Reset(d)</code>。Go 1.23 起，Reset 之後保證不會從 t.C 收到舊的那次計時，以前必須先 Stop、再把 t.C 清空，現在不用了。每隔固定時間就要做一次事，用 <code>time.Ticker</code>；「時間」那一章會再細談。</p>
+    </section>
+  </section>
+
+  <section aria-labelledby="default">
+    <h2 id="default">3. default：不等</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 170" role="img" aria-label="select 加上 default：有 case 能進行就執行它；全部都不能進行時，不等待，直接走 default">
+        <title>沒有就走</title>
+        <rect class="box" x="170" y="20" width="140" height="48" rx="10"/>
+        <text class="small bold" x="240" y="50" text-anchor="middle">select</text>
+        <path class="wire acc-ln" d="M210 68 V100 H110 V112"/>
+        <path class="tip acc-tip" d="M110 122 L104 110 L116 110 Z"/>
+        <path class="wire" d="M270 68 V100 H370 V112"/>
+        <path class="tip" d="M370 122 L364 110 L376 110 Z"/>
+        <rect class="acc" x="30" y="122" width="160" height="40" rx="8"/>
+        <text class="small" x="110" y="147" text-anchor="middle">有值：收下來</text>
+        <rect class="soft" x="290" y="122" width="160" height="40" rx="8"/>
+        <text class="small" x="370" y="147" text-anchor="middle">default：馬上走</text>
+        <text class="sm" x="96" y="94" text-anchor="end">case 能進行</text>
+        <text class="sm" x="384" y="94">全部都不能</text>
+      </svg>
+      <figcaption>有 default 的 select 不會等：當下沒有任何 case 能進行，就執行 default。</figcaption>
+    </figure>
+    <p>select 加上 <code>default</code>，就變成「試一下」：當下有 case 能進行就執行它，一個都沒有就立刻走 default，完全不等。收和送都能這樣用：</p>
+    <pre class="code" data-src="chapters/16-select/nonblocking.go#tryReceive,tryReceiveDemo"><code>func tryReceive(ch &lt;-chan int) string {
+	select {
+	case v := &lt;-ch:
+		return fmt.Sprint("收到 ", v)
+	default:
+		return "現在沒有"
+	}
+}
+
+func tryReceiveDemo() {
+	ch := make(chan int, 1)
+	fmt.Println(tryReceive(ch))
+	ch &lt;- 17
+	fmt.Println(tryReceive(ch))
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/16-select#Example_tryReceiveDemo"><code>現在沒有
+收到 17</code></pre>
+    <p>不等待的送，常用在「做不到就算了」的事情上，例如寫紀錄、發通知，不能因為它們卡住主要的流程：</p>
+    <pre class="code" data-src="chapters/16-select/nonblocking.go#dropDemo"><code>func dropDemo() {
+	logs := make(chan string, 2)
+	dropped := 0
+	for _, o := range []string{"排骨飯", "雞腿飯", "魚排飯", "滷肉飯", "控肉飯"} {
+		select {
+		case logs &lt;- o:
+		default:
+			dropped++
+		}
+	}
+	fmt.Println(len(logs), dropped)
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/16-select#Example_dropDemo"><code>2 3</code></pre>
+    <p>logs 只有兩格，前兩份放得進去，後面三份遇到 channel 已滿，走 default 被丟掉，點餐流程一路都沒有停下來。丟掉是不是可以接受，要看業務需求；至少要像這裡一樣數一數丟了幾個，才看得出系統是不是忙不過來。</p>
+    <p>小心不要寫出「只有 default 和收」的 for-select 迴圈：沒有值的時候它每一圈都馬上走 default、再進下一圈，一顆 CPU 會被吃滿，什麼正事也沒做（常見錯誤 3）。要等就讓它等，不要加 default。</p>
+  </section>
+
+  <section aria-labelledby="loop">
+    <h2 id="loop">4. for-select 與 nil channel</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 196" role="img" aria-label="for-select 同時收內用和外帶兩個 channel；外帶先 close，把外帶變數設成 nil，那個 case 就關掉了；內用也 close 後設成 nil，兩個都是 nil 時迴圈結束">
+        <title>收完的那一邊設成 nil</title>
+        <rect class="soft" x="16" y="30" width="130" height="42" rx="8"/>
+        <text class="small" x="81" y="56" text-anchor="middle">內用</text>
+        <rect class="soft" x="16" y="104" width="130" height="42" rx="8"/>
+        <text class="small" x="81" y="130" text-anchor="middle">外帶</text>
+        <text class="sm t-hot" x="81" y="166" text-anchor="middle">close 了 → nil</text>
+        <path class="wire" d="M146 51 H220 V80 H272"/>
+        <path class="wire faint dash" d="M146 125 H220 V102 H272"/>
+        <text class="t-hot bold" x="200" y="131">×</text>
+        <path class="tip" d="M282 91 L270 85 L270 97 Z"/>
+        <rect class="box" x="282" y="56" width="182" height="70" rx="10"/>
+        <text class="small bold" x="373" y="84" text-anchor="middle">for-select</text>
+        <text class="sm" x="373" y="108" text-anchor="middle">兩個都是 nil 才結束</text>
+        <text class="sm" x="240" y="190" text-anchor="middle">nil channel 永遠收不到，select 不會再選它</text>
+      </svg>
+      <figcaption>已經 close 的 channel 每次都收得到零值，會一直被選到；設成 nil 之後，那個 case 就等於不存在。</figcaption>
+    </figure>
+    <p>把 select 放進 for 迴圈，就能持續處理好幾個 channel。難的是結束條件：兩個來源各自會 close，要兩邊都收完才結束：</p>
+    <pre class="code" data-src="chapters/16-select/loop.go#from,combine,loopDemo"><code>func from(items ...string) &lt;-chan string {
+	out := make(chan string)
+	go func() {
+		defer close(out)
+		for _, it := range items {
+			out &lt;- it
+		}
+	}()
+	return out
+}
+
+func combine(dineIn, takeout &lt;-chan string) []string {
+	var all []string
+	for dineIn != nil || takeout != nil {
+		select {
+		case o, ok := &lt;-dineIn:
+			if !ok {
+				dineIn = nil
+				continue
+			}
+			all = append(all, "內用 "+o)
+		case o, ok := &lt;-takeout:
+			if !ok {
+				takeout = nil
+				continue
+			}
+			all = append(all, "外帶 "+o)
+		}
+	}
+	return all
+}
+
+func loopDemo() {
+	all := combine(from("排骨飯", "雞腿飯"), from("魚排飯"))
+	slices.Sort(all)
+	for _, o := range all {
+		fmt.Println(o)
+	}
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/16-select#Example_loopDemo"><code>內用 排骨飯
+內用 雞腿飯
+外帶 魚排飯</code></pre>
+    <p>關鍵在 <code>dineIn = nil</code>。一個已經 close 的 channel，每次收都<strong>立刻</strong>回傳零值和 false（<a href="15-channels.html#close">15 章</a>），如果不處理，select 會一直選到它，迴圈原地空轉。把變數設成 nil 之後，nil channel 永遠收不到東西，那個 case 就再也不會被選中，select 只剩另一邊能等。兩邊都是 nil 時，for 的條件不成立，迴圈結束。</p>
+    <p>只改變數，不會影響 channel 本身：設成 nil 的是 combine 裡的區域變數，送的 goroutine 手上的 channel 沒有變。</p>
+  </section>
+
+  <section aria-labelledby="done">
+    <h2 id="done">5. 叫送的一方停下來</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 196" role="img" aria-label="送的 goroutine 每次送出時同時等兩件事：有人收，或 done 被 close；find 找到之後 close done，送的 goroutine 選到 done 就結束">
+        <title>送的時候也看一下 done</title>
+        <rect class="soft" x="16" y="40" width="180" height="110" rx="10"/>
+        <text class="small bold" x="106" y="66" text-anchor="middle">fromUntil 的 goroutine</text>
+        <text class="sm mono" x="106" y="94" text-anchor="middle">case out &lt;- it</text>
+        <text class="sm mono" x="106" y="122" text-anchor="middle">case &lt;-done: return</text>
+        <rect class="acc" x="300" y="40" width="164" height="110" rx="10"/>
+        <text class="small bold" x="382" y="66" text-anchor="middle">find</text>
+        <text class="sm" x="382" y="94" text-anchor="middle">找到雞腿飯</text>
+        <text class="sm mono" x="382" y="122" text-anchor="middle">close(done)</text>
+        <path class="wire hot-ln dash" d="M300 118 H206"/>
+        <path class="tip hot-tip" d="M196 118 L208 112 L208 124 Z"/>
+        <path class="wire" d="M196 90 H290"/>
+        <path class="tip" d="M300 90 L288 84 L288 96 Z"/>
+        <text class="sm" x="248" y="82" text-anchor="middle">值</text>
+        <text class="sm t-hot" x="248" y="140" text-anchor="middle">停</text>
+        <text class="sm" x="240" y="180" text-anchor="middle">close(done) 會叫醒所有在等 done 的 goroutine</text>
+      </svg>
+      <figcaption>送的一方不只等「有人收」，也同時等「不用送了」。收的一方 close(done)，送的一方就能結束。</figcaption>
+    </figure>
+    <p><a href="15-channels.html#deadlock">上一章的 find</a> 提早 return 時，只能把剩下的值收完，送的 goroutine 才能結束。有了 select，送的一方可以在每次送出時，同時等一個「不用送了」的訊號：</p>
+    <pre class="code" data-src="chapters/16-select/done.go#fromUntil,find,findDemo"><code>func fromUntil(done &lt;-chan struct{}, items ...string) &lt;-chan string {
+	out := make(chan string)
+	go func() {
+		defer close(out)
+		for _, it := range items {
+			select {
+			case out &lt;- it:
+			case &lt;-done:
+				return
+			}
+		}
+	}()
+	return out
+}
+
+func find(items []string, want string) int {
+	done := make(chan struct{})
+	defer close(done)
+	i := 0
+	for o := range fromUntil(done, items...) {
+		if o == want {
+			return i
+		}
+		i++
+	}
+	return -1
+}
+
+func findDemo() {
+	fmt.Println(find([]string{"排骨飯", "雞腿飯", "魚排飯", "滷肉飯"}, "雞腿飯"))
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/16-select#Example_findDemo"><code>1</code></pre>
+    <ul class="notes">
+      <li>fromUntil 的每一次送出都放在 select 裡：有人收就送出去；done 被 close 就直接 return，defer 再 close out。</li>
+      <li>find 用 <code>defer close(done)</code>，不管是找到提早 return，還是全部看完，都會通知送的一方。不再需要把剩下的值收完，送的一方也不會白白產生用不到的值。</li>
+      <li>done 用 close 而不是送一個值：close 會叫醒<strong>所有</strong>在等它的 goroutine，管線有好幾站時，一個 close 就能讓每一站都停下來。</li>
+    </ul>
+    <p>同樣用 synctest 證明沒有洩漏：</p>
+    <pre class="code" data-src="chapters/16-select/main_test.go#TestFindNoLeak"><code>func TestFindNoLeak(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		if got := find([]string{"排骨飯", "雞腿飯", "魚排飯"}, "排骨飯"); got != 0 {
+			t.Errorf("find = %d, want 0", got)
+		}
+		if got := find([]string{"排骨飯"}, "紅茶"); got != -1 {
+			t.Errorf("find(紅茶) = %d, want -1", got)
+		}
+	})
+}</code></pre>
+    <p>這個「傳一個 done channel 進去，select 等它」的模式非常常見，標準庫把它包成了 <code>context.Context</code>：<code>ctx.Done()</code> 回傳的就是這樣一個 channel，取消時被 close。下下一章「<a href="18-context.html">context</a>」會用它取代自己寫的 done，還多了逾時和取消原因。</p>
+  </section>
+
+  <section aria-labelledby="priority">
+    <h2 id="priority">6. 優先順序</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 190" role="img" aria-label="先用一個帶 default 的 select 只看急件，有就處理；沒有急件，才用第二個 select 同時等急件和普通單">
+        <title>先看急件，再一起等</title>
+        <rect class="hot" x="16" y="30" width="200" height="56" rx="10"/>
+        <text class="small bold" x="116" y="54" text-anchor="middle">第一個 select</text>
+        <text class="sm" x="116" y="74" text-anchor="middle">只看急件，沒有就 default</text>
+        <path class="wire" d="M116 86 V120"/>
+        <path class="tip" d="M116 130 L110 118 L122 118 Z"/>
+        <text class="sm" x="126" y="110">沒有急件</text>
+        <rect class="box" x="16" y="130" width="200" height="50" rx="10"/>
+        <text class="small bold" x="116" y="152" text-anchor="middle">第二個 select</text>
+        <text class="sm" x="116" y="170" text-anchor="middle">急件和普通單一起等</text>
+        <path class="wire hot-ln" d="M216 58 H290"/>
+        <path class="tip hot-tip" d="M300 58 L288 52 L288 64 Z"/>
+        <rect class="hot" x="300" y="38" width="164" height="40" rx="8"/>
+        <text class="small" x="382" y="63" text-anchor="middle">處理急件</text>
+        <path class="wire" d="M216 155 H290"/>
+        <path class="tip" d="M300 155 L288 149 L288 161 Z"/>
+        <rect class="soft" x="300" y="135" width="164" height="40" rx="8"/>
+        <text class="small" x="382" y="160" text-anchor="middle">誰先來處理誰</text>
+      </svg>
+      <figcaption>select 本身沒有優先順序。要讓急件先走，就先單獨檢查急件，沒有急件時再一起等。</figcaption>
+    </figure>
+    <p>第 1 節看過，好幾個 case 同時能進行時，select 隨機挑。急件和普通單都有時，急件有一半的機率被普通單插隊。要讓急件優先，就分成兩步：</p>
+    <pre class="code" data-src="chapters/16-select/priority.go#next,priorityDemo"><code>func next(urgent, normal &lt;-chan string) string {
+	select {
+	case o := &lt;-urgent:
+		return o
+	default:
+	}
+	select {
+	case o := &lt;-urgent:
+		return o
+	case o := &lt;-normal:
+		return o
+	}
+}
+
+func priorityDemo() {
+	urgent := make(chan string, 3)
+	normal := make(chan string, 3)
+	normal &lt;- "普通 1"
+	normal &lt;- "普通 2"
+	urgent &lt;- "急件 1"
+	urgent &lt;- "急件 2"
+
+	for range 4 {
+		fmt.Println(next(urgent, normal))
+	}
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/16-select#Example_priorityDemo"><code>急件 1
+急件 2
+普通 1
+普通 2</code></pre>
+    <ul class="notes">
+      <li>第一個 select 只有急件和 default：有急件就立刻拿走，沒有就走 default，不等。</li>
+      <li>第二個 select 才同時等兩邊。到了這裡，代表剛剛沒有急件，誰先來就處理誰。</li>
+      <li>普通單比急件早放進去，但前兩次拿到的都是急件。</li>
+    </ul>
+    <p>同樣的問題也出現在「停止訊號」上：工作 channel 一直有東西時，就算 done 已經被 close，select 每一圈仍有一半的機率選到工作，會多做幾份才停。通常這沒關係；如果停下來之後絕對不能再做任何事，就在每一圈開頭先用帶 default 的 select 檢查一次 done。這不是絕對的保證，只是把「還會多做幾份」減到最少，工作本身是否已經開始，還是要靠程式其他地方判斷。</p>
+  </section>
+
+  <section aria-labelledby="pitfalls">
+    <h2 id="pitfalls">常見錯誤</h2>
+    <h3 id="pit-order">1. 以為 select 由上往下挑</h3>
+    <p>好幾個 case 同時能進行時是隨機挑的（第 1 節）。需要優先順序，就用兩個 select（第 6 節）。</p>
+
+    <h3 id="pit-after-in-loop">2. 把整段期限的 time.After 寫在 for-select 裡</h3>
+    <p>每一圈都建立新的計時器，等於每收到一個值就重新計時；來源一直有值進來，就永遠不會逾時。整段的期限要在迴圈外面建立一次（第 2 節，練習 7）。</p>
+
+    <h3 id="pit-busy">3. for-select 只有 default 和收，原地空轉</h3>
+    <p>沒有值時每一圈都馬上走 default，CPU 被吃滿。拿掉 default 讓它等，或是讓 default 去做真正有意義的事。</p>
+
+    <h3 id="pit-closed-case">4. 已經 close 的 channel 還留在 select 裡</h3>
+    <p>它每次都收得到零值，會一直被選到。用 <code>v, ok := &lt;-ch</code> 檢查，ok 是 false 就把變數設成 nil（第 4 節）。</p>
+
+    <h3 id="pit-timeout-leak">5. 逾時之後，送結果的 goroutine 卡住</h3>
+    <p>select 因為逾時離開了，送結果的 goroutine 之後要送時，已經沒有人收。結果 channel 給一格緩衝，或讓它也 select 一個 done（第 2、5 節）。</p>
+
+    <h3 id="pit-break">6. 在 select 裡用 break 想跳出 for 迴圈</h3>
+    <p>select 裡的 break 只會跳出 select，和 <a href="03-control-flow.html#break-switch">switch 裡的 break</a> 一樣，外面的 for 會繼續跑。要離開迴圈就用 return，或在 for 前面加標籤，寫 <code>break loop</code>。</p>
   </section>
 
   <section aria-labelledby="java">
@@ -115,20 +520,159 @@
       <table class="vs">
         <thead><tr><th scope="col">主題</th><th scope="col">Java</th><th scope="col">Go</th></tr></thead>
         <tbody>
-          <tr><th scope="row">等多個來源</th><td class="java"><code>CompletableFuture.anyOf</code>、NIO <code>Selector</code></td><td><code>select</code></td></tr>
-          <tr><th scope="row">逾時</th><td class="java"><code>future.get(1, SECONDS)</code></td><td><code>case &lt;-time.After(time.Second)</code></td></tr>
-          <tr><th scope="row">不阻塞地取</th><td class="java"><code>queue.poll()</code></td><td><code>select</code> 加上 <code>default</code></td></tr>
+          <tr><th scope="row">等多個來源</th><td class="java"><code>CompletableFuture.anyOf</code>、NIO <code>Selector</code></td><td><code>select</code>，送和收都可以</td></tr>
+          <tr><th scope="row">逾時</th><td class="java"><code>future.get(1, SECONDS)</code>、<code>queue.poll(1, SECONDS)</code></td><td><code>case &lt;-time.After(time.Second)</code></td></tr>
+          <tr><th scope="row">不阻塞地取</th><td class="java"><code>queue.poll()</code></td><td>select 加上 default</td></tr>
+          <tr><th scope="row">不阻塞地放</th><td class="java"><code>queue.offer(x)</code> 回傳 false</td><td><code>case ch &lt;- x:</code> 加上 default</td></tr>
+          <tr><th scope="row">叫工作停下來</th><td class="java"><code>Future.cancel(true)</code>、<code>Thread.interrupt()</code></td><td>close 一個 done channel，或 context 的取消</td></tr>
+          <tr><th scope="row">優先順序</th><td class="java"><code>PriorityBlockingQueue</code></td><td>沒有內建，先用帶 default 的 select 看急件</td></tr>
+          <tr><th scope="row">測試計時</th><td class="java">注入 <code>Clock</code>、用假的排程器</td><td><code>testing/synctest</code> 的假時間</td></tr>
         </tbody>
       </table>
     </div>
   </section>
 
+  <section aria-labelledby="exercises">
+    <h2 id="exercises">練習</h2>
+    <p>題目在 <code>exercises/16-select/exercises.go</code>。和時間有關的題目，測試在 synctest 的泡泡裡執行，用的是假時間，一下子就跑完，而且結果固定。</p>
+    <pre class="shell"><code>go test ./exercises/16-select/                    <span class="c"># 跑全部練習</span>
+go test ./exercises/16-select/ -run TestTryTake  <span class="c"># 只跑一題</span>
+go test -race ./exercises/16-select/              <span class="c"># 檢查 data race</span>
+go test -tags solution ./exercises/16-select/     <span class="c"># 跑參考解答</span></code></pre>
+    <ol class="exercises">
+      <li>
+        <h3><span class="level l1">入門</span>練習 1：看一眼出餐口</h3>
+        <p>有就拿，沒有就算了，不可以等。</p>
+        <pre class="code" data-src="exercises/16-select/exercises.go#TryTake"><code>func TryTake[T any](ch &lt;-chan T) (T, bool) {
+	// TODO: 實作
+	var zero T
+	return zero, false
+}</code></pre>
+        <p>測試：<code>TestTryTake</code>。</p>
+        <details><summary>提示</summary><p>一個收的 case 加上 default（第 3 節）。收的時候用 <code>v, ok := &lt;-ch</code>，已經 close 的 channel 收到的 ok 是 false，直接回傳 v 和 ok 就對了。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l1">入門</span>練習 2：最多等五分鐘</h3>
+        <p>等 channel 的值，最多等 d。</p>
+        <pre class="code" data-src="exercises/16-select/exercises.go#Within"><code>func Within[T any](ch &lt;-chan T, d time.Duration) (T, bool) {
+	// TODO: 實作
+	var zero T
+	return zero, false
+}</code></pre>
+        <p>測試：<code>TestWithin</code>。</p>
+        <details><summary>提示</summary><p>和第 2 節的 waitFor 一樣，只是改成泛型，逾時的時候回傳零值：<code>var zero T</code>。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l2">進階</span>練習 3：服務鈴</h3>
+        <p>客人按幾次鈴都不會卡住，店員來看時只看到一個「有人按過」。</p>
+        <pre class="code" data-src="exercises/16-select/doc.go#Bell"><code>type Bell struct {
+	ch chan struct{}
+}</code></pre>
+        <pre class="code" data-src="exercises/16-select/exercises.go#NewBell,Bell.Ring,Bell.C"><code>func NewBell() *Bell {
+	// TODO: 實作
+	return &amp;Bell{}
+}
+
+func (b *Bell) Ring() {
+	// TODO: 實作
+}
+
+func (b *Bell) C() &lt;-chan struct{} {
+	return b.ch
+}</code></pre>
+        <p>測試：<code>TestBell</code>。</p>
+        <details><summary>提示</summary><p>channel 容量 1。Ring 用不等待的送：還有空格就放一個，已經有一個了就走 default（第 3 節的 dropDemo）。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l2">進階</span>練習 4：營業額減退款</h3>
+        <p>同時收營業額和退款兩個 channel，兩邊都收完才回傳。</p>
+        <pre class="code" data-src="exercises/16-select/exercises.go#Tally"><code>func Tally(sales, refunds &lt;-chan int) int {
+	// TODO: 實作
+	return 0
+}</code></pre>
+        <p>測試：<code>TestTally</code>。</p>
+        <details><summary>提示</summary><p>照第 4 節的 combine：for 的條件是「兩個不全是 nil」，收到 ok 為 false 就把那個變數設成 nil。傳進來就是 nil 的 channel，迴圈根本不會等它。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l3">挑戰</span>練習 5：叫號機</h3>
+        <p>一直往下叫號，直到被叫停；被叫停之後要收攤，不能留下卡住的 goroutine。</p>
+        <pre class="code" data-src="exercises/16-select/exercises.go#Counter"><code>func Counter(done &lt;-chan struct{}) &lt;-chan int {
+	// TODO: 實作
+	out := make(chan int)
+	close(out)
+	return out
+}</code></pre>
+        <p>測試：<code>TestCounter</code>。</p>
+        <details><summary>提示</summary><p>照第 5 節的 fromUntil，只是來源換成 <code>for n := 1; ; n++</code>。每次送都放在 select 裡，另一個 case 是 <code>&lt;-done</code>，選到就 return；第一行寫 <code>defer close(out)</code>。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l3">挑戰</span>練習 6：等客人點完再送單</h3>
+        <p>客人一直改單時先別送，連續 wait 沒有改動，才把最後的那一張送進廚房。</p>
+        <pre class="code" data-src="exercises/16-select/exercises.go#Debounce"><code>func Debounce[T any](in &lt;-chan T, wait time.Duration) &lt;-chan T {
+	// TODO: 實作
+	out := make(chan T)
+	close(out)
+	return out
+}</code></pre>
+        <p>測試：<code>TestDebounce</code>。</p>
+        <details><summary>提示</summary><p>在 goroutine 裡用 for-select 等兩件事：in 的新值，和一個計時 channel <code>fire</code>。fire 一開始是 nil（沒有等著送的值，這個 case 不會被選到，第 4 節）。收到新值就記下來，<code>fire = time.After(wait)</code> 重新計時；fire 響了就送出記下的值，再把 fire 設回 nil。in 被 close 時，fire 不是 nil 代表還有值沒送，先送出再 return。</p></details>
+      </li>
+      <li>
+        <h3><span class="level fix">找錯</span>練習 7：說好的期限呢</h3>
+        <p>來源每秒來一個值、期限 3.5 秒，結果它一直收到來源結束為止。</p>
+        <pre class="code" data-src="exercises/16-select/exercises.go#CollectFor"><code>func CollectFor[T any](ch &lt;-chan T, d time.Duration) []T {
+	var got []T
+	for {
+		select {
+		case v, ok := &lt;-ch:
+			if !ok {
+				return got
+			}
+			got = append(got, v)
+		case &lt;-time.After(d):
+			return got
+		}
+	}
+}</code></pre>
+        <p>測試：<code>TestCollectFor</code>。</p>
+        <details><summary>提示</summary><p>常見錯誤 2。</p></details>
+      </li>
+    </ol>
+    <p><a href="https://github.com/xinqilin/GO-Playground/blob/main/exercises/16-select/solution.go">參考解答</a>：先自己寫完再看。測試通過、而且 <code>-race</code> 沒有警告的寫法都是對的。</p>
+  </section>
+
+  <section aria-labelledby="recap">
+    <h2 id="recap">重點回顧</h2>
+    <ul class="recap">
+      <li>select 同時等好幾個 channel 的送或收，執行第一個能進行的 case；都不能就等。</li>
+      <li>好幾個 case 同時能進行時隨機挑，不能靠 case 的順序決定優先順序。</li>
+      <li><code>time.After(d)</code> 放進 select 就是逾時；整段工作的期限要在迴圈外建立一次計時器。</li>
+      <li>Go 1.23 起計時器沒有 Stop 也會被回收，Reset 不會收到舊的計時。</li>
+      <li>加上 default 的 select 不等待：可以做「有就收」和「放不下就丟」。</li>
+      <li>for-select 收到 close 的 channel 時，把變數設成 nil 關掉那個 case。</li>
+      <li>送的一方在 select 裡同時等 done，收的一方 close(done) 就能叫它停下來；context 就是這個模式。</li>
+      <li>需要優先順序時，先用帶 default 的 select 檢查重要的那一個。</li>
+      <li>和時間有關的程式，用 <code>testing/synctest</code> 的假時間測試。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="further">
+    <h2 id="further">延伸閱讀</h2>
+    <ul class="notes">
+      <li>Go 語言規格：<a href="https://go.dev/ref/spec#Select_statements">Select statements</a>。</li>
+      <li>套件文件：<a href="https://pkg.go.dev/time#After">time.After</a>、<a href="https://pkg.go.dev/time#NewTimer">time.NewTimer</a>、<a href="https://pkg.go.dev/time#Timer.Reset">Timer.Reset</a>、<a href="https://pkg.go.dev/testing/synctest">testing/synctest</a>。</li>
+      <li><a href="https://go.dev/doc/go1.23#timer-changes">Go 1.23 版本說明：計時器的改變</a>。</li>
+      <li>Go blog：<a href="https://go.dev/blog/synctest">Testing concurrent code with testing/synctest</a>。</li>
+    </ul>
+  </section>
+
   <section aria-labelledby="run">
     <h2 id="run">動手跑</h2>
     <p class="label">在 repo 根目錄</p>
-    <pre class="shell"><code>go run ./chapters/16-select
-go test -race ./chapters/16-select</code></pre>
-    <p><a href="https://github.com/xinqilin/GO-Playground/tree/main/chapters/16-select">在 GitHub 看完整程式碼</a></p>
+    <pre class="shell"><code>go run ./chapters/16-select                   <span class="c"># 執行本章的示範</span>
+go test -race ./chapters/16-select            <span class="c"># 驗證頁面上的每一段輸出和 synctest 測試</span>
+go test ./exercises/16-select/                <span class="c"># 做練習</span></code></pre>
+    <p><a href="https://github.com/xinqilin/GO-Playground/tree/main/chapters/16-select">在 GitHub 看本章完整程式碼</a>，或看<a href="https://github.com/xinqilin/GO-Playground/tree/main/exercises/16-select">練習題</a>。</p>
   </section>
 </main>
 
