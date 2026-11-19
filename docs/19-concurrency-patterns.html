@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>並行模式｜Go 圖解手冊</title>
-<meta name="description" content="常用的 Go 並行模式：worker pool、fan-in，以及用有緩衝 channel 當 semaphore 限制同時數量。">
+<meta name="description" content="Go 的並行模式：worker pool、用 buffered channel 當 semaphore、可以取消的管線、讓結果維持原本的順序、第一個錯誤就全部取消（自己做一個 errgroup）、用 Ticker 限制速率，以及怎麼選，附用 synctest 假時間精確測試的練習題。">
 <link rel="stylesheet" href="assets/style.css">
 </head>
 <body>
@@ -13,126 +13,667 @@
   <span class="count">19 / 24</span>
 </header>
 
-<main class="page">
+<main class="page long">
   <header class="hero">
     <div class="num" aria-hidden="true">19</div>
     <p class="eyebrow">Part 3 · 並行 · 第 19 章</p>
     <h1>並行模式</h1>
-    <p class="analogy">把前幾章的零件組起來：固定人數的工班、匯流的輸送帶、有限的號碼牌。</p>
+    <p class="analogy">尖峰時段的便當店：固定幾個廚師輪流接單，外送平台的連線只有幾條，菜一站一站往下傳，有一家分店缺貨就整筆取消，簡訊一封一封隔著發。這一章把前面幾章的零件組成這些固定的做法。</p>
   </header>
 
-  <section aria-labelledby="look">
-    <h2 id="look">看圖</h2>
-    <div class="figs">
-      <figure class="fig">
-        <svg viewBox="0 0 480 236" role="img" aria-label="worker pool：五個工作從 jobCh 發給三個 worker，結果從 resCh 收回來，依編號排序後得到 1 4 9 16 25">
-          <title>worker pool</title>
-          <rect class="soft" x="16" y="30" width="60" height="34"/>
-          <rect class="soft" x="16" y="66" width="60" height="34"/>
-          <rect class="soft" x="16" y="102" width="60" height="34"/>
-          <rect class="soft" x="16" y="138" width="60" height="34"/>
-          <rect class="soft" x="16" y="174" width="60" height="34"/>
-          <text class="mono" x="46" y="53" text-anchor="middle">1</text>
-          <text class="mono" x="46" y="89" text-anchor="middle">2</text>
-          <text class="mono" x="46" y="125" text-anchor="middle">3</text>
-          <text class="mono" x="46" y="161" text-anchor="middle">4</text>
-          <text class="mono" x="46" y="197" text-anchor="middle">5</text>
-          <text class="sm mono" x="104" y="110" text-anchor="middle">jobCh</text>
-          <path class="wire" d="M76 120 H134 M134 60 V180 M134 60 H144 M134 180 H144 M134 120 H144"/>
-          <path class="tip" d="M154 60 L143 54 L143 66 Z"/>
-          <path class="tip" d="M154 120 L143 114 L143 126 Z"/>
-          <path class="tip" d="M154 180 L143 174 L143 186 Z"/>
-          <circle class="acc" cx="180" cy="60" r="26"/>
-          <circle class="acc" cx="180" cy="120" r="26"/>
-          <circle class="acc" cx="180" cy="180" r="26"/>
-          <text class="small bold t-acc" x="180" y="65" text-anchor="middle">W1</text>
-          <text class="small bold t-acc" x="180" y="125" text-anchor="middle">W2</text>
-          <text class="small bold t-acc" x="180" y="185" text-anchor="middle">W3</text>
-          <text class="sm" x="180" y="226" text-anchor="middle">固定 3 個 worker</text>
-          <path class="wire" d="M206 60 H240 M206 120 H240 M206 180 H240 M240 60 V180 M240 120 H262"/>
-          <path class="tip" d="M274 120 L262 114 L262 126 Z"/>
-          <text class="sm mono" x="256" y="110" text-anchor="middle">resCh</text>
-          <rect class="acc" x="276" y="90" width="110" height="60" rx="10"/>
-          <text class="small" x="331" y="116" text-anchor="middle">收集</text>
-          <text class="small" x="331" y="136" text-anchor="middle">依編號排序</text>
-          <path class="wire" d="M331 150 V176"/>
-          <path class="tip" d="M331 186 L324 173 L338 173 Z"/>
-          <text class="small mono bold t-acc" x="331" y="208" text-anchor="middle">1 4 9 16 25</text>
-        </svg>
-        <figcaption>worker pool 用固定數量的 worker 消化工作：工作從 jobCh 發下去，結果從 resCh 收回來，最後依編號排好。</figcaption>
-      </figure>
+  <nav class="toc-inline" aria-labelledby="toc-title">
+    <p class="label" id="toc-title">本章內容</p>
+    <ol>
+      <li><a href="#goals">本章你會學到</a></li>
+      <li><a href="#pool">worker pool</a></li>
+      <li><a href="#semaphore">semaphore</a></li>
+      <li><a href="#pipeline">可以取消的管線</a></li>
+      <li><a href="#order">結果的順序</a></li>
+      <li><a href="#group">第一個錯誤就全部取消</a></li>
+      <li><a href="#rate">限制速率</a></li>
+      <li><a href="#choose">怎麼選</a></li>
+      <li><a href="#pitfalls">常見錯誤</a></li>
+      <li><a href="#java">從 Java 來的你</a></li>
+      <li><a href="#exercises">練習</a></li>
+      <li><a href="#recap">重點回顧</a></li>
+      <li><a href="#further">延伸閱讀</a></li>
+    </ol>
+  </nav>
 
-      <figure class="fig">
-        <svg viewBox="0 0 480 190" role="img" aria-label="容量 3 的 channel 當號碼牌；三張都被拿走時，T1 到 T3 在跑，T4 到 T6 在外面等">
-          <title>semaphore 號碼牌</title>
-          <text class="sm mono t-acc" x="240" y="20" text-anchor="middle">sem := make(chan struct{}, 3)</text>
-          <rect class="acc" x="170" y="30" width="140" height="60" rx="10"/>
-          <rect class="hot" x="184" y="44" width="30" height="32" rx="4"/>
-          <rect class="hot" x="225" y="44" width="30" height="32" rx="4"/>
-          <rect class="hot" x="266" y="44" width="30" height="32" rx="4"/>
-          <circle class="acc" cx="200" cy="130" r="18"/>
-          <circle class="acc" cx="240" cy="130" r="18"/>
-          <circle class="acc" cx="280" cy="130" r="18"/>
-          <text class="sm bold t-acc" x="200" y="135" text-anchor="middle">T1</text>
-          <text class="sm bold t-acc" x="240" y="135" text-anchor="middle">T2</text>
-          <text class="sm bold t-acc" x="280" y="135" text-anchor="middle">T3</text>
-          <text class="sm t-acc" x="240" y="174" text-anchor="middle">拿到號碼牌，正在跑</text>
-          <circle class="soft" cx="120" cy="130" r="18"/>
-          <circle class="soft" cx="76" cy="130" r="18"/>
-          <circle class="soft" cx="32" cy="130" r="18"/>
-          <text class="sm bold" x="120" y="135" text-anchor="middle">T4</text>
-          <text class="sm bold" x="76" y="135" text-anchor="middle">T5</text>
-          <text class="sm bold" x="32" y="135" text-anchor="middle">T6</text>
-          <text class="sm t-hot" x="76" y="174" text-anchor="middle">沒有號碼牌，等</text>
-          <path class="wire acc-ln" d="M300 130 H350 V60 H318"/>
-          <path class="tip acc-tip" d="M310 60 L322 54 L322 66 Z"/>
-          <text class="sm t-acc" x="358" y="100">做完歸還</text>
-        </svg>
-        <figcaption>有緩衝的 channel 當號碼牌：放得進去才能開始，做完拿出來還回去。容量 3，同時就最多 3 個在跑。</figcaption>
-      </figure>
-    </div>
+  <section aria-labelledby="goals">
+    <h2 id="goals">本章你會學到</h2>
+    <ul class="notes">
+      <li>worker pool：固定人數，從同一個 channel 拿工作。</li>
+      <li>semaphore：每件事各開一個 goroutine，但限制同時執行的數量。</li>
+      <li>每一站都聽 ctx 的管線，下游不要了，整條線都停得下來。</li>
+      <li>並行處理之後，怎麼讓結果維持原本的順序。</li>
+      <li>自己做一個 Group：第一個錯誤就取消其他工作，並等大家都停下來。</li>
+      <li>用 time.Ticker 限制呼叫的速率，並用 synctest 精確測試時間。</li>
+      <li>遇到一個並行問題，該選哪一個模式。</li>
+    </ul>
+    <p>先備：<a href="14-goroutines.html">14 goroutine</a>、<a href="15-channels.html">15 channel</a>、<a href="16-select.html">16 select</a>、<a href="17-sync.html">17 sync 與 data race</a>、<a href="18-context.html">18 context</a>。這一章幾乎每一段都會用到它們。</p>
   </section>
 
-  <section aria-labelledby="code">
-    <h2 id="code">最小範例</h2>
-    <pre class="code"><code>func main() {
+  <section aria-labelledby="pool">
+    <h2 id="pool">1. worker pool</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 204" role="img" aria-label="派工的一方把單號送進 jobs channel，兩個廚師從同一個 channel 拿單，做好的結果寫進結果 slice 裡對應的那一格">
+        <title>固定人數，從同一個 channel 拿單</title>
+        <rect class="soft" x="16" y="78" width="90" height="44" rx="8"/>
+        <text class="small" x="61" y="105" text-anchor="middle">派工</text>
+        <path class="wire" d="M106 100 H118"/>
+        <path class="tip" d="M130 100 L118 94 L118 106 Z"/>
+        <rect class="soft" x="130" y="84" width="100" height="32" rx="6"/>
+        <text class="sm mono" x="180" y="105" text-anchor="middle">jobs</text>
+        <path class="wire" d="M230 100 H246 V60 H258"/>
+        <path class="tip" d="M270 60 L258 54 L258 66 Z"/>
+        <path class="wire" d="M246 100 V140 H258"/>
+        <path class="tip" d="M270 140 L258 134 L258 146 Z"/>
+        <rect class="acc" x="270" y="40" width="90" height="40" rx="8"/>
+        <text class="small" x="315" y="65" text-anchor="middle">廚師</text>
+        <rect class="acc" x="270" y="120" width="90" height="40" rx="8"/>
+        <text class="small" x="315" y="145" text-anchor="middle">廚師</text>
+        <rect class="box" x="400" y="24" width="64" height="28"/>
+        <text class="sm mono" x="432" y="43" text-anchor="middle">0</text>
+        <rect class="box" x="400" y="56" width="64" height="28"/>
+        <text class="sm mono" x="432" y="75" text-anchor="middle">1</text>
+        <rect class="box" x="400" y="88" width="64" height="28"/>
+        <text class="sm mono" x="432" y="107" text-anchor="middle">2</text>
+        <rect class="box" x="400" y="120" width="64" height="28"/>
+        <text class="sm mono" x="432" y="139" text-anchor="middle">3</text>
+        <rect class="box" x="400" y="152" width="64" height="28"/>
+        <text class="sm mono" x="432" y="171" text-anchor="middle">4</text>
+        <path class="wire" d="M360 60 H376 V70 H388"/>
+        <path class="tip" d="M400 70 L388 64 L388 76 Z"/>
+        <path class="wire" d="M360 140 H376 V166 H388"/>
+        <path class="tip" d="M400 166 L388 160 L388 172 Z"/>
+        <text class="sm" x="240" y="198" text-anchor="middle">固定人數，從同一個 channel 拿單，結果寫進自己那一格</text>
+      </svg>
+      <figcaption>worker pool：開固定幾個 goroutine，它們都從同一個 channel 拿工作，誰有空誰拿。</figcaption>
+    </figure>
+    <p><a href="14-goroutines.html#cheap">14 章</a>說過 goroutine 很便宜，每件事開一個通常沒問題。但工作量很大、或每件事都要用到有限的資源（CPU、資料庫連線、對方 API 的配額）時，就要限制同時在做的數量。最常見的做法是 <strong>worker pool</strong>：固定開幾個 worker，讓它們從同一個 channel 拿工作：</p>
+    <pre class="code" data-src="chapters/19-concurrency-patterns/pool.go#cookAll,poolDemo"><code>func cookAll(ctx context.Context, orders []string, cooks int, cook func(string) string) []string {
 	jobs := make(chan int)
-	results := make(chan int)
+	out := make([]string, len(orders))
 	var wg sync.WaitGroup
-	for range 3 { <span class="c">// 固定 3 個 worker</span>
+	for range cooks {
 		wg.Go(func() {
-			for n := range jobs {
-				results &lt;- n * n
+			for i := range jobs {
+				out[i] = cook(orders[i])
 			}
 		})
 	}
-	go func() { <span class="c">// 派工，派完就關</span>
-		for n := range 5 {
-			jobs &lt;- n + 1
+
+feed:
+	for i := range orders {
+		select {
+		case jobs &lt;- i:
+		case &lt;-ctx.Done():
+			break feed
 		}
-		close(jobs)
-	}()
-	go func() { wg.Wait(); close(results) }() <span class="c">// worker 都結束才關結果</span>
-	sum := 0
-	for r := range results {
-		sum += r
 	}
-	fmt.Println(sum)
+	close(jobs)
+	wg.Wait()
+	return out
+}
+
+func poolDemo() {
+	orders := []string{"排骨飯", "雞腿飯", "魚排飯", "滷肉飯", "控肉飯"}
+	done := cookAll(context.Background(), orders, 2, func(o string) string {
+		return o + " 好了"
+	})
+	for _, d := range done {
+		fmt.Println(d)
+	}
 }</code></pre>
     <p class="label">輸出</p>
-    <pre class="out"><code>55</code></pre>
+    <pre class="out" data-example="chapters/19-concurrency-patterns#Example_poolDemo"><code>排骨飯 好了
+雞腿飯 好了
+魚排飯 好了
+滷肉飯 好了
+控肉飯 好了</code></pre>
+    <ul class="notes">
+      <li>jobs 裡送的是<strong>索引</strong>，不是單子本身。worker 做好就寫進 <code>out[i]</code>，每個人寫不同的格子，不用鎖，結果的順序也自然和 orders 一樣（<a href="14-goroutines.html#results">14 章</a>的做法）。</li>
+      <li>一個 channel 可以有好幾個人同時收，每個值只會被其中一個人收到：這就是「誰有空誰拿」。</li>
+      <li>派完工一定要 <code>close(jobs)</code>，worker 的 <code>for range jobs</code> 才會結束，wg.Wait 才等得到。</li>
+      <li>派工的 select 也等 <code>ctx.Done()</code>：取消之後不再派新的單，已經拿到單的 worker 做完手上這張就收工。break 後面加上標籤 <code>feed</code>，才會跳出 for，而不是只跳出 select。</li>
+      <li>worker 數量怎麼定：CPU 密集的計算用 <code>runtime.NumCPU()</code> 左右；等待外部服務的工作，看對方能承受多少。</li>
+    </ul>
   </section>
 
-  <section aria-labelledby="notes">
-    <h2 id="notes">工程師筆記</h2>
+  <section aria-labelledby="semaphore">
+    <h2 id="semaphore">2. semaphore</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 184" role="img" aria-label="好幾個 goroutine 排隊等號碼牌；sem 是容量 2 的 channel，兩張號碼牌都被拿走時，其他人等著；拿到牌的兩個在查庫存，做完把號碼牌還回去">
+        <title>有限的號碼牌</title>
+        <text class="sm" x="66" y="20" text-anchor="middle">等號碼牌</text>
+        <rect class="soft" x="16" y="30" width="100" height="30" rx="6"/>
+        <text class="sm" x="66" y="50" text-anchor="middle">goroutine</text>
+        <rect class="soft" x="16" y="72" width="100" height="30" rx="6"/>
+        <text class="sm" x="66" y="92" text-anchor="middle">goroutine</text>
+        <rect class="soft" x="16" y="114" width="100" height="30" rx="6"/>
+        <text class="sm" x="66" y="134" text-anchor="middle">goroutine</text>
+        <path class="wire" d="M116 87 H158"/>
+        <path class="tip" d="M170 87 L158 81 L158 93 Z"/>
+        <text class="sm mono" x="230" y="62" text-anchor="middle">sem（容量 2）</text>
+        <rect class="box" x="170" y="70" width="120" height="40" rx="6"/>
+        <rect class="acc" x="176" y="76" width="50" height="28" rx="4"/>
+        <rect class="acc" x="234" y="76" width="50" height="28" rx="4"/>
+        <path class="wire" d="M290 90 H310 V58 H332"/>
+        <path class="tip" d="M344 58 L332 52 L332 64 Z"/>
+        <path class="wire" d="M310 90 V122 H332"/>
+        <path class="tip" d="M344 122 L332 116 L332 128 Z"/>
+        <rect class="soft" x="344" y="40" width="120" height="36" rx="6"/>
+        <text class="small" x="404" y="64" text-anchor="middle">查庫存</text>
+        <rect class="soft" x="344" y="104" width="120" height="36" rx="6"/>
+        <text class="small" x="404" y="128" text-anchor="middle">查庫存</text>
+        <path class="wire acc-ln dash" d="M404 140 V160 H230 V122"/>
+        <path class="tip acc-tip" d="M230 110 L224 122 L236 122 Z"/>
+        <text class="sm t-acc" x="317" y="178" text-anchor="middle">做完還回去</text>
+      </svg>
+      <figcaption>semaphore：容量 n 的 channel 是 n 張號碼牌。放得進去才能開始，做完拿出來，同時最多 n 個在做。</figcaption>
+    </figure>
+    <p>有時候每件事開一個 goroutine 最自然，只是不能同時太多，例如對方的 API 一次只接受兩條連線。<a href="15-channels.html#buffered">buffered channel</a> 就是現成的 <strong>semaphore</strong>（號碼牌）：容量是牌的數量，送進去是拿牌，拿出來是還牌，牌被拿光時送的人自然會等：</p>
+    <pre class="code" data-src="chapters/19-concurrency-patterns/semaphore.go#fetchAll,semaphoreDemo"><code>func fetchAll(branches []string, limit int, fetch func(string) int) []int {
+	sem := make(chan struct{}, limit)
+	out := make([]int, len(branches))
+	var wg sync.WaitGroup
+	for i, b := range branches {
+		wg.Go(func() {
+			sem &lt;- struct{}{}
+			defer func() { &lt;-sem }()
+			out[i] = fetch(b)
+		})
+	}
+	wg.Wait()
+	return out
+}
+
+func semaphoreDemo() {
+	stock := map[string]int{"東區": 12, "西區": 0, "南區": 7, "北區": 30, "中區": 5, "內湖": 18, "板橋": 9}
+	branches := []string{"東區", "西區", "南區", "北區", "中區", "內湖", "板橋"}
+	var g gauge
+	got := fetchAll(branches, 2, func(b string) int {
+		g.enter()
+		defer g.leave()
+		return stock[b]
+	})
+	fmt.Println(got)
+	fmt.Printf("同時在查的分店沒有超過 2 家：%t\n", g.peak.Load() &lt;= 2)
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/19-concurrency-patterns#Example_semaphoreDemo"><code>[12 0 7 30 5 18 9]
+同時在查的分店沒有超過 2 家：true</code></pre>
+    <p>gauge 用 <a href="17-sync.html#atomic">17 章的 CompareAndSwap</a> 記錄最多同時幾個。在 Example 裡只能檢查「沒有超過 2」，因為真實執行時，幾個 goroutine 會不會剛好同時在查，每次都不一樣。用 synctest 的假時間就能精確測試：每家查 1 秒、7 家、同時 2 家，剛好要 4 秒，同時最多剛好 2 家：</p>
+    <pre class="code" data-src="chapters/19-concurrency-patterns/main_test.go#TestFetchAllLimit"><code>func TestFetchAllLimit(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		var g gauge
+		start := time.Now()
+		fetchAll(make([]string, 7), 2, func(string) int {
+			g.enter()
+			defer g.leave()
+			time.Sleep(time.Second)
+			return 0
+		})
+		if d, p := time.Since(start), g.peak.Load(); d != 4*time.Second || p != 2 {
+			t.Errorf("花了 %v、同時最多 %d 個；want 4s、2 個", d, p)
+		}
+	})
+}</code></pre>
+    <p>worker pool 和 semaphore 都能限制同時的數量，差別在 goroutine 的數量：</p>
+    <div class="table-wrap">
+      <table class="vs">
+        <thead><tr><th scope="col"></th><th scope="col">worker pool</th><th scope="col">semaphore</th></tr></thead>
+        <tbody>
+          <tr><th scope="row">goroutine 數量</th><td>固定 n 個，重複使用</td><td>每件事一個，同時執行的最多 n 個</td></tr>
+          <tr><th scope="row">適合</th><td>工作量很大、源源不絕，或工作從 channel 來</td><td>一批數量已知的工作，寫法最短</td></tr>
+          <tr><th scope="row">要注意</th><td>要記得 close(jobs)</td><td>一萬件事就有一萬個 goroutine 在等牌</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>semaphore 的缺點可以改善：在開 goroutine <strong>之前</strong>就拿牌（把 <code>sem &lt;- struct{}{}</code> 移到 wg.Go 前面），迴圈會停在拿牌的地方，同時存在的 goroutine 也不會超過 n 個（練習 1）。</p>
+  </section>
+
+  <section aria-labelledby="pipeline">
+    <h2 id="pipeline">3. 可以取消的管線</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 190" role="img" aria-label="emit、parse、addTax、加總四站串成管線；加總的一方遇到錯誤就 break，defer cancel 讓每一站送不出去時選到 Done，結束並 close">
+        <title>下游不要了，整條線都停</title>
+        <rect class="soft" x="16" y="50" width="80" height="44" rx="8"/>
+        <text class="sm mono" x="56" y="77" text-anchor="middle">emit</text>
+        <rect class="soft" x="126" y="50" width="80" height="44" rx="8"/>
+        <text class="sm mono" x="166" y="77" text-anchor="middle">parse</text>
+        <rect class="soft" x="236" y="50" width="80" height="44" rx="8"/>
+        <text class="sm mono" x="276" y="77" text-anchor="middle">addTax</text>
+        <rect class="acc" x="346" y="50" width="118" height="44" rx="8"/>
+        <text class="small" x="405" y="70" text-anchor="middle">加總</text>
+        <text class="sm" x="405" y="87" text-anchor="middle">遇到錯誤 break</text>
+        <path class="wire" d="M96 72 H114"/>
+        <path class="tip" d="M126 72 L114 66 L114 78 Z"/>
+        <path class="wire" d="M206 72 H224"/>
+        <path class="tip" d="M236 72 L224 66 L224 78 Z"/>
+        <path class="wire" d="M316 72 H334"/>
+        <path class="tip" d="M346 72 L334 66 L334 78 Z"/>
+        <path class="wire hot-ln dash" d="M405 94 V128 H56 V106"/>
+        <path class="wire hot-ln dash" d="M166 128 V106"/>
+        <path class="wire hot-ln dash" d="M276 128 V106"/>
+        <path class="tip hot-tip" d="M56 94 L50 106 L62 106 Z"/>
+        <path class="tip hot-tip" d="M166 94 L160 106 L172 106 Z"/>
+        <path class="tip hot-tip" d="M276 94 L270 106 L282 106 Z"/>
+        <text class="sm mono t-hot" x="230" y="148" text-anchor="middle">defer cancel()</text>
+        <text class="sm" x="240" y="178" text-anchor="middle">每一站送的時候都看 ctx，下游不收了就結束</text>
+      </svg>
+      <figcaption>管線的每一站都是一個 goroutine。取消時，每一站在送不出去的地方選到 Done，結束並 close 自己的輸出，下一站的 range 跟著結束。</figcaption>
+    </figure>
+    <p><a href="15-channels.html#pipeline">15 章</a>的管線一定要把所有東西跑完；有了 ctx，下游可以隨時說「不要了」。把每一站寫成同一個樣子，就能自由組合：</p>
+    <pre class="code" data-src="chapters/19-concurrency-patterns/pipeline.go#emit,stage"><code>func emit[T any](ctx context.Context, items ...T) &lt;-chan T {
+	out := make(chan T)
+	go func() {
+		defer close(out)
+		for _, it := range items {
+			select {
+			case out &lt;- it:
+			case &lt;-ctx.Done():
+				return
+			}
+		}
+	}()
+	return out
+}
+
+func stage[In, Out any](ctx context.Context, in &lt;-chan In, f func(In) Out) &lt;-chan Out {
+	out := make(chan Out)
+	go func() {
+		defer close(out)
+		for v := range in {
+			select {
+			case out &lt;- f(v):
+			case &lt;-ctx.Done():
+				return
+			}
+		}
+	}()
+	return out
+}</code></pre>
+    <p>每一站只有三條規則：自己開的 channel 自己 close（defer）；送的時候 select ctx；收的時候直接 range 上一站。收的地方不需要聽 ctx，因為上一站也照同樣的規則寫，被取消時會 close，range 就結束了。用它算一疊發票的含稅合計，遇到看不懂的發票就停：</p>
+    <pre class="code" data-src="chapters/19-concurrency-patterns/pipeline.go#amount,parse,addTax,pipelineDemo"><code>type amount struct {
+	v   int
+	err error
+}
+
+func parse(s string) amount {
+	v, err := strconv.Atoi(s)
+	if err != nil {
+		return amount{err: fmt.Errorf("發票金額「%s」不是數字", s)}
+	}
+	return amount{v: v}
+}
+
+func addTax(a amount) amount {
+	if a.err != nil {
+		return a
+	}
+	return amount{v: a.v * 105 / 100}
+}
+
+func pipelineDemo() {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	raw := emit(ctx, "120", "85", "九十", "300")
+	taxed := stage(ctx, stage(ctx, raw, parse), addTax)
+
+	total := 0
+	for a := range taxed {
+		if a.err != nil {
+			fmt.Println("停下來：", a.err)
+			break
+		}
+		total += a.v
+	}
+	fmt.Println("含稅合計", total)
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/19-concurrency-patterns#Example_pipelineDemo"><code>停下來： 發票金額「九十」不是數字
+含稅合計 215</code></pre>
     <ul class="notes">
-      <li>worker 數量固定，工作再多 goroutine 也不會暴增；CPU 密集的工作用 CPU 數，I/O 密集可以多一些。</li>
-      <li>誰關哪個 channel 要講清楚：派工的 goroutine 關 jobs，所有 worker 結束後再關 results。</li>
-      <li>每個可能卡住的送出都要搭配 <code>ctx.Done()</code>，取消時 goroutine 才能收工，不會洩漏。</li>
-      <li>並行結果的順序不固定；需要順序就帶著編號，最後再排序。</li>
-      <li>需要「任何一個出錯就全部取消」時，用 <code>golang.org/x/sync/errgroup</code>，它的 <code>SetLimit</code> 也能限制同時數量。</li>
-      <li>先寫循序版本，量過真的太慢再改成並行；並行版本一定要用 <code>-race</code> 測過。</li>
+      <li>錯誤當成值沿著管線往下傳（amount 的 err 欄位），由最後的消費者決定怎麼處理。另一種做法是在發生錯誤的那一站用 WithCancelCause 取消整條線（第 5 節）。</li>
+      <li>消費者 break 之後，defer 的 cancel 讓 emit、parse、addTax 各自在送的地方選到 Done 結束，第四張發票根本不會被處理。測試裡用 synctest 檢查「提早離開之後，泡泡裡沒有留下任何 goroutine」，寫法和 <a href="18-context.html#listen">18 章</a>一樣。</li>
+      <li>某一站特別慢，可以讓它自己開好幾個 worker（第 1 節），再把它們的輸出匯成一條（<a href="15-channels.html#pipeline">15 章的 fan-in</a>）；但順序就亂了，見下一節。</li>
     </ul>
+  </section>
+
+  <section aria-labelledby="order">
+    <h2 id="order">4. 結果的順序</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 190" role="img" aria-label="做好的順序是 2、0、3、1；先做好的放在 pending 裡等，輪到它的時候才送出；送出的順序是 0、1、2、3">
+        <title>先做好的先等著</title>
+        <text class="sm" x="60" y="22" text-anchor="middle">做好的順序</text>
+        <rect class="soft" x="30" y="34" width="60" height="26" rx="4"/>
+        <text class="sm mono" x="60" y="52" text-anchor="middle">2</text>
+        <rect class="soft" x="30" y="66" width="60" height="26" rx="4"/>
+        <text class="sm mono" x="60" y="84" text-anchor="middle">0</text>
+        <rect class="soft" x="30" y="98" width="60" height="26" rx="4"/>
+        <text class="sm mono" x="60" y="116" text-anchor="middle">3</text>
+        <rect class="soft" x="30" y="130" width="60" height="26" rx="4"/>
+        <text class="sm mono" x="60" y="148" text-anchor="middle">1</text>
+        <path class="wire" d="M90 95 H158"/>
+        <path class="tip" d="M170 95 L158 89 L158 101 Z"/>
+        <rect class="box" x="170" y="50" width="140" height="90" rx="10"/>
+        <text class="sm mono bold" x="240" y="74" text-anchor="middle">pending</text>
+        <text class="sm" x="240" y="98" text-anchor="middle">先好的在這裡等</text>
+        <text class="sm" x="240" y="120" text-anchor="middle">輪到 next 才送</text>
+        <path class="wire" d="M310 95 H378"/>
+        <path class="tip" d="M390 95 L378 89 L378 101 Z"/>
+        <text class="sm" x="424" y="22" text-anchor="middle">送出的順序</text>
+        <rect class="acc" x="394" y="34" width="60" height="26" rx="4"/>
+        <text class="sm mono" x="424" y="52" text-anchor="middle">0</text>
+        <rect class="acc" x="394" y="66" width="60" height="26" rx="4"/>
+        <text class="sm mono" x="424" y="84" text-anchor="middle">1</text>
+        <rect class="acc" x="394" y="98" width="60" height="26" rx="4"/>
+        <text class="sm mono" x="424" y="116" text-anchor="middle">2</text>
+        <rect class="acc" x="394" y="130" width="60" height="26" rx="4"/>
+        <text class="sm mono" x="424" y="148" text-anchor="middle">3</text>
+        <text class="sm t-hot" x="240" y="180" text-anchor="middle">某一份特別慢，後面做好的全部要等它</text>
+      </svg>
+      <figcaption>重新排序：每份結果帶著原本的編號，先做好的暫存起來，等前面的都送出了才輪到它。</figcaption>
+    </figure>
+    <p>好幾個 worker 同時做，完成的順序每次都不一樣。需要原本的順序時，有三種做法：</p>
+    <ul class="notes">
+      <li><strong>全部做完再排序</strong>：結果帶著編號，收齊之後 <code>slices.SortFunc</code>。最直覺，但要等全部做完。</li>
+      <li><strong>寫進對應的格子</strong>：事先開好 slice，每份結果寫進自己的索引（第 1 節）。不用排序、不用鎖，同樣要等全部做完。工作數量事先知道時，這是首選。</li>
+      <li><strong>邊做邊照順序送出</strong>：結果是串流，不能等全部做完時，用一個暫存區重新排序：</li>
+    </ul>
+    <pre class="code" data-src="chapters/19-concurrency-patterns/order.go#finished,inOrder,orderDemo"><code>type finished struct {
+	seq  int
+	dish string
+}
+
+func inOrder(in &lt;-chan finished) &lt;-chan string {
+	out := make(chan string)
+	go func() {
+		defer close(out)
+		pending := make(map[int]string)
+		next := 0
+		for f := range in {
+			pending[f.seq] = f.dish
+			for {
+				dish, ok := pending[next]
+				if !ok {
+					break
+				}
+				out &lt;- dish
+				delete(pending, next)
+				next++
+			}
+		}
+	}()
+	return out
+}
+
+func orderDemo() {
+	in := make(chan finished, 4)
+	in &lt;- finished{2, "魚排飯"}
+	in &lt;- finished{0, "排骨飯"}
+	in &lt;- finished{3, "滷肉飯"}
+	in &lt;- finished{1, "雞腿飯"}
+	close(in)
+
+	for dish := range inOrder(in) {
+		fmt.Println(dish)
+	}
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/19-concurrency-patterns#Example_orderDemo"><code>排骨飯
+雞腿飯
+魚排飯
+滷肉飯</code></pre>
+    <p>每收到一份，就檢查「下一個該送的」是不是已經在 pending 裡，是就連續送出，直到斷掉為止。代價是排在前面的那一份特別慢時，後面做好的全部卡在 pending 裡等它，記憶體也跟著變大。能用格子就用格子；真的需要串流，再用這一招，並限制同時在做的數量，讓 pending 不會無限長大。</p>
+  </section>
+
+  <section aria-labelledby="group">
+    <h2 id="group">5. 第一個錯誤就全部取消</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 200" role="img" aria-label="東區、西區、北區三個工作同時執行；西區失敗，Group 用 Once 記下第一個錯誤並取消 ctx；東區和北區收到取消停下來；Wait 等大家都結束後回傳西區的錯誤">
+        <title>一個失敗，全部停下來</title>
+        <rect class="soft" x="16" y="30" width="120" height="36" rx="8"/>
+        <text class="small" x="76" y="54" text-anchor="middle">東區</text>
+        <rect class="hot" x="16" y="84" width="120" height="36" rx="8"/>
+        <text class="small" x="76" y="108" text-anchor="middle">西區 失敗</text>
+        <rect class="soft" x="16" y="138" width="120" height="36" rx="8"/>
+        <text class="small" x="76" y="162" text-anchor="middle">北區</text>
+        <path class="wire hot-ln" d="M136 102 H178"/>
+        <path class="tip hot-tip" d="M190 102 L178 96 L178 108 Z"/>
+        <rect class="acc" x="190" y="72" width="130" height="60" rx="10"/>
+        <text class="sm" x="255" y="96" text-anchor="middle">記下第一個錯誤</text>
+        <text class="sm mono" x="255" y="118" text-anchor="middle">cancel(err)</text>
+        <path class="wire hot-ln dash" d="M255 72 V48 H148"/>
+        <path class="tip hot-tip" d="M136 48 L148 42 L148 54 Z"/>
+        <path class="wire hot-ln dash" d="M255 132 V156 H148"/>
+        <path class="tip hot-tip" d="M136 156 L148 150 L148 162 Z"/>
+        <text class="sm t-hot" x="200" y="40" text-anchor="middle">取消</text>
+        <text class="sm t-hot" x="200" y="174" text-anchor="middle">取消</text>
+        <path class="wire" d="M320 102 H348"/>
+        <path class="tip" d="M360 102 L348 96 L348 108 Z"/>
+        <rect class="box" x="360" y="80" width="104" height="44" rx="8"/>
+        <text class="sm mono" x="412" y="98" text-anchor="middle">Wait()</text>
+        <text class="sm" x="412" y="116" text-anchor="middle">回傳西區的錯</text>
+        <text class="sm" x="240" y="194" text-anchor="middle">第一個錯誤取消其他人，Wait 等大家都停下來</text>
+      </svg>
+      <figcaption>Group 把 WaitGroup、Once 和 context 組在一起：第一個錯誤被記下並取消其他工作，Wait 等所有工作結束後回傳它。</figcaption>
+    </figure>
+    <p>一張訂單要三家分店都備好料才算成功，任何一家失敗，其他家再做下去也沒用。這是非常常見的需求：同時做好幾件事、等全部完成、第一個錯誤就取消其他的。把 WaitGroup、Once 和 <a href="18-context.html#cause">WithCancelCause</a> 組起來：</p>
+    <pre class="code" data-src="chapters/19-concurrency-patterns/group.go#Group,NewGroup,Group.Go,Group.Wait,groupDemo"><code>type Group struct {
+	wg     sync.WaitGroup
+	cancel context.CancelCauseFunc
+	once   sync.Once
+	err    error
+}
+
+func NewGroup(ctx context.Context) (*Group, context.Context) {
+	ctx, cancel := context.WithCancelCause(ctx)
+	return &amp;Group{cancel: cancel}, ctx
+}
+
+func (g *Group) Go(f func() error) {
+	g.wg.Go(func() {
+		if err := f(); err != nil {
+			g.once.Do(func() {
+				g.err = err
+				g.cancel(err)
+			})
+		}
+	})
+}
+
+func (g *Group) Wait() error {
+	g.wg.Wait()
+	g.cancel(g.err)
+	return g.err
+}
+
+func groupDemo() {
+	g, ctx := NewGroup(context.Background())
+	branches := []string{"東區", "西區", "北區"}
+	status := make([]string, len(branches))
+	for i, b := range branches {
+		g.Go(func() error {
+			if b == "西區" {
+				status[i] = "缺貨"
+				return errors.New("西區 排骨缺貨")
+			}
+			&lt;-ctx.Done() // 模擬一件很久的工作，只會因為取消而停下來
+			status[i] = "停下來：" + ctx.Err().Error()
+			return ctx.Err()
+		})
+	}
+
+	fmt.Println("錯誤：", g.Wait())
+	for i, b := range branches {
+		fmt.Println(b, status[i])
+	}
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/19-concurrency-patterns#Example_groupDemo"><code>錯誤： 西區 排骨缺貨
+東區 停下來：context canceled
+西區 缺貨
+北區 停下來：context canceled</code></pre>
+    <ul class="notes">
+      <li>Once 保證只記下<strong>第一個</strong>錯誤。被取消的東區、北區也回傳了錯誤（ctx.Err()），但那時 Once 已經做過，不會蓋掉真正的原因。</li>
+      <li>用 WithCancelCause 取消，工作裡用 <code>context.Cause(ctx)</code> 就能看到「西區 排骨缺貨」，而不只是 context canceled。</li>
+      <li>Wait 先等所有工作結束，<strong>才</strong>回傳。即使有人失敗，也不會留下還在跑的 goroutine。Wait 最後也取消 ctx，釋放它的資源。</li>
+      <li>工作一定要聽 ctx（這裡是 <code>&lt;-ctx.Done()</code>），否則取消了它也照樣做完，Wait 就得等它。</li>
+    </ul>
+    <p>這個模式太常用了，Go 團隊維護的 <code>golang.org/x/sync/errgroup</code> 提供了幾乎一樣的 API：<code>errgroup.WithContext(ctx)</code> 回傳 Group 和 ctx，再用 <code>Go</code>、<code>Wait</code>；還多了 <code>SetLimit(n)</code> 限制同時的數量（練習 4 就是自己做出它）。它不在標準庫，要用 go get 加進專案（「<a href="20-packages-modules.html">package 與 module</a>」那一章）。這本手冊只用標準庫，所以自己寫，順便看清楚它裡面在做什麼。</p>
+  </section>
+
+  <section aria-labelledby="rate">
+    <h2 id="rate">6. 限制速率</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 164" role="img" aria-label="時間軸上，第 1、2、3 秒各有一個 tick，每個 tick 通知一位客人">
+        <title>每個 tick 放行一次</title>
+        <text class="sm" x="240" y="26" text-anchor="middle">每次通知前，先等下一個 tick</text>
+        <rect class="acc" x="110" y="50" width="60" height="32" rx="6"/>
+        <text class="sm" x="140" y="71" text-anchor="middle">通知</text>
+        <rect class="acc" x="210" y="50" width="60" height="32" rx="6"/>
+        <text class="sm" x="240" y="71" text-anchor="middle">通知</text>
+        <rect class="acc" x="310" y="50" width="60" height="32" rx="6"/>
+        <text class="sm" x="340" y="71" text-anchor="middle">通知</text>
+        <path class="wire" d="M140 82 V102"/>
+        <path class="wire" d="M240 82 V102"/>
+        <path class="wire" d="M340 82 V102"/>
+        <path class="wire" d="M40 110 H440"/>
+        <path class="tip" d="M452 110 L440 104 L440 116 Z"/>
+        <path class="wire" d="M40 102 V118"/>
+        <path class="wire" d="M140 102 V118"/>
+        <path class="wire" d="M240 102 V118"/>
+        <path class="wire" d="M340 102 V118"/>
+        <text class="sm mono" x="40" y="136" text-anchor="middle">0</text>
+        <text class="sm mono" x="140" y="136" text-anchor="middle">1s</text>
+        <text class="sm mono" x="240" y="136" text-anchor="middle">2s</text>
+        <text class="sm mono" x="340" y="136" text-anchor="middle">3s</text>
+        <text class="sm" x="240" y="156" text-anchor="middle">收得太慢時，跟不上的 tick 會被丟掉，不會累積</text>
+      </svg>
+      <figcaption>time.Ticker 每隔固定時間往 channel 送一次。每做一件事前先收一個 tick，就不會超過那個速率。</figcaption>
+    </figure>
+    <p>限制同時的數量（第 1、2 節）和限制速率是兩回事：簡訊商可能規定「每秒最多一封」，就算你只有一條連線，也不能連續狂送。<code>time.NewTicker(d)</code> 每隔 d 往 <code>t.C</code> 送一次時間，每次做事前先收一個 tick：</p>
+    <pre class="code" data-src="chapters/19-concurrency-patterns/ticker.go#notifyAll,tickerDemo"><code>func notifyAll(ctx context.Context, phones []string, every time.Duration, send func(string)) error {
+	t := time.NewTicker(every)
+	defer t.Stop()
+	for _, p := range phones {
+		select {
+		case &lt;-t.C:
+			send(p)
+		case &lt;-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	return nil
+}
+
+func tickerDemo() {
+	phones := []string{"0912-000-111", "0922-000-222", "0933-000-333"}
+	err := notifyAll(context.Background(), phones, time.Millisecond, func(p string) {
+		fmt.Println("已通知", p)
+	})
+	fmt.Println("錯誤：", err)
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/19-concurrency-patterns#Example_tickerDemo"><code>已通知 0912-000-111
+已通知 0922-000-222
+已通知 0933-000-333
+錯誤： &lt;nil&gt;</code></pre>
+    <p>Example 只看得到順序；時間對不對，用 synctest 的假時間檢查，連「1.5 秒逾時，只來得及通知一位」都能精確測試：</p>
+    <pre class="code" data-src="chapters/19-concurrency-patterns/main_test.go#TestNotifyAllPacing"><code>func TestNotifyAllPacing(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		start := time.Now()
+		var at []time.Duration
+		send := func(string) { at = append(at, time.Since(start)) }
+		if err := notifyAll(t.Context(), []string{"a", "b", "c"}, time.Second, send); err != nil {
+			t.Fatal(err)
+		}
+		if want := []time.Duration{time.Second, 2 * time.Second, 3 * time.Second}; !slices.Equal(at, want) {
+			t.Errorf("通知的時間 = %v, want %v", at, want)
+		}
+
+		ctx, cancel := context.WithTimeout(t.Context(), 1500*time.Millisecond)
+		defer cancel()
+		at, start = nil, time.Now()
+		err := notifyAll(ctx, []string{"a", "b", "c"}, time.Second, send)
+		if !errors.Is(err, context.DeadlineExceeded) || len(at) != 1 {
+			t.Errorf("1.5 秒逾時：錯誤 = %v、通知了 %d 位；want DeadlineExceeded、1 位", err, len(at))
+		}
+	})
+}</code></pre>
+    <ul class="notes">
+      <li>第一個 tick 在一個間隔<strong>之後</strong>才來，不是馬上。要第一件立刻做，就先做一次再進迴圈。</li>
+      <li>收的一方太慢時，Ticker 會丟掉跟不上的 tick，不會累積一堆，之後一口氣放行。</li>
+      <li><code>defer t.Stop()</code>：Go 1.23 起沒有 Stop 的 Ticker 也會被回收，但不用了就停掉，意圖比較清楚。只需要 channel 的話，<code>time.Tick(d)</code> 在 Go 1.23 之後也可以放心用。</li>
+      <li>需要「平常每秒一個，但允許偶爾一次衝幾個」這種 token bucket 的限速，可以用 Go 團隊維護的 <code>golang.org/x/time/rate</code>：<code>rate.NewLimiter(r, b)</code>，每次做事前呼叫 <code>lim.Wait(ctx)</code>。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="choose">
+    <h2 id="choose">7. 怎麼選</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 214" role="img" aria-label="四種情況對應四種模式：一大批工作、人力固定用 worker pool；每件事各開一個但同時有上限用 semaphore；資料要一站一站加工用管線；一起做、任一失敗就全部停用 Group 或 errgroup">
+        <title>情況與模式</title>
+        <rect class="soft" x="16" y="16" width="274" height="36" rx="8"/>
+        <text class="sm" x="153" y="39" text-anchor="middle">一大批工作，人力固定</text>
+        <rect class="soft" x="16" y="66" width="274" height="36" rx="8"/>
+        <text class="sm" x="153" y="89" text-anchor="middle">每件事各開一個，但同時有上限</text>
+        <rect class="soft" x="16" y="116" width="274" height="36" rx="8"/>
+        <text class="sm" x="153" y="139" text-anchor="middle">資料要一站一站加工</text>
+        <rect class="soft" x="16" y="166" width="274" height="36" rx="8"/>
+        <text class="sm" x="153" y="189" text-anchor="middle">一起做，任一個失敗就全部停</text>
+        <path class="wire" d="M290 34 H302"/>
+        <path class="tip" d="M314 34 L302 28 L302 40 Z"/>
+        <path class="wire" d="M290 84 H302"/>
+        <path class="tip" d="M314 84 L302 78 L302 90 Z"/>
+        <path class="wire" d="M290 134 H302"/>
+        <path class="tip" d="M314 134 L302 128 L302 140 Z"/>
+        <path class="wire" d="M290 184 H302"/>
+        <path class="tip" d="M314 184 L302 178 L302 190 Z"/>
+        <rect class="acc" x="314" y="16" width="150" height="36" rx="8"/>
+        <text class="sm mono" x="389" y="39" text-anchor="middle">worker pool</text>
+        <rect class="acc" x="314" y="66" width="150" height="36" rx="8"/>
+        <text class="sm mono" x="389" y="89" text-anchor="middle">semaphore</text>
+        <rect class="acc" x="314" y="116" width="150" height="36" rx="8"/>
+        <text class="sm" x="389" y="139" text-anchor="middle">管線</text>
+        <rect class="acc" x="314" y="166" width="150" height="36" rx="8"/>
+        <text class="sm mono" x="389" y="189" text-anchor="middle">Group / errgroup</text>
+      </svg>
+      <figcaption>這些模式常常一起用：管線的某一站開 worker pool，Group 加上限制數量，每個工作再遵守速率限制。</figcaption>
+    </figure>
+    <p>這些模式背後是同一組原則，比記住每個模式更重要：</p>
+    <ul class="notes">
+      <li><strong>每個 goroutine 都要有人負責等它結束</strong>。開 goroutine 的函式，回傳之前就要等它們結束（WaitGroup、Group），或是把「怎麼讓它結束」交給呼叫的人（ctx、close channel）。這樣函式回傳之後，就不會有它開的 goroutine 還在背景亂跑。</li>
+      <li><strong>輸入沒有上限時，並行就要有上限</strong>。工作來自使用者、檔案、網路，數量就不受你控制；用 worker pool 或 semaphore 把同時的數量固定下來。</li>
+      <li><strong>會等待的地方都要能被取消</strong>：送、收、睡、呼叫外部服務，都放進有 <code>ctx.Done()</code> 的 select，或用收 ctx 的 API。</li>
+      <li><strong>誰送誰 close</strong>，而且只 close 一次（<a href="15-channels.html#close">15 章</a>）。</li>
+      <li><strong>先寫循序的版本</strong>。並行有成本：程式變複雜、測試變難、goroutine 和 channel 本身也要時間。先確認慢在哪裡（等外部服務？算太多？），量測之後再並行，而且只並行慢的那一段。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="pitfalls">
+    <h2 id="pitfalls">常見錯誤</h2>
+    <h3 id="pit-wait-first">1. 先 Wait 再收結果</h3>
+    <p>結果 channel 沒有緩衝，worker 送結果時要有人收；收的那一方卻卡在 wg.Wait 等 worker 結束，兩邊互等，永遠結束不了（練習 5）。把「等 worker 結束再 close 結果」放到另一個 goroutine，或改用寫格子的做法。</p>
+
+    <h3 id="pit-no-close">2. 忘了 close(jobs)</h3>
+    <p>worker 的 <code>for range jobs</code> 永遠等下一個工作，wg.Wait 永遠等不到。派工的一方送完一定要 close（第 1 節）。</p>
+
+    <h3 id="pit-unbounded">3. 輸入有多少就開多少 goroutine 去打外部服務</h3>
+    <p>一萬筆資料就同時開一萬條連線，對方會把你擋掉，你自己的檔案描述元也可能用完。用 semaphore 或 worker pool 限制數量（第 2 節）。</p>
+
+    <h3 id="pit-stage-leak">4. 管線的某一站送的時候不聽 ctx</h3>
+    <p>下游不收了，這一站就永遠卡在送，前面每一站跟著卡住，全部洩漏。每一站送的時候都要 select ctx（第 3 節）。</p>
+
+    <h3 id="pit-ignore-ctx">5. Group 裡的工作不聽 ctx</h3>
+    <p>第一個錯誤發生了、ctx 也取消了，其他工作卻照樣做完，Wait 只能等它們。工作內部會等待的地方都要聽 ctx（第 5 節）。</p>
+
+    <h3 id="pit-order">6. 依賴完成的順序</h3>
+    <p>並行的結果「在我電腦上每次順序都一樣」只是巧合。需要順序就用格子或重新排序（第 4 節）；測試裡比較結果前先排序，或用 synctest 控制時間。</p>
   </section>
 
   <section aria-labelledby="java">
@@ -143,19 +684,149 @@
         <tbody>
           <tr><th scope="row">執行緒池</th><td class="java"><code>Executors.newFixedThreadPool(n)</code></td><td>n 個 goroutine 讀同一個 channel</td></tr>
           <tr><th scope="row">限制同時數量</th><td class="java"><code>Semaphore</code></td><td>有緩衝的 channel</td></tr>
-          <tr><th scope="row">等全部完成</th><td class="java"><code>invokeAll</code>、<code>CompletableFuture.allOf</code></td><td><code>sync.WaitGroup</code>；要收集錯誤用 <code>errgroup</code></td></tr>
+          <tr><th scope="row">等全部、任一失敗就取消</th><td class="java"><code>invokeAll</code>、<code>CompletableFuture.allOf</code> 加上自己處理取消</td><td>本章的 Group、<code>golang.org/x/sync/errgroup</code></td></tr>
           <tr><th scope="row">串流處理</th><td class="java"><code>stream().parallel()</code></td><td>自己用 channel 接成管線</td></tr>
+          <tr><th scope="row">保持順序</th><td class="java"><code>forEachOrdered</code></td><td>寫進對應的格子，或重新排序</td></tr>
+          <tr><th scope="row">限制速率</th><td class="java">Guava 的 <code>RateLimiter</code></td><td><code>time.Ticker</code>、<code>golang.org/x/time/rate</code></td></tr>
         </tbody>
       </table>
     </div>
+    <p>Java 的 ExecutorService 是一個要記得 shutdown 的物件；Go 的 worker pool 只是幾個 goroutine 和一個 channel，close(jobs) 就是 shutdown，wg.Wait 就是 awaitTermination。</p>
+  </section>
+
+  <section aria-labelledby="exercises">
+    <h2 id="exercises">練習</h2>
+    <p>題目在 <code>exercises/19-concurrency-patterns/exercises.go</code>。測試用 synctest 的假時間，精確檢查花了多久、同時有幾個工作在跑，所以「看起來有並行」不夠，數字要剛好對。</p>
+    <pre class="shell"><code>go test -race ./exercises/19-concurrency-patterns/                  <span class="c"># 跑全部練習</span>
+go test -race ./exercises/19-concurrency-patterns/ -run TestLimit   <span class="c"># 只跑一題</span>
+go test -race -tags solution ./exercises/19-concurrency-patterns/   <span class="c"># 跑參考解答</span></code></pre>
+    <ol class="exercises">
+      <li>
+        <h3><span class="level l1">入門</span>練習 1：號碼牌</h3>
+        <p>一批工作，同時最多 n 個在做，全部做完才回傳。</p>
+        <pre class="code" data-src="exercises/19-concurrency-patterns/exercises.go#Limit"><code>func Limit(n int, tasks ...func()) {
+	// TODO: 實作
+}</code></pre>
+        <p>測試：<code>TestLimit</code>。6 個各要 1 秒的工作、同時 2 個，要剛好 3 秒。</p>
+        <details><summary>提示</summary><p>容量 n 的 channel 當號碼牌（第 2 節），在 wg.Go 之前拿牌，goroutine 裡 defer 還牌。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l2">進階</span>練習 2：照順序的 worker pool</h3>
+        <p>剛好 workers 個 goroutine，結果和輸入的順序相同。</p>
+        <pre class="code" data-src="exercises/19-concurrency-patterns/exercises.go#MapOrdered"><code>func MapOrdered[In, Out any](workers int, in []In, f func(In) Out) []Out {
+	// TODO: 實作
+	return nil
+}</code></pre>
+        <p>測試：<code>TestMapOrdered</code>。</p>
+        <details><summary>提示</summary><p>第 1 節的 cookAll 改成泛型、拿掉 ctx：jobs 送索引，結果寫進 <code>out[i]</code>，送完 close(jobs)，再 wg.Wait。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l3">挑戰</span>練習 3：湊一批再送</h3>
+        <p>外送單湊滿 size 張就一起派出去；等太久湊不滿，也先派出去。</p>
+        <pre class="code" data-src="exercises/19-concurrency-patterns/exercises.go#Batches"><code>func Batches[T any](ctx context.Context, in &lt;-chan T, size int, every time.Duration) &lt;-chan []T {
+	// TODO: 實作
+	out := make(chan []T)
+	close(out)
+	return out
+}</code></pre>
+        <p>測試：<code>TestBatches</code>。</p>
+        <details><summary>提示</summary><p>一個 goroutine 裡的 for-select，等三件事：in 的新值、計時 channel <code>flush</code>、ctx.Done()。flush 在這一批是空的時候是 nil（<a href="16-select.html#loop">nil channel 的 case 不會被選到</a>），收到這一批的第一個值時才設成 <code>time.After(every)</code>。送出一批時也要 select ctx，送完把 batch 和 flush 都設回 nil。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l3">挑戰</span>練習 4：有人數上限的 Group</h3>
+        <p>第 5 節的 Group，加上同時最多 limit 個，就是 errgroup 的 SetLimit。</p>
+        <pre class="code" data-src="exercises/19-concurrency-patterns/exercises.go#Team,NewTeam,Team.Go,Team.Wait"><code>type Team struct {
+	// TODO: 加上需要的欄位
+}
+
+func NewTeam(ctx context.Context, limit int) (*Team, context.Context) {
+	// TODO: 實作
+	return &amp;Team{}, ctx
+}
+
+func (t *Team) Go(f func() error) {
+	// TODO: 實作
+}
+
+func (t *Team) Wait() error {
+	// TODO: 實作
+	return nil
+}</code></pre>
+        <p>測試：<code>TestTeam</code>。</p>
+        <details><summary>提示</summary><p>照抄 Group 的欄位，再加一個號碼牌 channel（limit 小於 1 時保持 nil，代表不限制）。Go 在開 goroutine 之前拿牌，goroutine 結束時還牌。</p></details>
+      </li>
+      <li>
+        <h3><span class="level fix">找錯</span>練習 5：查不完的價目表</h3>
+        <p>worker pool 查每道菜的價格，結果一道菜都查不回來。</p>
+        <pre class="code" data-src="exercises/19-concurrency-patterns/exercises.go#Prices"><code>func Prices(workers int, dishes []string, lookup func(string) int) map[string]int {
+	type priced struct {
+		dish  string
+		price int
+	}
+	jobs := make(chan string)
+	results := make(chan priced)
+
+	var wg sync.WaitGroup
+	for range workers {
+		wg.Go(func() {
+			for d := range jobs {
+				results &lt;- priced{d, lookup(d)}
+			}
+		})
+	}
+	go func() {
+		defer close(jobs)
+		for _, d := range dishes {
+			jobs &lt;- d
+		}
+	}()
+
+	wg.Wait()
+	close(results)
+	out := make(map[string]int)
+	for r := range results {
+		out[r.dish] = r.price
+	}
+	return out
+}</code></pre>
+        <p>測試：<code>TestPrices</code>。測試在另一個 goroutine 呼叫 Prices，一秒內沒有回傳就判定失敗。</p>
+        <details><summary>提示</summary><p>常見錯誤 1。</p></details>
+      </li>
+    </ol>
+    <p><a href="https://github.com/xinqilin/GO-Playground/blob/main/exercises/19-concurrency-patterns/solution.go">參考解答</a>：先自己寫完再看。測試通過、而且 <code>-race</code> 沒有警告的寫法都是對的。</p>
+  </section>
+
+  <section aria-labelledby="recap">
+    <h2 id="recap">重點回顧</h2>
+    <ul class="recap">
+      <li>worker pool：固定 n 個 goroutine 從同一個 channel 拿工作，派完要 close。</li>
+      <li>semaphore：容量 n 的 channel 當號碼牌；在開 goroutine 之前拿牌，連 goroutine 數量都有上限。</li>
+      <li>管線的每一站：自己 close 輸出、送的時候 select ctx、收的時候 range 上一站。</li>
+      <li>結果要有順序：能寫格子就寫格子；串流才用重新排序，並限制同時的數量。</li>
+      <li>Group（errgroup）：第一個錯誤用 Once 記下並取消 ctx，Wait 等所有工作結束才回傳。</li>
+      <li>限制速率用 time.Ticker，每做一件事先收一個 tick；需要突發額度用 x/time/rate。</li>
+      <li>每個 goroutine 都要有人負責等它結束；會等待的地方都要能被取消。</li>
+      <li>並行程式的時間行為，用 synctest 的假時間精確測試。</li>
+      <li>先寫循序的版本，量測之後只並行慢的那一段。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="further">
+    <h2 id="further">延伸閱讀</h2>
+    <ul class="notes">
+      <li>Go blog：<a href="https://go.dev/blog/pipelines">Go Concurrency Patterns: Pipelines and cancellation</a>。</li>
+      <li>套件文件：<a href="https://pkg.go.dev/time#NewTicker">time.NewTicker</a>、<a href="https://pkg.go.dev/testing/synctest">testing/synctest</a>。</li>
+      <li>Go 團隊維護、不在標準庫的套件：<a href="https://pkg.go.dev/golang.org/x/sync/errgroup">golang.org/x/sync/errgroup</a>、<a href="https://pkg.go.dev/golang.org/x/time/rate">golang.org/x/time/rate</a>。</li>
+    </ul>
   </section>
 
   <section aria-labelledby="run">
     <h2 id="run">動手跑</h2>
     <p class="label">在 repo 根目錄</p>
-    <pre class="shell"><code>go run ./chapters/19-concurrency-patterns
-go test -race ./chapters/19-concurrency-patterns</code></pre>
-    <p><a href="https://github.com/xinqilin/GO-Playground/tree/main/chapters/19-concurrency-patterns">在 GitHub 看完整程式碼</a></p>
+    <pre class="shell"><code>go run ./chapters/19-concurrency-patterns              <span class="c"># 執行本章的示範</span>
+go test -race ./chapters/19-concurrency-patterns       <span class="c"># 驗證頁面上的每一段輸出和 synctest 測試</span>
+go test -race ./exercises/19-concurrency-patterns/     <span class="c"># 做練習</span></code></pre>
+    <p><a href="https://github.com/xinqilin/GO-Playground/tree/main/chapters/19-concurrency-patterns">在 GitHub 看本章完整程式碼</a>，或看<a href="https://github.com/xinqilin/GO-Playground/tree/main/exercises/19-concurrency-patterns">練習題</a>。</p>
   </section>
 </main>
 
