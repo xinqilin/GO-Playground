@@ -71,6 +71,7 @@ go test -race -tags solution ./...          # 全部測試，練習題改用參�
 
 | 章 | 主題 | 圖解 | 程式碼 |
 |---|---|---|---|
+| 20 | 檔案與 I/O | [看圖](https://bill-lin.dev/GO-Playground/20-files.html) | [chapters/20-files](chapters/20-files) |
 | 22 | 標準庫精選 | [看圖](https://bill-lin.dev/GO-Playground/22-stdlib.html) | [chapters/22-stdlib](chapters/22-stdlib) |
 | 26 | HTTP 服務 | [看圖](https://bill-lin.dev/GO-Playground/26-http.html) | [chapters/26-http](chapters/26-http) |
 
