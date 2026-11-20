@@ -4,95 +4,90 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>費氏數列｜Go 圖解手冊</title>
-<meta name="description" content="修好這個 repo 最早的 fibonacci 練習：無限遞迴、數列錯位、過時的 rand.Seed，並比較遞迴、迭代、記憶化三種寫法。">
+<meta name="description" content="從這個 repo 最早的 fibonacci 練習出發：修好無限遞迴和數列錯位，再用遞迴、記憶化、迴圈、疊代器、math/big 五種寫法算同一個數列，處理整數溢位，最後用 benchmark 比較。">
 <link rel="stylesheet" href="assets/style.css">
 </head>
 <body>
 <header class="site">
   <a href="index.html">Go 圖解手冊</a>
-  <span class="count">專題 1 / 4</span>
+  <span class="count">專題 1 / 7</span>
 </header>
 
-<main class="page">
+<main class="page long">
   <header class="hero">
     <div class="num" aria-hidden="true">P1</div>
-    <p class="eyebrow">專題 · 遞迴、迴圈、closure、benchmark</p>
+    <p class="eyebrow">專題 1 · 遞迴、記憶化、溢位、疊代器、math/big、benchmark</p>
     <h1>費氏數列</h1>
-    <p class="analogy">這個 repo 最早的練習：先修好三個 bug，再比較三種寫法差多少。</p>
+    <p class="analogy">0、1、1、2、3、5、8……每一項是前兩項的和。題目短到一行就說完，但要寫對、寫快、算到很大的數字，會一路碰到遞迴的代價、整數溢位和任意精度。這個專題把同一個數列用五種方法寫一次，每一種都有測試互相對照。</p>
   </header>
 
-  <section aria-labelledby="look">
-    <h2 id="look">看圖</h2>
-    <div class="figs">
-      <figure class="fig">
-        <svg viewBox="0 0 480 236" role="img" aria-label="舊版從 fib(0) 開始會一路呼叫 fib(-1)、fib(-2)，永遠停不下來；新版先處理 n 小於等於 0 回傳 0、n 等於 1 回傳 1">
-          <title>舊版為什麼停不下來</title>
-          <path class="wire faint" d="M240 12 V226"/>
-          <text class="small bold" x="117" y="24" text-anchor="middle">舊版</text>
-          <rect class="soft" x="57" y="40" width="120" height="32" rx="6"/>
-          <rect class="hot" x="57" y="96" width="120" height="32" rx="6"/>
-          <rect class="hot" x="57" y="152" width="120" height="32" rx="6"/>
-          <text class="small mono" x="117" y="61" text-anchor="middle">fib(0)</text>
-          <text class="small mono t-hot" x="117" y="117" text-anchor="middle">fib(-1)</text>
-          <text class="small mono t-hot" x="117" y="173" text-anchor="middle">fib(-2)</text>
-          <path class="wire hot-ln" d="M117 72 V86 M117 128 V142"/>
-          <path class="tip hot-tip" d="M117 94 L111 83 L123 83 Z"/>
-          <path class="tip hot-tip" d="M117 150 L111 139 L123 139 Z"/>
-          <text class="bold t-hot" x="117" y="212" text-anchor="middle">……stack overflow</text>
+  <nav class="toc-inline" aria-labelledby="toc-title">
+    <p class="label" id="toc-title">本專題內容</p>
+    <ol>
+      <li><a href="#goal">這個專題做什麼</a></li>
+      <li><a href="#recursive">照定義寫：遞迴</a></li>
+      <li><a href="#memo">記住算過的：記憶化</a></li>
+      <li><a href="#iterative">只記兩個數：迴圈</a></li>
+      <li><a href="#overflow">溢位：int 的上限</a></li>
+      <li><a href="#seq">一項一項產生：疊代器</a></li>
+      <li><a href="#big">沒有上限：math/big</a></li>
+      <li><a href="#bench">比一比：benchmark</a></li>
+      <li><a href="#cli">包成命令列工具</a></li>
+      <li><a href="#challenges">延伸挑戰</a></li>
+      <li><a href="#recap">重點回顧</a></li>
+      <li><a href="#further">延伸閱讀</a></li>
+    </ol>
+  </nav>
 
-          <text class="small bold" x="363" y="24" text-anchor="middle">新版</text>
-          <rect class="acc" x="283" y="40" width="160" height="32" rx="6"/>
-          <rect class="acc" x="283" y="86" width="160" height="32" rx="6"/>
-          <rect class="soft" x="263" y="132" width="200" height="32" rx="6"/>
-          <text class="small mono" x="363" y="61" text-anchor="middle">n ≤ 0 → 0</text>
-          <text class="small mono" x="363" y="107" text-anchor="middle">n == 1 → 1</text>
-          <text class="small mono" x="363" y="153" text-anchor="middle">F(n-1) + F(n-2)</text>
-          <text class="small t-acc" x="363" y="200" text-anchor="middle">遇到停止條件就往回算</text>
-        </svg>
-        <figcaption>舊版的停止條件只有 n == 1 或 n == 2，從 0 開始就一路往負數走，最後 stack overflow。新版先處理 n ≤ 0 和 n == 1。</figcaption>
-      </figure>
-
-      <figure class="fig">
-        <svg viewBox="0 0 480 216" role="img" aria-label="直接遞迴計算 F(5) 的呼叫樹，F(3) 和 F(2) 被重複計算好幾次">
-          <title>直接遞迴會重複計算</title>
-          <rect class="hot" x="380" y="20" width="16" height="16" rx="3"/>
-          <text class="sm" x="402" y="33">重複算的</text>
-          <path class="wire faint" d="M240 44 L140 70 M240 44 L340 70 M140 98 L80 124 M140 98 L200 124 M340 98 L300 124 M340 98 L380 124 M80 152 L50 178 M80 152 L110 178 M200 152 L175 178 M200 152 L225 178 M300 152 L275 178 M300 152 L325 178"/>
-          <rect class="acc" x="214" y="16" width="52" height="28" rx="6"/>
-          <rect class="soft" x="114" y="70" width="52" height="28" rx="6"/>
-          <rect class="hot" x="314" y="70" width="52" height="28" rx="6"/>
-          <rect class="hot" x="54" y="124" width="52" height="28" rx="6"/>
-          <rect class="hot" x="174" y="124" width="52" height="28" rx="6"/>
-          <rect class="hot" x="274" y="124" width="52" height="28" rx="6"/>
-          <rect class="soft" x="354" y="124" width="52" height="28" rx="6"/>
-          <rect class="hot" x="28" y="178" width="44" height="28" rx="6"/>
-          <rect class="soft" x="88" y="178" width="44" height="28" rx="6"/>
-          <rect class="soft" x="153" y="178" width="44" height="28" rx="6"/>
-          <rect class="soft" x="203" y="178" width="44" height="28" rx="6"/>
-          <rect class="soft" x="253" y="178" width="44" height="28" rx="6"/>
-          <rect class="soft" x="303" y="178" width="44" height="28" rx="6"/>
-          <text class="small mono" x="240" y="35" text-anchor="middle">F(5)</text>
-          <text class="small mono" x="140" y="89" text-anchor="middle">F(4)</text>
-          <text class="small mono" x="340" y="89" text-anchor="middle">F(3)</text>
-          <text class="small mono" x="80" y="143" text-anchor="middle">F(3)</text>
-          <text class="small mono" x="200" y="143" text-anchor="middle">F(2)</text>
-          <text class="small mono" x="300" y="143" text-anchor="middle">F(2)</text>
-          <text class="small mono" x="380" y="143" text-anchor="middle">F(1)</text>
-          <text class="small mono" x="50" y="197" text-anchor="middle">F(2)</text>
-          <text class="small mono" x="110" y="197" text-anchor="middle">F(1)</text>
-          <text class="small mono" x="175" y="197" text-anchor="middle">F(1)</text>
-          <text class="small mono" x="225" y="197" text-anchor="middle">F(0)</text>
-          <text class="small mono" x="275" y="197" text-anchor="middle">F(1)</text>
-          <text class="small mono" x="325" y="197" text-anchor="middle">F(0)</text>
-        </svg>
-        <figcaption>照定義直接遞迴，F(3)、F(2) 會被算好幾次；n 每加 1，工作量大約變成 1.6 倍。迭代或記憶化每一項只算一次。</figcaption>
-      </figure>
-    </div>
+  <section aria-labelledby="goal">
+    <h2 id="goal">這個專題做什麼</h2>
+    <p>這個 repo 最早有一支 Exercise/fibonacci.go，裡面有三個問題：隨機抽到 n = 0 時會無限遞迴，最後 stack overflow；<code>fibonacci(2)</code> 回傳 2，整個數列錯開一格；還在呼叫 Go 1.20 起已經 deprecated 的 rand.Seed。這個專題從修好它開始，最後做出一個命令列工具：</p>
+    <pre class="shell"><code>go run ./projects/fibonacci -n 30</code></pre>
+    <pre class="out" data-example="projects/fibonacci#Example_run"><code>F(30) = 832040
+遞迴：832040（呼叫了 2692537 次）
+記憶化：832040
+迴圈：832040
+math/big：832040</code></pre>
+    <pre class="shell"><code>go run ./projects/fibonacci -n 100
+go run ./projects/fibonacci -list 15</code></pre>
+    <pre class="out" data-example="projects/fibonacci#Example_runBig"><code>F(100) = 354224848179261915075
+超過 int 的範圍（最大到 F(92)），只用 math/big 計算</code></pre>
+    <pre class="out" data-example="projects/fibonacci#Example_runList"><code>0 1 1 2 3 5 8 13 21 34 55 89 144 233 377</code></pre>
+    <ul class="notes">
+      <li><strong>fib.go</strong>：五種寫法，每一種都是一個函式。</li>
+      <li><strong>main.go</strong>：命令列介面，解析 -n 和 -list。</li>
+      <li><strong>main_test.go</strong>：表格測試、和 math/big 的交叉比對、Example、benchmark。</li>
+    </ul>
+    <p>先備：<a href="04-functions.html#recursion">04 章的遞迴</a>和 <a href="04-functions.html#closures">closure</a>、<a href="13-iterators.html">13 章疊代器</a>、<a href="30-testing.html">30 章測試</a>、<a href="31-performance.html">31 章 benchmark</a>。</p>
   </section>
 
-  <section aria-labelledby="code">
-    <h2 id="code">核心程式</h2>
-    <pre class="code"><code>func Recursive(n int) int {
+  <section aria-labelledby="recursive">
+    <h2 id="recursive">1. 照定義寫：遞迴</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 256" role="img" aria-label="Recursive(5) 的呼叫樹：F(5) 呼叫 F(4) 和 F(3)，F(4) 又呼叫 F(3) 和 F(2)，一路展開到 F(1) 和 F(0)。整棵樹有 15 個節點，F(3) 被算了 2 次，F(2) 被算了 3 次">
+        <title>Recursive(5) 的呼叫樹</title>
+        <path class="wire faint" d="M240 34 L140 56 M240 34 L355 56 M140 80 L85 102 M140 80 L195 102 M355 80 L305 102 M355 80 L405 102 M85 126 L50 148 M85 126 L120 148 M195 126 L170 148 M195 126 L220 148 M305 126 L280 148 M305 126 L330 148 M50 172 L28 194 M50 172 L76 194"/>
+        <rect class="acc" x="218" y="10" width="44" height="24" rx="5"/><text class="sm mono" x="240" y="27" text-anchor="middle">F(5)</text>
+        <rect class="soft" x="118" y="56" width="44" height="24" rx="5"/><text class="sm mono" x="140" y="73" text-anchor="middle">F(4)</text>
+        <rect class="hot" x="333" y="56" width="44" height="24" rx="5"/><text class="sm mono" x="355" y="73" text-anchor="middle">F(3)</text>
+        <rect class="hot" x="63" y="102" width="44" height="24" rx="5"/><text class="sm mono" x="85" y="119" text-anchor="middle">F(3)</text>
+        <rect class="soft" x="173" y="102" width="44" height="24" rx="5"/><text class="sm mono" x="195" y="119" text-anchor="middle">F(2)</text>
+        <rect class="soft" x="283" y="102" width="44" height="24" rx="5"/><text class="sm mono" x="305" y="119" text-anchor="middle">F(2)</text>
+        <rect class="soft" x="383" y="102" width="44" height="24" rx="5"/><text class="sm mono" x="405" y="119" text-anchor="middle">F(1)</text>
+        <rect class="soft" x="28" y="148" width="44" height="24" rx="5"/><text class="sm mono" x="50" y="165" text-anchor="middle">F(2)</text>
+        <rect class="soft" x="98" y="148" width="44" height="24" rx="5"/><text class="sm mono" x="120" y="165" text-anchor="middle">F(1)</text>
+        <rect class="soft" x="148" y="148" width="44" height="24" rx="5"/><text class="sm mono" x="170" y="165" text-anchor="middle">F(1)</text>
+        <rect class="soft" x="198" y="148" width="44" height="24" rx="5"/><text class="sm mono" x="220" y="165" text-anchor="middle">F(0)</text>
+        <rect class="soft" x="258" y="148" width="44" height="24" rx="5"/><text class="sm mono" x="280" y="165" text-anchor="middle">F(1)</text>
+        <rect class="soft" x="308" y="148" width="44" height="24" rx="5"/><text class="sm mono" x="330" y="165" text-anchor="middle">F(0)</text>
+        <rect class="soft" x="6" y="194" width="44" height="24" rx="5"/><text class="sm mono" x="28" y="211" text-anchor="middle">F(1)</text>
+        <rect class="soft" x="54" y="194" width="44" height="24" rx="5"/><text class="sm mono" x="76" y="211" text-anchor="middle">F(0)</text>
+        <text class="sm" x="240" y="246" text-anchor="middle">15 次呼叫：F(3) 算了 2 次，F(2) 算了 3 次</text>
+      </svg>
+      <figcaption>每一次呼叫都會再分成兩次，同樣的值被算了一遍又一遍。n 每加 1，呼叫次數大約變成 1.6 倍。</figcaption>
+    </figure>
+    <p>最直接的寫法就是把定義翻成程式：</p>
+    <pre class="code" data-src="projects/fibonacci/fib.go#Recursive"><code>func Recursive(n int) int {
 	if n &lt;= 0 {
 		return 0
 	}
@@ -100,33 +95,435 @@
 		return 1
 	}
 	return Recursive(n-1) + Recursive(n-2)
-}
+}</code></pre>
+    <p>兩個停止條件都很重要。舊版只寫了 <code>n == 1</code> 和 <code>n == 2</code>：從 F(0) 開始會呼叫 F(-1)、F(-2)，永遠碰不到停止條件；而且 F(2) 被寫成 2，整個數列錯開一格。新版用 <code>n &lt;= 0</code> 一次擋下 0 和所有負數。</p>
+    <p>這個寫法正確，但非常慢。數一數它到底呼叫了自己幾次：</p>
+    <pre class="code" data-src="projects/fibonacci/fib.go#countCalls"><code>func countCalls(n int) int {
+	calls := 0
+	var f func(int) int
+	f = func(n int) int {
+		calls++
+		if n &lt;= 0 {
+			return 0
+		}
+		if n == 1 {
+			return 1
+		}
+		return f(n-1) + f(n-2)
+	}
+	f(n)
+	return calls
+}</code></pre>
+    <pre class="out" data-example="projects/fibonacci#Example_countCalls"><code>Recursive(5) 呼叫了 15 次
+Recursive(10) 呼叫了 177 次
+Recursive(20) 呼叫了 21891 次
+Recursive(30) 呼叫了 2692537 次</code></pre>
+    <ul class="notes">
+      <li>呼叫次數剛好是 2·F(n+1) − 1，TestCountCalls 對 n = 0 到 25 驗證了這個關係。F(30) 只是 832040，卻要呼叫兩百多萬次。</li>
+      <li>countCalls 用一個 closure 改外面的 calls 變數。函式要遞迴呼叫自己的 closure 時，必須先宣告變數 <code>var f func(int) int</code>，再把函式指定給它，否則函式本體裡還看不到 f。</li>
+      <li>遞迴的深度是 n，每一層都佔一點 stack。Go 的 goroutine stack 會自動長大，所以不會像 C 那樣很快就爆掉，但慢的問題還在。</li>
+    </ul>
+  </section>
 
-func Iterative(n int) int {
+  <section aria-labelledby="memo">
+    <h2 id="memo">2. 記住算過的：記憶化</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 200" role="img" aria-label="記憶化：計算 F(n) 之前先查表，表裡有就直接回傳；沒有才遞迴計算 F(n-1) 加 F(n-2)，算完存進表裡。表從 n 等於 2 開始累積：1、2、3、5、8、13">
+        <title>先查表，再計算</title>
+        <rect class="acc" x="8" y="20" width="96" height="40" rx="8"/>
+        <text class="sm mono" x="56" y="45" text-anchor="middle">fib(n)</text>
+        <path class="wire" d="M104 40 H140"/>
+        <rect class="soft" x="140" y="20" width="120" height="40" rx="8"/>
+        <text class="sm" x="200" y="45" text-anchor="middle">表裡有嗎？</text>
+        <path class="wire" d="M260 40 H296"/>
+        <text class="sm t-acc" x="278" y="30" text-anchor="middle">有</text>
+        <rect class="acc" x="296" y="20" width="176" height="40" rx="8"/>
+        <text class="sm" x="384" y="45" text-anchor="middle">直接回傳</text>
+        <path class="wire" d="M200 60 V84"/>
+        <text class="sm" x="212" y="78">沒有</text>
+        <rect class="hot" x="96" y="84" width="376" height="40" rx="8"/>
+        <text class="sm" x="284" y="109" text-anchor="middle">算 fib(n-1) + fib(n-2)，存進表裡</text>
+        <text class="sm mono" x="8" y="166">memo</text>
+        <rect class="soft" x="56" y="146" width="56" height="30" rx="4"/><text class="sm mono" x="84" y="166" text-anchor="middle">2:1</text>
+        <rect class="soft" x="116" y="146" width="56" height="30" rx="4"/><text class="sm mono" x="144" y="166" text-anchor="middle">3:2</text>
+        <rect class="soft" x="176" y="146" width="56" height="30" rx="4"/><text class="sm mono" x="204" y="166" text-anchor="middle">4:3</text>
+        <rect class="soft" x="236" y="146" width="56" height="30" rx="4"/><text class="sm mono" x="264" y="166" text-anchor="middle">5:5</text>
+        <rect class="soft" x="296" y="146" width="56" height="30" rx="4"/><text class="sm mono" x="324" y="166" text-anchor="middle">6:8</text>
+        <rect class="soft" x="356" y="146" width="56" height="30" rx="4"/><text class="sm mono" x="384" y="166" text-anchor="middle">7:13</text>
+        <text class="sm mono" x="440" y="166" text-anchor="middle">…</text>
+      </svg>
+      <figcaption>每個 n 只會真的計算一次。呼叫次數從「指數」降到「大約 2n 次」，代價是一張表的記憶體。</figcaption>
+    </figure>
+    <pre class="code" data-src="projects/fibonacci/fib.go#Memoized"><code>func Memoized() func(int) int {
+	memo := map[int]int{}
+	var fib func(int) int
+	fib = func(n int) int {
+		if n &lt;= 0 {
+			return 0
+		}
+		if n == 1 {
+			return 1
+		}
+		if v, ok := memo[n]; ok {
+			return v
+		}
+		v := fib(n-1) + fib(n-2)
+		memo[n] = v
+		return v
+	}
+	return fib
+}</code></pre>
+    <ul class="notes">
+      <li>Memoized 回傳一個函式，表 memo 是它捕獲的變數（<a href="04-functions.html#closures">04 章</a>）。每次呼叫 Memoized() 都得到一張新的表，兩個呼叫端不會互相影響。</li>
+      <li>寫法和 Recursive 幾乎一樣，只是在計算前查表、計算後存表。這是記憶化最大的優點：不用改演算法，就把重複的計算拿掉。</li>
+      <li>表用 map 很直覺，但 n 是連續的小整數，用長度 n+1 的 slice 更省（延伸挑戰 1）。</li>
+      <li>這個 closure 不能同時被多個 goroutine 使用：map 不是並行安全的（<a href="07-maps.html">07 章</a>）。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="iterative">
+    <h2 id="iterative">3. 只記兩個數：迴圈</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 188" role="img" aria-label="迴圈的寫法像一個寬度 2 的窗戶在數列上往右滑：一開始 a 是 0、b 是 1，每走一步 a 換成原本的 b，b 換成 a 加 b。走 n 步之後 a 就是 F(n)">
+        <title>往右滑的窗戶</title>
+        <text class="sm mono" x="20" y="28">0</text><text class="sm mono" x="70" y="28">1</text><text class="sm mono" x="120" y="28">1</text><text class="sm mono" x="170" y="28">2</text><text class="sm mono" x="220" y="28">3</text><text class="sm mono" x="270" y="28">5</text><text class="sm mono" x="320" y="28">8</text><text class="sm mono" x="370" y="28">13</text><text class="sm mono" x="420" y="28">21</text>
+        <rect class="acc" x="10" y="44" width="90" height="30" rx="6"/>
+        <text class="sm mono" x="24" y="64">a</text><text class="sm mono" x="74" y="64">b</text>
+        <text class="sm" x="120" y="64">第 0 步：a = F(0)</text>
+        <rect class="acc" x="60" y="86" width="90" height="30" rx="6"/>
+        <text class="sm mono" x="74" y="106">a</text><text class="sm mono" x="124" y="106">b</text>
+        <text class="sm" x="170" y="106">第 1 步：a = F(1)</text>
+        <rect class="acc" x="110" y="128" width="90" height="30" rx="6"/>
+        <text class="sm mono" x="124" y="148">a</text><text class="sm mono" x="174" y="148">b</text>
+        <text class="sm" x="220" y="148">第 2 步：a = F(2)</text>
+        <text class="sm mono" x="240" y="180" text-anchor="middle">a, b = b, a+b</text>
+      </svg>
+      <figcaption>不需要表，也不需要遞迴：任何時候只要知道最後兩項，就能算出下一項。</figcaption>
+    </figure>
+    <pre class="code" data-src="projects/fibonacci/fib.go#Iterative"><code>func Iterative(n int) int {
 	a, b := 0, 1
 	for range max(n, 0) {
 		a, b = b, a+b
 	}
 	return a
 }</code></pre>
-    <p class="label">go run ./projects/fibonacci -n 30</p>
-    <pre class="out"><code>F(30)
-迭代： 832040
-記憶化： 832040
-遞迴： 832040</code></pre>
-    <p class="label">go test -run='^$' -bench=. ./projects/fibonacci（本機 Apple Silicon）</p>
-    <pre class="out"><code>BenchmarkRecursive25-10    	    3604	    329268 ns/op
-BenchmarkIterative25-10    	127197861	         9.433 ns/op</code></pre>
+    <ul class="notes">
+      <li><code>a, b = b, a+b</code> 是 Go 的多重指定：右邊的值全部先算好，再一起指定給左邊（<a href="https://go.dev/ref/spec#Assignment_statements">規格</a>）。所以不需要暫存變數，也不會用到更新到一半的 a。</li>
+      <li><code>for range max(n, 0)</code>：Go 1.22 起可以 range 一個整數；用 max 把負數當成 0，迴圈一次都不跑，回傳 F(0) = 0。</li>
+      <li>時間和 n 成正比，記憶體固定只有兩個變數。這是 n 在 int 範圍內時最好的寫法。</li>
+    </ul>
   </section>
 
-  <section aria-labelledby="notes">
-    <h2 id="notes">工程師筆記</h2>
+  <section aria-labelledby="overflow">
+    <h2 id="overflow">4. 溢位：int 的上限</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 190" role="img" aria-label="int 的範圍是負的九百多京到正的九百多京。F(92) 還在範圍內，F(93) 超過了最大值，加法的結果繞回負數那一端，變成一個負的數字，而且程式不會報錯">
+        <title>超過最大值就繞回負數</title>
+        <rect class="soft" x="16" y="60" width="448" height="30" rx="4"/>
+        <text class="sm mono" x="16" y="48">MinInt</text>
+        <text class="sm mono" x="240" y="48" text-anchor="middle">0</text>
+        <text class="sm mono" x="464" y="48" text-anchor="end">MaxInt</text>
+        <path class="wire faint" d="M240 60 V90"/>
+        <rect class="acc" x="418" y="60" width="18" height="30"/>
+        <text class="sm" x="427" y="116" text-anchor="middle">F(92)</text>
+        <rect class="hot" x="104" y="60" width="18" height="30"/>
+        <text class="sm t-hot" x="113" y="116" text-anchor="middle">F(93)？</text>
+        <path class="wire hot-ln dash" d="M450 90 C450 160 113 160 113 126"/>
+        <text class="sm t-hot" x="282" y="178" text-anchor="middle">超過 MaxInt，繞回負數，不會報錯</text>
+      </svg>
+      <figcaption>Go 的整數運算溢位時不會 panic，也沒有警告：結果就是繞回去之後的值（<a href="https://go.dev/ref/spec#Integer_overflow">規格</a>）。這是刻意的設計，但要由你自己檢查。</figcaption>
+    </figure>
+    <p>64 位元的 int 最大約 9.2 × 10¹⁸，F(92) 是最後一個放得下的項。Iterative(93) 不會失敗，只會默默給你一個錯的負數：</p>
+    <pre class="code" data-src="projects/fibonacci/fib.go#maxN,ErrOverflow,Checked"><code>const maxN = 92
+
+var ErrOverflow = errors.New("超過 int 的範圍")
+
+func Checked(n int) (int, error) {
+	if n &lt;= 0 {
+		return 0, nil
+	}
+	a, b := 0, 1 // F(0)、F(1)
+	for range n - 1 {
+		if a &gt; math.MaxInt-b {
+			return 0, fmt.Errorf("F(%d)：%w", n, ErrOverflow)
+		}
+		a, b = b, a+b
+	}
+	return b, nil
+}</code></pre>
+    <pre class="out" data-example="projects/fibonacci#Example_overflow"><code>math.MaxInt   = 9223372036854775807
+F(92)         = 7540113804746346429
+F(93)         = 12200160415121876738
+Iterative(93) = -6246583658587674878
+F(93)：超過 int 的範圍</code></pre>
     <ul class="notes">
-      <li>遞迴先寫停止條件，而且要涵蓋所有可能的輸入，包括 0 和負數；測試表格裡也要放這些邊界值。</li>
-      <li>舊版的 <code>rand.Seed(time.Now().UnixNano())</code> 不用再寫：Go 1.20 起 <code>math/rand</code> 會自動用隨機種子，新程式建議直接用 <code>math/rand/v2</code>。</li>
-      <li>64 位元的 <code>int</code> 最多放得下 F(92)；再大就會溢位，要改用 <code>math/big</code>。</li>
-      <li>把參數解析和輸出放進 <code>run(args, out)</code>，<code>main</code> 只負責接上 <code>os.Args</code> 和 <code>os.Stdout</code>，測試就能直接呼叫 <code>run</code>。</li>
-      <li>同樣算 F(25)，遞迴比迭代慢了三萬倍以上。先找對演算法，再談最佳化。</li>
+      <li><strong>先檢查再加</strong>：<code>a &gt; math.MaxInt-b</code> 等於「a + b 會超過 MaxInt」，但這個比較本身不會溢位。等加完再檢查結果是不是負數也能抓到這次，但那是依賴溢位後的行為，意圖不清楚。</li>
+      <li>Checked 從 F(1) 開始只走 n−1 步，讓最後一步算出來的正好是 F(n)。如果照 Iterative 走 n 步，算 F(92) 時最後一步會多算一個用不到、而且會溢位的 F(93)，誤報錯誤。這種差一的問題，靠 TestAgreeWithBig 從 0 到 92 每一項都比對才抓得到。</li>
+      <li>錯誤用 %w 包住 ErrOverflow，呼叫端用 errors.Is 判斷（<a href="11-errors.html">11 章</a>）。</li>
+      <li>int 在 32 位元的平台只有 32 位元，maxN 會小很多。需要固定大小時用 int64 或 uint64（<a href="01-variables.html#int-size">01 章</a>）。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="seq">
+    <h2 id="seq">5. 一項一項產生：疊代器</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 196" role="img" aria-label="Seq 是推送式的疊代器：Seq 每算出一項就呼叫 yield 把它交給 for range 的迴圈本體；迴圈本體 break 時 yield 回傳 false，Seq 就停下來。下一項會溢位時，Seq 自己結束">
+        <title>Seq 推、迴圈收</title>
+        <rect class="acc" x="8" y="16" width="200" height="140" rx="10"/>
+        <text class="sm bold mono" x="20" y="40">Seq()</text>
+        <text class="sm" x="20" y="68">算出 a</text>
+        <text class="sm mono" x="20" y="96">yield(a)</text>
+        <text class="sm" x="20" y="124">下一項會溢位？</text>
+        <text class="sm" x="20" y="146">會：結束</text>
+        <rect class="soft" x="272" y="16" width="200" height="140" rx="10"/>
+        <text class="sm bold mono" x="284" y="40">for v := range Seq()</text>
+        <text class="sm" x="284" y="68">迴圈本體處理 v</text>
+        <text class="sm" x="284" y="96">夠了就 break</text>
+        <path class="wire acc-ln" d="M208 92 H264"/>
+        <path class="tip acc-tip" d="M272 92 l-10 -6 v12 z"/>
+        <text class="sm t-acc" x="240" y="84" text-anchor="middle">v</text>
+        <path class="wire hot-ln" d="M272 112 H216"/>
+        <path class="tip hot-tip" d="M208 112 l10 -6 v12 z"/>
+        <text class="sm t-hot" x="240" y="130" text-anchor="middle">false</text>
+        <text class="sm" x="240" y="184" text-anchor="middle">break 讓 yield 回傳 false，Seq 就要停下來</text>
+      </svg>
+      <figcaption>疊代器把「怎麼產生」和「要用幾個、怎麼用」分開。Seq 不知道呼叫端要幾項，呼叫端也不用知道怎麼算（<a href="13-iterators.html">13 章</a>）。</figcaption>
+    </figure>
+    <pre class="code" data-src="projects/fibonacci/fib.go#Seq"><code>func Seq() iter.Seq[int] {
+	return func(yield func(int) bool) {
+		a, b := 0, 1
+		nextFits := true // b 是正確的值嗎（之前的加法沒有溢位）
+		for {
+			if !yield(a) || !nextFits {
+				return
+			}
+			nextFits = a &lt;= math.MaxInt-b
+			a, b = b, a+b
+		}
+	}
+}</code></pre>
+    <pre class="code" data-src="projects/fibonacci/main.go#printList"><code>func printList(out io.Writer, count int) error {
+	if count &lt; 1 || count &gt; maxN+1 {
+		return fmt.Errorf("list 必須介於 1 到 %d，收到 %d", maxN+1, count)
+	}
+	var terms []string
+	for v := range Seq() {
+		terms = append(terms, strconv.Itoa(v))
+		if len(terms) == count {
+			break
+		}
+	}
+	fmt.Fprintln(out, strings.Join(terms, " "))
+	return nil
+}</code></pre>
+    <ul class="notes">
+      <li><strong>yield 回傳 false 就要停</strong>。呼叫端 break 之後還繼續 yield，執行時會 panic（<a href="13-iterators.html#yield">13 章</a>）。</li>
+      <li><strong>nextFits</strong>：和 Checked 一樣的檢查，只是位置不同。算出 F(93) 會溢位時，F(92) 還是正確的，所以要先 yield 它再結束。結果是剛好 93 項：F(0) 到 F(92)，TestAgreeWithBig 檢查了數量和每一項。</li>
+      <li>呼叫端想要幾項就拿幾項，-list 15 只算了 15 項。同一個 Seq 也可以搭配 slices.Collect 收集全部、或在 for range 裡找第一個超過一百萬的項。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="big">
+    <h2 id="big">6. 沒有上限：math/big</h2>
+    <p>F(100) 有 21 位數，int 放不下。math/big 的 Int 可以表示任意大的整數，大小只受記憶體限制：</p>
+    <pre class="code" data-src="projects/fibonacci/fib.go#Big"><code>func Big(n int) *big.Int {
+	a, b := big.NewInt(0), big.NewInt(1)
+	for range max(n, 0) {
+		a.Add(a, b)
+		a, b = b, a
+	}
+	return a
+}</code></pre>
+    <pre class="out" data-example="projects/fibonacci#Example_big"><code>F(1000) 有 209 位數，開頭是 4346655768…，結尾是 …6849228875</code></pre>
+    <ul class="notes">
+      <li><strong>結果寫進 receiver</strong>：<code>a.Add(a, b)</code> 把 a + b 的結果存進 a，並回傳 a。math/big 的方法都是這個形式（z.Op(x, y)），讓你重複使用同一個 Int，不用每一步都配置新的數字。</li>
+      <li><strong>交換指標</strong>：<code>a, b = b, a</code> 交換的是兩個 *big.Int 指標，不是數字本身，所以很便宜。加完之後 a 存的是新的一項，交換後它變成 b，舊的 b 變成 a。</li>
+      <li><strong>*big.Int 不要直接複製值</strong>：<code>x := *a</code> 會讓兩個 Int 共用內部的陣列。要複製用 <code>new(big.Int).Set(a)</code>。</li>
+      <li>代價是速度：每一次加法都要處理一個陣列，數字越大越慢。int 放得下時，用 int。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="bench">
+    <h2 id="bench">7. 比一比：benchmark</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 214" role="img" aria-label="計算 F(30) 的時間，對數刻度：遞迴約 357 萬奈秒，記憶化約 1494 奈秒，math/big 約 257 奈秒，疊代器約 73 奈秒，迴圈約 11 奈秒。遞迴比迴圈慢了三十萬倍">
+        <title>F(30) 要多久（對數刻度）</title>
+        <path class="wire faint dash" d="M141 8 V188 M186 8 V188 M231 8 V188 M276 8 V188 M321 8 V188 M366 8 V188"/>
+        <text class="sm mono" x="8" y="30">recursive</text>
+        <rect class="hot" x="96" y="14" width="296" height="24" rx="3"/>
+        <text class="sm mono" x="400" y="31">3.57 ms</text>
+        <text class="sm mono" x="8" y="66">memoized</text>
+        <rect class="soft" x="96" y="50" width="143" height="24" rx="3"/>
+        <text class="sm mono" x="247" y="67">1494 ns</text>
+        <text class="sm mono" x="8" y="102">big</text>
+        <rect class="soft" x="96" y="86" width="109" height="24" rx="3"/>
+        <text class="sm mono" x="213" y="103">257 ns</text>
+        <text class="sm mono" x="8" y="138">seq</text>
+        <rect class="soft" x="96" y="122" width="84" height="24" rx="3"/>
+        <text class="sm mono" x="188" y="139">73 ns</text>
+        <text class="sm mono" x="8" y="174">iterative</text>
+        <rect class="acc" x="96" y="158" width="47" height="24" rx="3"/>
+        <text class="sm mono" x="151" y="175">11 ns</text>
+        <text class="sm mute" x="96" y="206">每一格代表 10 倍</text>
+      </svg>
+      <figcaption>對數刻度：長條每多一段就是慢 10 倍。遞迴和迴圈差了五個數量級。</figcaption>
+    </figure>
+    <pre class="code" data-src="projects/fibonacci/main_test.go#BenchmarkFib"><code>func BenchmarkFib(b *testing.B) {
+	const n = 30
+	b.Run("recursive", func(b *testing.B) {
+		for b.Loop() {
+			Recursive(n)
+		}
+	})
+	b.Run("memoized", func(b *testing.B) {
+		for b.Loop() {
+			Memoized()(n)
+		}
+	})
+	b.Run("iterative", func(b *testing.B) {
+		for b.Loop() {
+			Iterative(n)
+		}
+	})
+	b.Run("seq", func(b *testing.B) {
+		for b.Loop() {
+			i := 0
+			for range Seq() {
+				if i == n {
+					break
+				}
+				i++
+			}
+		}
+	})
+	b.Run("big", func(b *testing.B) {
+		for b.Loop() {
+			Big(n)
+		}
+	})
+}</code></pre>
+    <pre class="shell"><code>go test -run='^$' -bench=Fib -benchmem ./projects/fibonacci</code></pre>
+    <p class="label">輸出（數字依機器不同）</p>
+    <pre class="out"><code>goos: darwin
+goarch: arm64
+pkg: github.com/xinqilin/GO-Playground/projects/fibonacci
+cpu: Apple M1 Pro
+BenchmarkFib/recursive-10         	     334	   3569604 ns/op	       0 B/op	       0 allocs/op
+BenchmarkFib/memoized-10          	  763836	      1494 ns/op	    2120 B/op	       7 allocs/op
+BenchmarkFib/iterative-10         	100000000	        10.99 ns/op	       0 B/op	       0 allocs/op
+BenchmarkFib/seq-10               	16366118	        73.26 ns/op	       0 B/op	       0 allocs/op
+BenchmarkFib/big-10               	 4700028	       257.0 ns/op	     176 B/op	       6 allocs/op
+PASS
+ok  	github.com/xinqilin/GO-Playground/projects/fibonacci	5.920s</code></pre>
+    <ul class="notes">
+      <li><strong>recursive</strong>：沒有配置任何記憶體，但呼叫了 269 萬次函式。演算法的複雜度一錯，再怎麼省記憶體都救不回來。</li>
+      <li><strong>memoized</strong>：快了兩千多倍，但每次都建一張新的 map，map 長大時要配置好幾次（7 allocs）。benchmark 裡每一圈都呼叫 Memoized()，量的是「從空的表開始」的成本。</li>
+      <li><strong>iterative</strong>：30 次加法，11 奈秒，沒有任何配置。</li>
+      <li><strong>seq</strong>：同樣是 30 次加法，多了每一項一次的 yield 呼叫，慢了幾倍，但仍然不配置記憶體。換來的是呼叫端可以自由決定要幾項。</li>
+      <li><strong>big</strong>：每次都配置兩個 big.Int，加法也比較重。F(30) 用不到它，F(100) 以上只能用它。</li>
+      <li>結論不是「永遠用最快的」：F(n) 在 int 範圍內用迴圈；要一串數列用疊代器；超過範圍用 math/big；遞迴適合用來寫出第一個正確的版本，作為測試的對照組（<a href="31-performance.html">31 章</a>）。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="cli">
+    <h2 id="cli">8. 包成命令列工具</h2>
+    <p>main 只做一件事：呼叫 run，把錯誤印到 stderr，用 exit code 2 結束。真正的邏輯在 run 裡，參數和輸出都從外面傳進來，所以 Example 和測試可以直接呼叫它（<a href="21-cli.html">21 章</a>）：</p>
+    <pre class="code" data-src="projects/fibonacci/main.go#run,main"><code>func run(args []string, out io.Writer) error {
+	fs := flag.NewFlagSet("fibonacci", flag.ContinueOnError)
+	fs.SetOutput(out)
+	n := fs.Int("n", 10, "要算第幾項（0 以上）")
+	list := fs.Int("list", 0, fmt.Sprintf("改成列出前幾項（1 到 %d）", maxN+1))
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *list != 0 {
+		return printList(out, *list)
+	}
+	if *n &lt; 0 {
+		return fmt.Errorf("n 不能是負數，收到 %d", *n)
+	}
+
+	v, err := Checked(*n)
+	if err != nil {
+		fmt.Fprintf(out, "F(%d) = %s\n", *n, Big(*n))
+		fmt.Fprintf(out, "超過 int 的範圍（最大到 F(%d)），只用 math/big 計算\n", maxN)
+		return nil
+	}
+	fmt.Fprintf(out, "F(%d) = %d\n", *n, v)
+	if *n &lt;= slowN {
+		fmt.Fprintf(out, "遞迴：%d（呼叫了 %d 次）\n", Recursive(*n), countCalls(*n))
+	} else {
+		fmt.Fprintf(out, "遞迴：略過（n 大於 %d 會跑很久）\n", slowN)
+	}
+	fmt.Fprintf(out, "記憶化：%d\n", Memoized()(*n))
+	fmt.Fprintf(out, "迴圈：%d\n", Iterative(*n))
+	fmt.Fprintf(out, "math/big：%s\n", Big(*n))
+	return nil
+}
+
+func main() {
+	if err := run(os.Args[1:], os.Stdout); err != nil {
+		fmt.Fprintln(os.Stderr, "錯誤：", err)
+		os.Exit(2)
+	}
+}</code></pre>
+    <ul class="notes">
+      <li><strong>FlagSet 加 ContinueOnError</strong>：參數錯誤時回傳 error，而不是直接結束整個程式，測試才測得到。TestRunErrors 試了負數、不是數字、超出範圍的 -list。</li>
+      <li><strong>依 n 選方法</strong>：先用 Checked；溢位時改用 math/big，告訴使用者原因。n 大於 35 時不跑遞迴，因為它會跑好幾秒以上。</li>
+      <li><strong>每一種寫法互相對照</strong>：-n 30 的輸出同時印出四種方法的結果。測試裡也是同一個想法：TestAgreeWithBig 讓最慢但最可靠的 math/big 當標準答案，其他寫法都要和它一致。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="challenges">
+    <h2 id="challenges">延伸挑戰</h2>
+    <p>這些題目沒有附測試，寫完用 go test 和 benchmark 自己驗證：先寫測試，再寫實作。</p>
+    <ol class="exercises">
+      <li>
+        <h3><span class="level l1">入門</span>挑戰 1：用 slice 當記憶化的表</h3>
+        <p>把 Memoized 的 map 換成長度 n+1 的 slice，零值 0 代表「還沒算過」（F(0) 本來就是 0，不影響結果）。用 -benchmem 比較兩個版本的配置次數和時間。</p>
+        <details><summary>提示</summary><p>slice 的大小要在知道 n 之後才能決定，所以函式的形狀要改成 <code>func MemoSlice(n int) int</code>，或讓表在需要時用 append 長大。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l2">進階</span>挑戰 2：列出某一段</h3>
+        <p>加上 -from 和 -to 兩個旗標，例如 <code>-from 10 -to 15</code> 印出 F(10) 到 F(15)。用 Seq 實作，不要先算出整個 slice 再切。</p>
+        <details><summary>提示</summary><p>for range Seq() 時自己數 index，小於 from 的跳過，超過 to 就 break。別忘了檢查 from ≤ to，以及 to 不能超過 92。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l2">進階</span>挑戰 3：fuzz 測試</h3>
+        <p>寫一個 FuzzChecked：對任意的 n（限制在 0 到 200），Checked 沒有錯誤時結果要和 Big 相同；有錯誤時 Big(n) 一定放不進 int64（<code>IsInt64()</code> 是 false）。</p>
+        <details><summary>提示</summary><p>fuzz 的輸入可以是任意 int，先用 <code>n = abs(n) % 201</code> 之類的方式收斂到想要的範圍（<a href="30-testing.html">30 章</a>）。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l3">挑戰</span>挑戰 4：fast doubling</h3>
+        <p>利用 F(2k) = F(k)·(2F(k+1) − F(k)) 和 F(2k+1) = F(k)² + F(k+1)²，從 n 的二進位最高位往下算，只要 log₂ n 步。用 math/big 實作，和 Big 比較 F(100000) 的 benchmark。</p>
+        <details><summary>提示</summary><p>從 (F(0), F(1)) = (0, 1) 開始，n 的每一個位元都先「加倍」得到 (F(2k), F(2k+1))，如果這個位元是 1，再往前走一步得到 (F(2k+1), F(2k+2))。用 TestAgreeWithBig 的方式和 Big 比對前幾百項。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l3">挑戰</span>挑戰 5：任意起始的兩項</h3>
+        <p>寫一個泛型的 <code>Sequence[T ~int | ~int64 | ~uint64](first, second T) iter.Seq[T]</code>，從任意兩項開始產生「每項是前兩項的和」的數列。Lucas 數列就是從 2、1 開始的版本：2、1、3、4、7、11……</p>
+        <details><summary>提示</summary><p>型別參數讓同一份程式用在不同的整數型別（<a href="12-generics.html">12 章</a>）。溢位的檢查要依型別不同：可以先只支援由呼叫端決定要拿幾項，不檢查溢位，並在文件寫清楚。</p></details>
+      </li>
+    </ol>
+  </section>
+
+  <section aria-labelledby="recap">
+    <h2 id="recap">重點回顧</h2>
+    <ul class="recap">
+      <li>遞迴寫起來最像定義，但重複計算讓它是指數時間；停止條件要涵蓋 0 和負數。</li>
+      <li>記憶化不改演算法，只加一張表；遞迴的 closure 要先宣告變數再指定。</li>
+      <li><code>a, b = b, a+b</code>：右邊先全部算完再指定，迴圈版只需要兩個變數。</li>
+      <li>Go 的整數溢位不會報錯；用 <code>a &gt; math.MaxInt-b</code> 在加之前檢查。</li>
+      <li>疊代器把產生和使用分開；yield 回傳 false 就要停。</li>
+      <li>math/big 沒有上限，方法把結果寫進 receiver，可以重複使用同一個數字。</li>
+      <li>用最簡單可靠的版本當標準答案，讓其他寫法和它逐項比對。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="further">
+    <h2 id="further">延伸閱讀</h2>
+    <ul class="notes">
+      <li>Go 語言規格：<a href="https://go.dev/ref/spec#Integer_overflow">Integer overflow</a>、<a href="https://go.dev/ref/spec#Assignment_statements">Assignment statements</a>、<a href="https://go.dev/ref/spec#Function_literals">Function literals</a>。</li>
+      <li>套件文件：<a href="https://pkg.go.dev/math/big">math/big</a>、<a href="https://pkg.go.dev/iter">iter</a>、<a href="https://pkg.go.dev/testing#hdr-Benchmarks">testing：Benchmarks</a>。</li>
     </ul>
   </section>
 
@@ -134,9 +531,11 @@ BenchmarkIterative25-10    	127197861	         9.433 ns/op</code></pre>
     <h2 id="run">動手跑</h2>
     <p class="label">在 repo 根目錄</p>
     <pre class="shell"><code>go run ./projects/fibonacci -n 30
+go run ./projects/fibonacci -n 1000
+go run ./projects/fibonacci -list 20
 go test ./projects/fibonacci
-go test -run='^$' -bench=. ./projects/fibonacci</code></pre>
-    <p><a href="https://github.com/xinqilin/GO-Playground/tree/main/projects/fibonacci">在 GitHub 看完整程式碼</a></p>
+go test -run='^$' -bench=Fib -benchmem ./projects/fibonacci</code></pre>
+    <p><a href="https://github.com/xinqilin/GO-Playground/tree/main/projects/fibonacci">在 GitHub 看完整程式碼</a>。</p>
   </section>
 </main>
 
