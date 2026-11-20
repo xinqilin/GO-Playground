@@ -100,6 +100,7 @@ go test -race -tags solution ./...          # 全部測試，練習題改用參�
 | P3 | 並行網址檢查器：worker pool、逾時、限速、退避重試、synctest | [看圖](https://bill-lin.dev/GO-Playground/project-urlchecker.html) | [projects/urlchecker](projects/urlchecker) |
 | P4 | 待辦事項 API：三層架構、驗證、並行修改、原子存檔、優雅關機 | [看圖](https://bill-lin.dev/GO-Playground/project-todoapi.html) | [projects/todoapi](projects/todoapi) |
 | P5 | 日誌分析：regexp、gzip、百分位數、三種輸出、exit code | [看圖](https://bill-lin.dev/GO-Playground/project-logstats.html) | [projects/logstats](projects/logstats) |
+| P6 | TCP 聊天室：每連線兩個 goroutine、鎖與待送區、deadline、優雅關機、net.Pipe + synctest | [看圖](https://bill-lin.dev/GO-Playground/project-chat.html) | [projects/chat](projects/chat) |
 
 ## 每一章的結構
 
