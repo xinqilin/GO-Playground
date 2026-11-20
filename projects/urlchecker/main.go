@@ -40,6 +40,10 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		fmt.Fprintln(stderr, "urlchecker：-workers 至少是 1，-timeout 要大於 0，其他數值不能是負數")
 		return 2
 	}
+	if cfg.PerSecond > int(time.Second) { // 節拍的間隔會小於 1 奈秒，NewTicker 會 panic
+		fmt.Fprintln(stderr, "urlchecker：-rate 最多是每秒 1000000000 個")
+		return 2
+	}
 
 	urls := fs.Args()
 	if len(urls) == 0 {

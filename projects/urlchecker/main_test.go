@@ -53,6 +53,7 @@ func TestRunExitCodes(t *testing.T) {
 		{nil, "", 2, "用法"},
 		{nil, "# 只有註解\n\n", 2, "用法"},
 		{[]string{"-workers", "0", "https://ok.test"}, "", 2, "-workers 至少是 1"},
+		{[]string{"-rate", "2000000000", "https://ok.test"}, "", 2, "-rate 最多"},
 		{[]string{"-timeout", "soon", "https://ok.test"}, "", 2, `invalid value "soon" for flag -timeout`},
 	}
 	for _, tt := range tests {
