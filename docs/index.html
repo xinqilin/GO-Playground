@@ -20,26 +20,29 @@
     <p class="lede">每一章先用大圖把觀念講懂，再附上可以執行、有測試的程式碼，並對照 Java 的寫法。</p>
     <a class="start" href="00-hello.html">從第 00 章開始 →</a>
     <figure class="fig route">
-      <svg viewBox="0 0 480 110" role="img" aria-label="學習路線：開始 00，基礎 01 到 08，型別 09 到 13，並行 14 到 19，實務 20 到 24，最後是專題">
+      <svg viewBox="0 0 480 110" role="img" aria-label="學習路線：開始 00，基礎 01 到 08，型別 09 到 13，並行 14 到 19，標準庫 20 到 28，實務 29 到 33，最後是專題">
         <title>學習路線</title>
         <path class="wire faint" d="M30 40 H450"/>
         <circle class="acc" cx="30" cy="40" r="10"/>
-        <circle class="acc" cx="114" cy="40" r="10"/>
-        <circle class="acc" cx="198" cy="40" r="10"/>
-        <circle class="acc" cx="282" cy="40" r="10"/>
-        <circle class="acc" cx="366" cy="40" r="10"/>
+        <circle class="acc" cx="100" cy="40" r="10"/>
+        <circle class="acc" cx="170" cy="40" r="10"/>
+        <circle class="acc" cx="240" cy="40" r="10"/>
+        <circle class="acc" cx="310" cy="40" r="10"/>
+        <circle class="acc" cx="380" cy="40" r="10"/>
         <circle class="hot" cx="450" cy="40" r="12"/>
         <text class="small bold" x="30" y="76" text-anchor="middle">開始</text>
-        <text class="small bold" x="114" y="76" text-anchor="middle">基礎</text>
-        <text class="small bold" x="198" y="76" text-anchor="middle">型別</text>
-        <text class="small bold" x="282" y="76" text-anchor="middle">並行</text>
-        <text class="small bold" x="366" y="76" text-anchor="middle">實務</text>
+        <text class="small bold" x="100" y="76" text-anchor="middle">基礎</text>
+        <text class="small bold" x="170" y="76" text-anchor="middle">型別</text>
+        <text class="small bold" x="240" y="76" text-anchor="middle">並行</text>
+        <text class="small bold" x="310" y="76" text-anchor="middle">標準庫</text>
+        <text class="small bold" x="380" y="76" text-anchor="middle">實務</text>
         <text class="small bold t-hot" x="450" y="76" text-anchor="middle">專題</text>
         <text class="sm mono" x="30" y="98" text-anchor="middle">00</text>
-        <text class="sm mono" x="114" y="98" text-anchor="middle">01–08</text>
-        <text class="sm mono" x="198" y="98" text-anchor="middle">09–13</text>
-        <text class="sm mono" x="282" y="98" text-anchor="middle">14–19</text>
-        <text class="sm mono" x="366" y="98" text-anchor="middle">20–24</text>
+        <text class="sm mono" x="100" y="98" text-anchor="middle">01–08</text>
+        <text class="sm mono" x="170" y="98" text-anchor="middle">09–13</text>
+        <text class="sm mono" x="240" y="98" text-anchor="middle">14–19</text>
+        <text class="sm mono" x="310" y="98" text-anchor="middle">20–28</text>
+        <text class="sm mono" x="380" y="98" text-anchor="middle">29–33</text>
         <text class="sm mono" x="450" y="98" text-anchor="middle">P1–P4</text>
       </svg>
       <figcaption>照順序讀最順；每一章也都能單獨讀。</figcaption>
@@ -54,6 +57,18 @@
       <li><strong>工程師筆記</strong>：實務上會踩的坑和慣例。</li>
       <li><strong>從 Java 來的你</strong>：同一件事在 Java 和 Go 的寫法對照。</li>
       <li><strong>動手跑</strong>：在 repo 裡執行的指令，以及完整程式碼的連結。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="pre">
+    <p class="part-label">先修</p>
+    <h2 id="pre">從零開始</h2>
+    <p>從來沒寫過程式的話，先讀這四章：從終端機和第一行程式開始，練到能用函式和清單解決小問題。已經會其他程式語言的話，可以直接從 00 開始。</p>
+    <ul class="toc">
+      <li><a href="pre-1-running.html"><span class="n">P1</span><span class="t">程式怎麼跑起來</span><span class="d">終端機、編譯與執行、讀懂錯誤訊息</span></a></li>
+      <li><a href="pre-2-values.html"><span class="n">P2</span><span class="t">值、變數與運算</span><span class="d">型別、指定、整數除法、追蹤表</span></a></li>
+      <li><a href="pre-3-decisions.html"><span class="n">P3</span><span class="t">判斷與重複</span><span class="d">if、決策樹、for、計數器與累加器</span></a></li>
+      <li><a href="pre-4-problems.html"><span class="n">P4</span><span class="t">拆解問題：函式與清單</span><span class="d">函式、slice、四個基本演算法、除錯</span></a></li>
     </ul>
   </section>
 
@@ -107,13 +122,27 @@
 
   <section aria-labelledby="p4">
     <p class="part-label">Part 4</p>
-    <h2 id="p4">工程實務</h2>
+    <h2 id="p4">標準庫實戰</h2>
     <ul class="toc">
-      <li><a href="20-packages-modules.html"><span class="n">20</span><span class="t">package 與 module</span><span class="d">匯出、internal、go.mod</span></a></li>
-      <li><a href="21-testing.html"><span class="n">21</span><span class="t">測試</span><span class="d">table-driven、benchmark、fuzz</span></a></li>
-      <li><a href="22-stdlib.html"><span class="n">22</span><span class="t">標準庫精選</span><span class="d">time、json、slog、uuid</span></a></li>
-      <li><a href="23-http.html"><span class="n">23</span><span class="t">HTTP 服務</span><span class="d">路由、middleware、httptest</span></a></li>
-      <li><a href="24-toolchain.html"><span class="n">24</span><span class="t">工具鏈</span><span class="d">vet、fix、build tag、交叉編譯</span></a></li>
+      <li><a href="20-files.html"><span class="n">20</span><span class="t">檔案與 I/O</span><span class="d">os、io、filepath、os.Root、embed</span></a></li>
+      <li><a href="21-cli.html"><span class="n">21</span><span class="t">命令列工具</span><span class="d">flag、子命令、結束碼、Ctrl-C</span></a></li>
+      <li><a href="22-time.html"><span class="n">22</span><span class="t">時間</span><span class="d">版面、時區、月底、計時器、假時間</span></a></li>
+      <li><a href="23-json.html"><span class="n">23</span><span class="t">JSON 與資料編碼</span><span class="d">json/v2、tag、串流、v1 對照、CSV</span></a></li>
+      <li><a href="24-text.html"><span class="n">24</span><span class="t">文字處理</span><span class="d">解析、regexp、text/template、html/template</span></a></li>
+      <li><a href="25-logging.html"><span class="n">25</span><span class="t">日誌</span><span class="d">slog、層級、遮蔽個資、Handler、測試</span></a></li>
+      <li><a href="26-http.html"><span class="n">26</span><span class="t">HTTP 服務</span><span class="d">路由、JSON API、middleware、逾時、關機、測試</span></a></li>
+      <li><a href="27-http-client.html"><span class="n">27</span><span class="t">HTTP 用戶端</span><span class="d">逾時、JSON、連線重用、重試、RoundTripper</span></a></li>
+      <li><a href="28-database.html"><span class="n">28</span><span class="t">資料庫</span><span class="d">database/sql、SQLite、交易、連線池、migration</span></a></li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="p5">
+    <p class="part-label">Part 5</p>
+    <h2 id="p5">工程實務</h2>
+    <ul class="toc">
+      <li><a href="29-packages-modules.html"><span class="n">29</span><span class="t">package 與 module</span><span class="d">匯出、internal、go.mod</span></a></li>
+      <li><a href="30-testing.html"><span class="n">30</span><span class="t">測試</span><span class="d">table-driven、benchmark、fuzz</span></a></li>
+      <li><a href="32-toolchain.html"><span class="n">32</span><span class="t">工具鏈</span><span class="d">vet、fix、build tag、交叉編譯</span></a></li>
     </ul>
   </section>
 
@@ -133,8 +162,9 @@
     <p>需要 Go 1.21 以上；<code>go.mod</code> 宣告的是 <code>go 1.27</code>，比較舊的 Go 會自動下載需要的版本。</p>
     <pre class="shell"><code>git clone https://github.com/xinqilin/GO-Playground.git
 cd GO-Playground
-go run ./chapters/00-hello   <span class="c"># 執行某一章</span>
-go test -race ./...          <span class="c"># 跑全部測試</span></code></pre>
+go run ./chapters/00-hello                  <span class="c"># 執行某一章</span>
+go test ./chapters/... ./projects/...       <span class="c"># 跑章節和專題的測試</span>
+go test ./exercises/03-control-flow/        <span class="c"># 做練習（寫完之前會失敗）</span></code></pre>
   </section>
 </main>
 

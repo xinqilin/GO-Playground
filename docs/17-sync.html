@@ -4,112 +4,749 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>sync 與 data race｜Go 圖解手冊</title>
-<meta name="description" content="什麼是 data race、怎麼用 race detector 抓出來，以及 sync.Mutex、atomic 與 sync.OnceValue。">
+<meta name="description" content="Go 的 data race 與 sync 套件：-race 怎麼用、找不到什麼，Mutex 與「先查再改」，map 同時寫入會當掉，RWMutex，sync.OnceValue 與 OnceValues，atomic 的計數、CompareAndSwap 與 Pointer，sync.Map 和 sync.Pool 的使用時機，初見 happens-before，附一定要加 -race 的練習題。">
 <link rel="stylesheet" href="assets/style.css">
 </head>
 <body>
 <header class="site">
   <a href="index.html">Go 圖解手冊</a>
-  <span class="count">17 / 24</span>
+  <span class="count">17 / 33</span>
 </header>
 
-<main class="page">
+<main class="page long">
   <header class="hero">
     <div class="num" aria-hidden="true">17</div>
     <p class="eyebrow">Part 3 · 並行 · 第 17 章</p>
     <h1>sync 與 data race</h1>
-    <p class="analogy">好幾個人同時在同一格寫字，結果一定亂掉；Mutex 是那一格的鑰匙。</p>
+    <p class="analogy">好幾個店員共用同一本帳簿，沒有規矩，帳一定會記錯。Mutex 是帳簿旁邊唯一的那支筆，拿到筆的人才能寫；atomic 是按一下就完成的計數器，不會按到一半。</p>
   </header>
 
-  <section aria-labelledby="look">
-    <h2 id="look">看圖</h2>
-    <div class="figs">
-      <figure class="fig">
-        <svg viewBox="0 0 480 262" role="img" aria-label="count 原本是 5；G1 和 G2 交錯執行，都讀到 5、都加 1、都寫回 6，結果少算了一次">
-          <title>data race：同時寫同一格</title>
-          <rect class="acc" x="180" y="16" width="120" height="36" rx="6"/>
-          <text class="small" x="240" y="39" text-anchor="middle">count = 5</text>
-          <text class="small mono bold" x="16" y="106">G1</text>
-          <rect class="soft" x="60" y="84" width="110" height="36" rx="6"/>
-          <rect class="soft" x="180" y="84" width="110" height="36" rx="6"/>
-          <rect class="soft" x="300" y="84" width="110" height="36" rx="6"/>
-          <text class="small" x="115" y="107" text-anchor="middle">讀到 5</text>
-          <text class="small" x="235" y="107" text-anchor="middle">加 1 得 6</text>
-          <text class="small" x="355" y="107" text-anchor="middle">寫回 6</text>
-          <text class="small mono bold" x="16" y="176">G2</text>
-          <rect class="soft" x="100" y="154" width="110" height="36" rx="6"/>
-          <rect class="soft" x="220" y="154" width="110" height="36" rx="6"/>
-          <rect class="soft" x="340" y="154" width="110" height="36" rx="6"/>
-          <text class="small" x="155" y="177" text-anchor="middle">讀到 5</text>
-          <text class="small" x="275" y="177" text-anchor="middle">加 1 得 6</text>
-          <text class="small" x="395" y="177" text-anchor="middle">寫回 6</text>
-          <rect class="hot" x="150" y="214" width="180" height="36" rx="6"/>
-          <text class="small bold t-hot" x="240" y="237" text-anchor="middle">count = 6，少算一次</text>
-        </svg>
-        <figcaption><code>count++</code> 是「讀、加、寫」三步。兩個 goroutine 交錯執行，都讀到 5、都寫回 6，就少算了一次。這叫 data race。</figcaption>
-      </figure>
+  <nav class="toc-inline" aria-labelledby="toc-title">
+    <p class="label" id="toc-title">本章內容</p>
+    <ol>
+      <li><a href="#goals">本章你會學到</a></li>
+      <li><a href="#race">data race</a></li>
+      <li><a href="#mutex">Mutex</a></li>
+      <li><a href="#rwmutex">RWMutex</a></li>
+      <li><a href="#once">只做一次</a></li>
+      <li><a href="#atomic">atomic</a></li>
+      <li><a href="#map-pool">sync.Map 與 sync.Pool</a></li>
+      <li><a href="#hb">happens-before</a></li>
+      <li><a href="#pitfalls">常見錯誤</a></li>
+      <li><a href="#java">從 Java 來的你</a></li>
+      <li><a href="#exercises">練習</a></li>
+      <li><a href="#recap">重點回顧</a></li>
+      <li><a href="#further">延伸閱讀</a></li>
+    </ol>
+  </nav>
 
-      <figure class="fig">
-        <svg viewBox="0 0 480 200" role="img" aria-label="Mutex 一次只讓一個 goroutine 進房間；G1 在裡面做 count++，G2、G3、G4 在門外排隊">
-          <title>Mutex 是一把鑰匙</title>
-          <rect class="acc" x="240" y="40" width="200" height="120" rx="12"/>
-          <text class="small mono t-acc" x="256" y="64">mu.Lock()</text>
-          <circle class="hot" cx="340" cy="104" r="22"/>
-          <text class="small bold t-hot" x="340" y="109" text-anchor="middle">G1</text>
-          <text class="small mono" x="340" y="146" text-anchor="middle">count++</text>
-          <circle class="soft" cx="180" cy="104" r="22"/>
-          <circle class="soft" cx="120" cy="104" r="22"/>
-          <circle class="soft" cx="60" cy="104" r="22"/>
-          <text class="small bold" x="180" y="109" text-anchor="middle">G2</text>
-          <text class="small bold" x="120" y="109" text-anchor="middle">G3</text>
-          <text class="small bold" x="60" y="109" text-anchor="middle">G4</text>
-          <path class="wire" d="M204 104 H230"/>
-          <path class="tip" d="M240 104 L228 98 L228 110 Z"/>
-          <text class="sm" x="120" y="150" text-anchor="middle">排隊等鑰匙</text>
-          <text class="small t-acc" x="340" y="188" text-anchor="middle">Unlock() 之後，下一個才能進去</text>
-        </svg>
-        <figcaption>Mutex 一次只讓一個 goroutine 進去；其他人在門外排隊，等前一個 Unlock 才輪到下一個。</figcaption>
-      </figure>
-    </div>
+  <section aria-labelledby="goals">
+    <h2 id="goals">本章你會學到</h2>
+    <ul class="notes">
+      <li>什麼是 data race，怎麼用 <code>-race</code> 把它找出來，以及它找不到什麼。</li>
+      <li>用 Mutex 保護共用的資料，讓「先查再改」成為一個不會被插隊的整體。</li>
+      <li>RWMutex 適合的場合和它的限制。</li>
+      <li>用 <code>sync.OnceValue</code>、<code>sync.OnceValues</code> 做只執行一次的初始化。</li>
+      <li>atomic 型別：計數、旗標、CompareAndSwap，以及整份換掉的 Pointer。</li>
+      <li>sync.Map 和 sync.Pool 什麼時候才該用。</li>
+      <li>初見 happens-before：為什麼「看起來會動」的同步其實是錯的。</li>
+    </ul>
+    <p>先備：<a href="14-goroutines.html">14 goroutine</a>（wg.Go）、<a href="15-channels.html">15 channel</a>、<a href="16-select.html">16 select</a>。</p>
   </section>
 
-  <section aria-labelledby="code">
-    <h2 id="code">最小範例</h2>
-    <pre class="code"><code>type Counter struct {
-	mu sync.Mutex
-	n  int
+  <section aria-labelledby="race">
+    <h2 id="race">1. data race</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 220" role="img" aria-label="店員 A 和店員 B 都先讀到 served 是 5，A 寫回 6，B 也寫回 6；兩個人各加一次，結果只多了 1">
+        <title>兩個人都先讀，再各自寫回</title>
+        <text class="small bold" x="90" y="16" text-anchor="middle">店員 A</text>
+        <text class="small mono" x="240" y="16" text-anchor="middle">served</text>
+        <text class="small bold" x="390" y="16" text-anchor="middle">店員 B</text>
+        <rect class="soft" x="20" y="24" width="140" height="32" rx="6"/>
+        <text class="small" x="90" y="46" text-anchor="middle">讀到 5</text>
+        <rect class="box" x="200" y="24" width="80" height="32" rx="6"/>
+        <text class="small mono" x="240" y="46" text-anchor="middle">5</text>
+        <path class="wire" d="M200 40 H172"/>
+        <path class="tip" d="M160 40 L172 34 L172 46 Z"/>
+        <rect class="soft" x="320" y="66" width="140" height="32" rx="6"/>
+        <text class="small" x="390" y="88" text-anchor="middle">讀到 5</text>
+        <rect class="box" x="200" y="66" width="80" height="32" rx="6"/>
+        <text class="small mono" x="240" y="88" text-anchor="middle">5</text>
+        <path class="wire" d="M280 82 H308"/>
+        <path class="tip" d="M320 82 L308 76 L308 88 Z"/>
+        <rect class="soft" x="20" y="108" width="140" height="32" rx="6"/>
+        <text class="small" x="90" y="130" text-anchor="middle">寫回 6</text>
+        <rect class="box" x="200" y="108" width="80" height="32" rx="6"/>
+        <text class="small mono" x="240" y="130" text-anchor="middle">6</text>
+        <path class="wire" d="M160 124 H188"/>
+        <path class="tip" d="M200 124 L188 118 L188 130 Z"/>
+        <rect class="soft" x="320" y="150" width="140" height="32" rx="6"/>
+        <text class="small" x="390" y="172" text-anchor="middle">寫回 6</text>
+        <rect class="hot" x="200" y="150" width="80" height="32" rx="6"/>
+        <text class="small mono" x="240" y="172" text-anchor="middle">6</text>
+        <path class="wire" d="M320 166 H292"/>
+        <path class="tip" d="M280 166 L292 160 L292 172 Z"/>
+        <text class="sm t-hot" x="240" y="208" text-anchor="middle">兩個人各加一次，結果只多了 1</text>
+      </svg>
+      <figcaption>served++ 是讀出來、加一、寫回去三步。兩個 goroutine 的步驟交錯，其中一次加一就不見了。</figcaption>
+    </figure>
+    <p>好幾個 goroutine 同時存取同一個變數，其中至少一個在寫，而且彼此之間沒有任何同步，這就是 <strong>data race</strong>。最常見的就是一起做 <code>served++</code>：它看起來是一個動作，其實是「讀出來、加一、寫回去」三步。把兩個店員交錯執行的步驟一行一行排出來：</p>
+    <pre class="code" data-src="chapters/17-sync/lost.go#lostUpdateDemo"><code>func lostUpdateDemo() {
+	served := 5
+	a := served    // 店員 A 讀到 5
+	b := served    // 店員 B 也讀到 5
+	served = a + 1 // A 寫回 6
+	served = b + 1 // B 也寫回 6
+	fmt.Println("兩個店員各記一份，結果是", served)
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/17-sync#Example_lostUpdateDemo"><code>兩個店員各記一份，結果是 6</code></pre>
+    <p>真的讓 10 個 goroutine 各做 1000 次 <code>served++</code>，這個程式故意寫錯，放在沒有測試的子資料夾裡：</p>
+    <pre class="code" data-src="chapters/17-sync/race/main.go#main"><code>func main() {
+	served := 0
+	var wg sync.WaitGroup
+	for range 10 {
+		wg.Go(func() {
+			for range 1000 {
+				served++ // data race：好幾個 goroutine 同時讀寫 served
+			}
+		})
+	}
+	wg.Wait()
+	fmt.Println("賣出", served, "份（應該是 10000）")
+}</code></pre>
+    <p class="label">執行五次</p>
+    <pre class="out"><code>賣出 8550 份（應該是 10000）
+賣出 6761 份（應該是 10000）
+賣出 10000 份（應該是 10000）
+賣出 7979 份（應該是 10000）
+賣出 10000 份（應該是 10000）</code></pre>
+    <p>每次結果都不一樣，有時候還剛好是對的。這正是 data race 可怕的地方：在你的電腦上測十次都過，上線之後才偶爾算錯。而且不只是少算：Go 的記憶體模型說，slice、string、interface 這種由好幾個欄位組成的值，被同時讀寫時可能讀到拼湊出來的內容，進一步讓記憶體損壞、程式當掉。</p>
+    <p>Go 內建了 <strong>race detector</strong>。在 go run、go build、go test 後面加上 <code>-race</code>，程式執行時會記錄每一次記憶體存取，一抓到沒有同步的同時存取就印出報告：</p>
+    <pre class="shell"><code>go run -race ./chapters/17-sync/race</code></pre>
+    <pre class="out err"><code>==================
+WARNING: DATA RACE
+Read at 0x00c000012158 by goroutine 13:
+  main.main.func1()
+      …/chapters/17-sync/race/main.go:21 +0x38
+
+Previous write at 0x00c000012158 by goroutine 8:
+  main.main.func1()
+      …/chapters/17-sync/race/main.go:21 +0x48
+
+Goroutine 13 (running) created at:
+  sync.(*WaitGroup).Go()
+      …/src/sync/waitgroup.go:238 +0x6c
+…
+==================
+賣出 7667 份（應該是 10000）
+Found 2 data race(s)
+exit status 66</code></pre>
+    <ul class="notes">
+      <li>報告指出兩次衝突的存取：哪一行讀、哪一行寫、各是哪個 goroutine，以及這兩個 goroutine 是在哪裡開出來的。</li>
+      <li>平常最常用的是 <code>go test -race</code>。寫並行程式時，測試一律加上它，CI 也要跑。</li>
+      <li>它只抓得到<strong>這一次執行真的發生</strong>的 race。沒被執行到的程式碼、測試裡沒有同時發生的情況，它都看不到，所以測試要真的開好幾個 goroutine 去打同一個東西。</li>
+      <li>代價不小：官方文件說，一般的程式記憶體會多用 5 到 10 倍，執行時間多 2 到 20 倍。用在測試和 CI，不要用在正式環境。</li>
+    </ul>
+    <p>修正的方法有三大類：不要共用（每個 goroutine 寫自己的格子，<a href="14-goroutines.html#results">14 章</a>）、用 channel 把資料交給另一個 goroutine（<a href="15-channels.html">15 章</a>）、真的要共用時加上同步，也就是這一章的 sync 和 atomic。</p>
+  </section>
+
+  <section aria-labelledby="mutex">
+    <h2 id="mutex">2. Mutex</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 200" role="img" aria-label="三個 goroutine 排隊等鎖；拿到鎖的那一個在上鎖的區間裡先查還有沒有，再減一；Unlock 之後下一個才能進來">
+        <title>一次只讓一個人進去</title>
+        <text class="sm" x="66" y="24" text-anchor="middle">排隊等 Lock</text>
+        <rect class="soft" x="16" y="36" width="100" height="32" rx="6"/>
+        <text class="sm" x="66" y="57" text-anchor="middle">goroutine</text>
+        <rect class="soft" x="16" y="80" width="100" height="32" rx="6"/>
+        <text class="sm" x="66" y="101" text-anchor="middle">goroutine</text>
+        <rect class="soft" x="16" y="124" width="100" height="32" rx="6"/>
+        <text class="sm" x="66" y="145" text-anchor="middle">goroutine</text>
+        <path class="wire" d="M116 96 H168"/>
+        <path class="tip" d="M180 96 L168 90 L168 102 Z"/>
+        <rect class="acc" x="180" y="30" width="180" height="140" rx="10"/>
+        <text class="small bold" x="270" y="56" text-anchor="middle">拿到鎖的人</text>
+        <rect class="box" x="200" y="70" width="140" height="34" rx="6"/>
+        <text class="small" x="270" y="93" text-anchor="middle">查還有沒有</text>
+        <path class="wire" d="M270 104 V112"/>
+        <path class="tip" d="M270 122 L264 110 L276 110 Z"/>
+        <rect class="box" x="200" y="122" width="140" height="34" rx="6"/>
+        <text class="small" x="270" y="145" text-anchor="middle">減一</text>
+        <path class="wire" d="M360 100 H402"/>
+        <path class="tip" d="M414 100 L402 94 L402 106 Z"/>
+        <text class="sm mono" x="385" y="90" text-anchor="middle">Unlock</text>
+        <text class="sm" x="447" y="105" text-anchor="middle">下一個</text>
+        <text class="sm" x="240" y="192" text-anchor="middle">同一時間只有一個 goroutine 在鎖裡面</text>
+      </svg>
+      <figcaption>Lock 和 Unlock 之間叫做臨界區（critical section）。同一時間只有一個 goroutine 能在裡面，其他人在 Lock 那裡排隊。</figcaption>
+    </figure>
+    <p><code>sync.Mutex</code>（互斥鎖）只有兩個方法：<code>Lock</code> 拿鎖，拿不到就等；<code>Unlock</code> 還鎖，讓下一個人進來。慣例是把 Mutex 和它保護的欄位放在同一個 struct 裡，而且放在那些欄位的上面：</p>
+    <pre class="code" data-src="chapters/17-sync/stock.go#Stock,Stock.Take,Stock.Left,stockDemo"><code>type Stock struct {
+	mu   sync.Mutex
+	left int
 }
 
-func (c *Counter) Inc() {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.n++
+func (s *Stock) Take() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.left == 0 {
+		return false
+	}
+	s.left--
+	return true
+}
+
+func (s *Stock) Left() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.left
+}
+
+func stockDemo() {
+	s := &amp;Stock{left: 30}
+	sold := make([]bool, 100)
+	var wg sync.WaitGroup
+	for i := range sold {
+		wg.Go(func() { sold[i] = s.Take() })
+	}
+	wg.Wait()
+
+	n := 0
+	for _, ok := range sold {
+		if ok {
+			n++
+		}
+	}
+	fmt.Printf("100 個人搶 30 份：賣出 %d 份，剩 %d 份\n", n, s.Left())
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/17-sync#Example_stockDemo"><code>100 個人搶 30 份：賣出 30 份，剩 0 份</code></pre>
+    <ul class="notes">
+      <li>零值的 Mutex 就是沒上鎖的鎖，不用初始化，<code>&amp;Stock{left: 30}</code> 就能用。</li>
+      <li><code>Lock</code> 之後馬上寫 <code>defer Unlock()</code>：中途 return、甚至 panic，鎖都會還回去。</li>
+      <li><strong>只是讀也要上鎖</strong>。Left 沒有上鎖的話，它和 Take 裡的寫入一樣構成 data race。</li>
+      <li>含有 Mutex 的 struct 不能複製，方法一律用指標 receiver，傳遞時也傳指標（常見錯誤 3）。</li>
+      <li>臨界區要短：鎖裡面只做讀寫共用資料的事。拿著鎖去讀檔、打 API、等 channel，其他人就全部跟著等。</li>
+    </ul>
+    <p>Take 的重點不只是「有上鎖」，而是<strong>「檢查還有沒有」和「減一」在同一段鎖裡</strong>。如果分成兩次各自上鎖，先呼叫 Left 查，再另外改，兩次之間就可能被別人插隊。把兩個客人的步驟排出來：</p>
+    <pre class="code" data-src="chapters/17-sync/stock.go#oversellDemo"><code>func oversellDemo() {
+	s := &amp;Stock{left: 1}
+	a := s.Left() // 客人 A 查：還有 1 份
+	b := s.Left() // 客人 B 也查：還有 1 份
+	if a &gt; 0 {
+		s.set(a - 1)
+		fmt.Println("A 買到了")
+	}
+	if b &gt; 0 {
+		s.set(b - 1)
+		fmt.Println("B 買到了")
+	}
+	fmt.Println("只有 1 份，卻賣出 2 份，剩", s.Left())
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/17-sync#Example_oversellDemo"><code>A 買到了
+B 買到了
+只有 1 份，卻賣出 2 份，剩 0</code></pre>
+    <p>這裡每一次讀寫都有鎖，race detector 一個字都不會說，但結果還是錯的。這叫 <strong>race condition</strong>：結果取決於執行的先後順序。data race 是記憶體層級的錯誤，工具抓得到；race condition 是邏輯上的錯誤，要靠你決定「哪些動作必須是一個整體」，然後用同一段鎖包起來。</p>
+    <p>Go 內建的 map 也不能同時寫。執行時期偵測到時，不是 panic，而是直接讓整個程式結束，recover 也接不住：</p>
+    <pre class="code" data-src="chapters/17-sync/mapcrash/main.go#main"><code>func main() {
+	orders := make(map[int]int)
+	var wg sync.WaitGroup
+	for shop := range 10 {
+		wg.Go(func() {
+			for n := range 1000 {
+				orders[shop*1000+n] = n // 好幾個 goroutine 同時寫 orders
+			}
+		})
+	}
+	wg.Wait()
+	fmt.Println("共", len(orders), "筆")
+}</code></pre>
+    <pre class="out err"><code>fatal error: concurrent map writes
+
+goroutine 20 [running]:
+internal/runtime/maps.fatal(…)
+…
+main.main.func1()
+	…/chapters/17-sync/mapcrash/main.go:20 +0x44
+…
+exit status 2</code></pre>
+    <p>這個偵測不保證每次都抓得到，抓不到的時候資料就悄悄壞掉了。給多個 goroutine 用的 map，一律和一把鎖放在一起（練習 3）。</p>
+  </section>
+
+  <section aria-labelledby="rwmutex">
+    <h2 id="rwmutex">3. RWMutex</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 190" role="img" aria-label="RLock 時好幾個查價的人可以一起在裡面；Lock 時只有一個改價的人在裡面，查價的人在外面等">
+        <title>一起讀，一個人寫</title>
+        <rect class="soft" x="16" y="36" width="214" height="110" rx="10"/>
+        <text class="small bold" x="123" y="62" text-anchor="middle">RLock：可以一起讀</text>
+        <rect class="box" x="32" y="80" width="56" height="40" rx="6"/>
+        <text class="sm" x="60" y="105" text-anchor="middle">查價</text>
+        <rect class="box" x="95" y="80" width="56" height="40" rx="6"/>
+        <text class="sm" x="123" y="105" text-anchor="middle">查價</text>
+        <rect class="box" x="158" y="80" width="56" height="40" rx="6"/>
+        <text class="sm" x="186" y="105" text-anchor="middle">查價</text>
+        <rect class="hot" x="250" y="36" width="214" height="110" rx="10"/>
+        <text class="small bold" x="357" y="62" text-anchor="middle">Lock：只有一個人寫</text>
+        <rect class="box" x="272" y="80" width="76" height="40" rx="6"/>
+        <text class="sm" x="310" y="105" text-anchor="middle">改價</text>
+        <rect class="box dash" x="366" y="80" width="80" height="40" rx="6"/>
+        <text class="sm mute" x="406" y="105" text-anchor="middle">查價等著</text>
+        <text class="sm" x="240" y="176" text-anchor="middle">有人在寫，誰都不能讀；有人在讀，就不能寫</text>
+      </svg>
+      <figcaption>RWMutex 分成讀鎖和寫鎖：讀鎖可以很多人同時拿，寫鎖只能一個人拿，而且拿寫鎖時不能有人在讀。</figcaption>
+    </figure>
+    <p>價目表一天改不到幾次，卻隨時有人在查。用 Mutex 的話，查價的人也得一個一個排隊。<code>sync.RWMutex</code> 多了一組讀鎖：<code>RLock</code> / <code>RUnlock</code> 給只讀的人用，可以很多人同時拿；要寫的人照樣用 <code>Lock</code> / <code>Unlock</code>，拿到時一個讀的人也沒有：</p>
+    <pre class="code" data-src="chapters/17-sync/menu.go#Menu,NewMenu,Menu.Price,Menu.SetPrice,menuDemo"><code>type Menu struct {
+	mu     sync.RWMutex
+	prices map[string]int
+}
+
+func NewMenu() *Menu {
+	return &amp;Menu{prices: make(map[string]int)}
+}
+
+func (m *Menu) Price(item string) (int, bool) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	p, ok := m.prices[item]
+	return p, ok
+}
+
+func (m *Menu) SetPrice(item string, price int) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.prices[item] = price
+}
+
+func menuDemo() {
+	m := NewMenu()
+	m.SetPrice("排骨飯", 90)
+
+	seen := make([]int, 50)
+	var wg sync.WaitGroup
+	for i := range seen {
+		wg.Go(func() { seen[i], _ = m.Price("排骨飯") })
+	}
+	wg.Go(func() { m.SetPrice("排骨飯", 95) })
+	wg.Wait()
+
+	ok := true
+	for _, p := range seen {
+		if p != 90 &amp;&amp; p != 95 {
+			ok = false
+		}
+	}
+	p, _ := m.Price("排骨飯")
+	fmt.Printf("50 個人查到的不是 90 就是 95：%t\n", ok)
+	fmt.Println("現在的價格", p)
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/17-sync#Example_menuDemo"><code>50 個人查到的不是 90 就是 95：true
+現在的價格 95</code></pre>
+    <p>改價和查價同時進行，每個人查到的不是舊價就是新價，不會讀到改到一半的 map。用 <code>go test -race</code> 跑也乾乾淨淨。使用 RWMutex 前，先知道這幾件事：</p>
+    <ul class="notes">
+      <li>不能升級：拿著讀鎖時呼叫 Lock，會等所有讀的人離開，包括你自己，永遠等不到。也不能從寫鎖降級成讀鎖。</li>
+      <li>不能重複拿讀鎖：有人在等寫鎖時，新的 RLock 會先等寫的人做完，避免寫的人一直等不到。所以同一個 goroutine 拿著讀鎖再 RLock 一次，可能和等待中的寫入卡成死結。</li>
+      <li>不一定比較快：RWMutex 本身要記的狀態比 Mutex 多。讀的區間很短、或寫入其實很頻繁時，換成 RWMutex 沒有好處。先用 Mutex，等 benchmark（「<a href="30-testing.html">測試</a>」那一章）證明鎖的競爭真的是瓶頸，再考慮換。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="once">
+    <h2 id="once">4. 只做一次</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 190" role="img" aria-label="好幾個 goroutine 同時呼叫；只有第一個真的執行 f，其他人等它跑完；最後大家拿到同一份結果">
+        <title>同時呼叫，只執行一次</title>
+        <rect class="soft" x="16" y="24" width="110" height="30" rx="6"/>
+        <text class="sm" x="71" y="44" text-anchor="middle">第 1 個呼叫</text>
+        <rect class="soft" x="16" y="70" width="110" height="30" rx="6"/>
+        <text class="sm" x="71" y="90" text-anchor="middle">第 2 個呼叫</text>
+        <rect class="soft" x="16" y="116" width="110" height="30" rx="6"/>
+        <text class="sm" x="71" y="136" text-anchor="middle">第 3 個呼叫</text>
+        <path class="wire acc-ln" d="M126 39 H170 V74 H202"/>
+        <path class="tip acc-tip" d="M214 74 L202 68 L202 80 Z"/>
+        <path class="wire faint dash" d="M126 85 H202"/>
+        <path class="wire faint dash" d="M126 131 H170 V96 H202"/>
+        <text class="sm mute" x="148" y="124">等</text>
+        <rect class="acc" x="214" y="56" width="130" height="58" rx="10"/>
+        <text class="small bold" x="279" y="82" text-anchor="middle">執行 f</text>
+        <text class="sm" x="279" y="102" text-anchor="middle">只有這一次</text>
+        <path class="wire" d="M344 85 H358"/>
+        <path class="tip" d="M370 85 L358 79 L358 91 Z"/>
+        <rect class="box" x="370" y="60" width="94" height="50" rx="8"/>
+        <text class="sm" x="417" y="82" text-anchor="middle">同一份</text>
+        <text class="sm" x="417" y="100" text-anchor="middle">結果</text>
+        <text class="sm" x="240" y="178" text-anchor="middle">f 跑完之前，其他呼叫的人都在等</text>
+      </svg>
+      <figcaption>OnceValue 回傳的函式第一次被呼叫時執行 f；同時呼叫的人等 f 跑完，之後每個人拿到的都是同一份結果。</figcaption>
+    </figure>
+    <p>讀設定檔、建立連線、載入菜單這類初始化，常常希望「第一次用到時才做，而且只做一次」。好幾個 goroutine 可能同時第一次用到，自己用 bool 判斷會變成 data race。<code>sync.OnceValue</code> 把這件事包好了：</p>
+    <pre class="code" data-src="chapters/17-sync/once.go#onceDemo"><code>func onceDemo() {
+	loads := 0
+	menu := sync.OnceValue(func() []string {
+		loads++
+		fmt.Println("讀取菜單")
+		return []string{"排骨飯", "雞腿飯"}
+	})
+
+	var wg sync.WaitGroup
+	for range 10 {
+		wg.Go(func() { menu() })
+	}
+	wg.Wait()
+	fmt.Println(menu(), "讀取次數", loads)
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/17-sync#Example_onceDemo"><code>讀取菜單
+[排骨飯 雞腿飯] 讀取次數 1</code></pre>
+    <p>OnceValue 收一個函式，回傳一個包好的新函式。第一次呼叫時執行 f；其他同時呼叫的人會等 f 跑完，不會跑第二次；之後的呼叫直接回傳存好的結果。f 裡寫入的東西（例如 loads），等到的人保證看得到，不用另外上鎖。同一系列還有：</p>
+    <ul class="notes">
+      <li><code>sync.OnceFunc(f)</code>：f 沒有回傳值，只要「做一次」。</li>
+      <li><code>sync.OnceValues(f)</code>：f 回傳兩個值，通常是 <code>(T, error)</code>。</li>
+      <li><code>sync.Once</code>：比較早的寫法，<code>var once sync.Once</code> 再呼叫 <code>once.Do(f)</code>，結果要自己存在外面的變數裡。上面三個函式是 Go 1.21 加入的，新程式優先用它們。</li>
+    </ul>
+    <p>要注意 OnceValues 連<strong>失敗也只算一次</strong>：</p>
+    <pre class="code" data-src="chapters/17-sync/once.go#onceErrDemo"><code>func onceErrDemo() {
+	tries := 0
+	load := sync.OnceValues(func() (int, error) {
+		tries++
+		return 0, errors.New("價目表讀取失敗")
+	})
+
+	for range 3 {
+		_, err := load()
+		fmt.Println(err)
+	}
+	fmt.Println("實際嘗試", tries, "次")
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/17-sync#Example_onceErrDemo"><code>價目表讀取失敗
+價目表讀取失敗
+價目表讀取失敗
+實際嘗試 1 次</code></pre>
+    <p>第一次讀取失敗，之後每次呼叫都拿到同一個錯誤，不會重試；f 如果 panic，之後每次呼叫也都用同一個值 panic。暫時性的錯誤（網路不穩）需要重試時，Once 系列就不適合，要自己用 Mutex 寫（練習 5）。</p>
+  </section>
+
+  <section aria-labelledby="atomic">
+    <h2 id="atomic">5. atomic</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 214" role="img" aria-label="CompareAndSwap 的重試迴圈：先讀出目前的值，再問它是不是還是剛剛讀到的那個；是就換成新值結束，不是代表被別人改過，回頭重讀再試">
+        <title>CompareAndSwap：沒被改過才換</title>
+        <rect class="soft" x="16" y="70" width="120" height="50" rx="8"/>
+        <text class="small" x="76" y="100" text-anchor="middle">讀出 cur</text>
+        <path class="wire" d="M136 95 H158"/>
+        <path class="tip" d="M170 95 L158 89 L158 101 Z"/>
+        <rect class="box" x="170" y="60" width="150" height="70" rx="10"/>
+        <text class="sm mono" x="245" y="88" text-anchor="middle">CompareAndSwap</text>
+        <text class="sm" x="245" y="112" text-anchor="middle">還是 cur 嗎？</text>
+        <path class="wire acc-ln" d="M320 80 H334 V52 H342"/>
+        <path class="tip acc-tip" d="M354 52 L342 46 L342 58 Z"/>
+        <rect class="acc" x="354" y="30" width="110" height="44" rx="8"/>
+        <text class="sm" x="409" y="57" text-anchor="middle">是：換上，結束</text>
+        <path class="wire hot-ln" d="M320 110 H334 V142 H342"/>
+        <path class="tip hot-tip" d="M354 142 L342 136 L342 148 Z"/>
+        <rect class="hot" x="354" y="120" width="110" height="44" rx="8"/>
+        <text class="sm" x="409" y="147" text-anchor="middle">不是：被改過</text>
+        <path class="wire hot-ln dash" d="M409 164 V184 H76 V132"/>
+        <path class="tip hot-tip" d="M76 120 L70 132 L82 132 Z"/>
+        <text class="sm t-hot" x="240" y="204" text-anchor="middle">回頭重讀再試</text>
+      </svg>
+      <figcaption>CompareAndSwap 一次完成「確認還是原來的值，就換成新值」。被別人搶先改過就失敗，重讀之後再試一次。</figcaption>
+    </figure>
+    <p>只有一個數字要共用時，用一把鎖有點大材小用。<code>sync/atomic</code> 提供的型別，每個操作都是不可分割的：別的 goroutine 只會看到操作之前或之後的值，不會看到做到一半的狀態。最常用的是計數：</p>
+    <pre class="code" data-src="chapters/17-sync/atomic.go#ticketDemo"><code>func ticketDemo() {
+	var next atomic.Int64
+	got := make([]int64, 200)
+	var wg sync.WaitGroup
+	for i := range got {
+		wg.Go(func() { got[i] = next.Add(1) })
+	}
+	wg.Wait()
+
+	slices.Sort(got)
+	last := got[len(got)-1]
+	unique := len(slices.Compact(got)) == len(got)
+	fmt.Printf("發出 %d 張，號碼不重複：%t，最大 %d\n", next.Load(), unique, last)
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/17-sync#Example_ticketDemo"><code>發出 200 張，號碼不重複：true，最大 200</code></pre>
+    <p><code>next.Add(1)</code> 一步完成「加一，並拿到加完的值」，所以 200 個人同時抽，號碼也不會重複。如果寫成先 <code>Add(1)</code>、再另外 <code>Load()</code> 拿號碼，兩步之間別人可能也加了，就會拿到重複的號碼。atomic 型別都是零值就能用、不能複製，常用的有：</p>
+    <div class="table-wrap">
+      <table class="vs">
+        <thead><tr><th scope="col">型別</th><th scope="col">用途</th></tr></thead>
+        <tbody>
+          <tr><th scope="row"><code>atomic.Int64</code>、<code>Int32</code>、<code>Uint64</code>……</th><td>計數器、序號：Add、Load、Store、Swap、CompareAndSwap</td></tr>
+          <tr><th scope="row"><code>atomic.Bool</code></th><td>旗標，例如「已經關閉了嗎」</td></tr>
+          <tr><th scope="row"><code>atomic.Pointer[T]</code></th><td>整份換掉的資料，例如設定、公告</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>Load 和 Store 各自是不可分割的，但「讀出來、判斷、寫回去」三步合起來就不是了，又回到第 2 節的先查再改。atomic 的解法是 <strong>CompareAndSwap</strong>（CAS）：只有值還是我剛剛讀到的那個時，才換成新的，並回傳 true；被別人搶先改過就回傳 false，重讀再試：</p>
+    <pre class="code" data-src="chapters/17-sync/atomic.go#raiseTo,maxDemo"><code>func raiseTo(best *atomic.Int64, v int64) {
+	for {
+		cur := best.Load()
+		if v &lt;= cur || best.CompareAndSwap(cur, v) {
+			return
+		}
+	}
+}
+
+func maxDemo() {
+	var best atomic.Int64
+	var wg sync.WaitGroup
+	for _, amount := range []int64{320, 85, 1260, 470, 990} {
+		wg.Go(func() { raiseTo(&amp;best, amount) })
+	}
+	wg.Wait()
+	fmt.Println("今天最大的一筆：", best.Load())
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/17-sync#Example_maxDemo"><code>今天最大的一筆： 1260</code></pre>
+    <p>好幾個欄位要一起換時，用 <code>atomic.Pointer[T]</code>：做一份全新的值，把指標整個換上去。讀的人拿到的永遠是某一份完整的值：</p>
+    <pre class="code" data-src="chapters/17-sync/atomic.go#Notice,noticeDemo"><code>type Notice struct {
+	Text  string
+	Until string
+}
+
+func noticeDemo() {
+	var board atomic.Pointer[Notice]
+	board.Store(&amp;Notice{Text: "正常營業", Until: "21:00"})
+
+	old := board.Swap(&amp;Notice{Text: "颱風提早打烊", Until: "18:00"})
+	now := board.Load()
+	fmt.Println("換下來的：", old.Text, old.Until)
+	fmt.Println("現在的：", now.Text, now.Until)
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/17-sync#Example_noticeDemo"><code>換下來的： 正常營業 21:00
+現在的： 颱風提早打烊 18:00</code></pre>
+    <p>換上去之後，就不要再改那一份 Notice 的欄位：讀的人可能正拿著它，改了就是 data race。要改就再做一份新的換上去（練習 4）。</p>
+    <p>atomic 還是 Mutex？只有一個獨立的值（計數、旗標、整份換掉的指標）用 atomic；好幾個值必須互相一致（次數和金額、名單和人數），用 Mutex。兩個各自 atomic 的欄位，分開讀時可能一個已經更新、另一個還沒有（練習 1）。拿不定主意時用 Mutex，比較不容易寫錯。</p>
+  </section>
+
+  <section aria-labelledby="map-pool">
+    <h2 id="map-pool">6. sync.Map 與 sync.Pool</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 196" role="img" aria-label="sync.Pool 的循環：從 Pool 借一個 Buffer，用它寫收據，Reset 清空，再還回 Pool；Pool 在 GC 時可能被清空">
+        <title>借、用、清空、還</title>
+        <rect class="soft" x="16" y="20" width="140" height="40" rx="8"/>
+        <text class="small mono" x="86" y="46" text-anchor="middle">Get</text>
+        <path class="wire" d="M156 40 H312"/>
+        <path class="tip" d="M324 40 L312 34 L312 46 Z"/>
+        <rect class="soft" x="324" y="20" width="140" height="40" rx="8"/>
+        <text class="small" x="394" y="46" text-anchor="middle">寫收據</text>
+        <path class="wire" d="M394 60 V118"/>
+        <path class="tip" d="M394 130 L388 118 L400 118 Z"/>
+        <rect class="soft" x="324" y="130" width="140" height="40" rx="8"/>
+        <text class="small mono" x="394" y="156" text-anchor="middle">Reset</text>
+        <path class="wire" d="M324 150 H168"/>
+        <path class="tip" d="M156 150 L168 144 L168 156 Z"/>
+        <rect class="soft" x="16" y="130" width="140" height="40" rx="8"/>
+        <text class="small mono" x="86" y="156" text-anchor="middle">Put</text>
+        <rect class="acc" x="165" y="70" width="150" height="56" rx="10"/>
+        <text class="small bold mono" x="240" y="94" text-anchor="middle">sync.Pool</text>
+        <text class="sm t-hot" x="240" y="115" text-anchor="middle">GC 時可能清空</text>
+        <path class="wire" d="M165 84 H86 V72"/>
+        <path class="tip" d="M86 60 L80 72 L92 72 Z"/>
+        <path class="wire" d="M86 130 V112 H153"/>
+        <path class="tip" d="M165 112 L153 106 L153 118 Z"/>
+        <text class="sm" x="240" y="190" text-anchor="middle">只放暫時的東西：放進去的隨時可能不見</text>
+      </svg>
+      <figcaption>Pool 是暫時物件的回收箱：要用時先借舊的，用完清乾淨還回去；裡面的東西隨時可能被 GC 清掉。</figcaption>
+    </figure>
+    <p>sync 套件裡還有兩個常被過度使用的型別。先講結論：<strong>大多數情況都用不到</strong>。</p>
+    <p><code>sync.Map</code> 是可以直接給多個 goroutine 用的 map。它的鍵和值都是 any，沒有型別檢查，官方文件明說大多數程式應該用一般的 map 搭配鎖。它只在兩種情況比較快：鍵寫入一次之後就只會被讀（只會長大的快取），或是每個 goroutine 讀寫的鍵各不相同。它的方法把常見的「先查再改」做成一步，例如 LoadOrStore：</p>
+    <pre class="code" data-src="chapters/17-sync/mappool.go#seenDemo"><code>func seenDemo() {
+	var seen sync.Map
+	for _, id := range []string{"A-01", "A-02", "A-01"} {
+		if _, loaded := seen.LoadOrStore(id, true); loaded {
+			fmt.Println(id, "重複，略過")
+			continue
+		}
+		fmt.Println(id, "接單")
+	}
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/17-sync#Example_seenDemo"><code>A-01 接單
+A-02 接單
+A-01 重複，略過</code></pre>
+    <p>這個例子用 <code>map[string]bool</code> 加一把 Mutex 一樣做得到，而且型別清楚。需要同時維護其他欄位（例如重複次數）時，map 加鎖更是唯一合理的選擇。</p>
+    <p><code>sync.Pool</code> 存放可以重複使用的暫時物件，減少一直配置新記憶體、又讓 GC 回收的負擔。標準庫的 fmt 就用它保存輸出用的緩衝區：</p>
+    <pre class="code" data-src="chapters/17-sync/mappool.go#slips,receipt,poolDemo"><code>var slips = sync.Pool{
+	New: func() any { return new(bytes.Buffer) },
+}
+
+func receipt(item string, price int) string {
+	b := slips.Get().(*bytes.Buffer)
+	defer func() {
+		b.Reset()
+		slips.Put(b)
+	}()
+	fmt.Fprintf(b, "%s NT$%d", item, price)
+	return b.String()
+}
+
+func poolDemo() {
+	fmt.Println(receipt("排骨飯", 90))
+	fmt.Println(receipt("雞腿飯", 100))
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/17-sync#Example_poolDemo"><code>排骨飯 NT$90
+雞腿飯 NT$100</code></pre>
+    <ul class="notes">
+      <li>Get 回傳 any，要做型別斷言；Pool 是空的時候呼叫 New 做一個新的。</li>
+      <li>還回去之前要 Reset，下一個借的人才不會看到上一張收據。</li>
+      <li>還回去之後就不能再用它。這裡回傳 <code>b.String()</code> 是安全的，因為它會複製一份；回傳 <code>b.Bytes()</code> 的話，拿到的 slice 和 Buffer 共用底層陣列，下一個借走的人會改掉它。</li>
+      <li>Pool 裡的東西隨時可能被清掉，所以不能拿來當連線池或快取，只能放「沒有也沒關係、重做一個就好」的東西。</li>
+      <li>它是效能最佳化，不是預設寫法。先用 benchmark 和 profiling 證明配置記憶體真的是瓶頸（「效能與 profiling」那一章），再加上它。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="hb">
+    <h2 id="hb">7. happens-before</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 236" role="img" aria-label="goroutine 先寫 menu 再 close done；main 的 receive 在 close 之後才完成，接著讀 menu；close 保證先於 receive 完成，所以 main 一定看得到寫進去的 menu">
+        <title>同步把兩條時間線接起來</title>
+        <text class="small bold" x="120" y="22" text-anchor="middle">goroutine</text>
+        <text class="small bold" x="360" y="22" text-anchor="middle">main</text>
+        <rect class="soft" x="40" y="40" width="160" height="34" rx="6"/>
+        <text class="sm mono" x="120" y="62" text-anchor="middle">menu = …</text>
+        <path class="wire" d="M120 74 V88"/>
+        <path class="tip" d="M120 100 L114 88 L126 88 Z"/>
+        <rect class="soft" x="40" y="100" width="160" height="34" rx="6"/>
+        <text class="sm mono" x="120" y="122" text-anchor="middle">close(done)</text>
+        <path class="wire acc-ln" d="M200 117 H240 V147 H268"/>
+        <path class="tip acc-tip" d="M280 147 L268 141 L268 153 Z"/>
+        <text class="sm t-acc" x="240" y="108" text-anchor="middle">保證先發生</text>
+        <rect class="soft" x="280" y="130" width="160" height="34" rx="6"/>
+        <text class="sm mono" x="360" y="152" text-anchor="middle">&lt;-done</text>
+        <path class="wire" d="M360 164 V174"/>
+        <path class="tip" d="M360 186 L354 174 L366 174 Z"/>
+        <rect class="acc" x="280" y="186" width="160" height="34" rx="6"/>
+        <text class="sm" x="360" y="208" text-anchor="middle">讀 menu：看得到</text>
+      </svg>
+      <figcaption>同一個 goroutine 裡照程式的順序發生；不同 goroutine 之間，只有同步操作（這裡是 close 和收）能把兩條時間線接起來。</figcaption>
+    </figure>
+    <p>最後回答一個問題：為什麼一定要用 channel、鎖、atomic，不能自己用一個 bool 當「準備好了」的訊號？</p>
+    <div class="compare">
+      <p class="label bad">錯：用普通的 bool 等</p>
+      <pre class="code bad" data-src="chapters/17-sync/order.go#waitFlag"><code>func waitFlag() []string {
+	var menu []string
+	ready := false
+	go func() {
+		menu = []string{"排骨飯", "雞腿飯"}
+		ready = true
+	}()
+	for !ready {
+	}
+	return menu
+}</code></pre>
+      <p class="label good">對：用 channel 等</p>
+      <pre class="code good" data-src="chapters/17-sync/order.go#waitDone"><code>func waitDone() []string {
+	var menu []string
+	done := make(chan struct{})
+	go func() {
+		menu = []string{"排骨飯", "雞腿飯"}
+		close(done)
+	}()
+	&lt;-done
+	return menu
+}</code></pre>
+    </div>
+    <p class="label">waitDone 的輸出</p>
+    <pre class="out" data-example="chapters/17-sync#Example_orderDemo"><code>[排骨飯 雞腿飯]</code></pre>
+    <p>waitFlag 在同一個 goroutine 裡讀起來很合理：先寫 menu，再把 ready 設成 true。但編譯器和 CPU 為了效率，可以在<strong>單一 goroutine 看不出差別</strong>的前提下重新安排讀寫順序，或把值放在暫存器裡不重讀。結果是另一個 goroutine 可能永遠看不到 ready 變成 true，也可能看到 true，卻讀到還沒寫好的 menu。這段程式本身就是 data race，-race 會直接抓到。</p>
+    <p>Go 的記憶體模型用「<strong>happens-before</strong>」描述「某件事保證先發生、而且結果看得到」：同一個 goroutine 裡，照程式的順序；不同 goroutine 之間，只有同步操作能建立這個關係。waitDone 裡，寫 menu 在 close 之前（同一個 goroutine），close 保證先於 <code>&lt;-done</code> 完成，收到之後才讀 menu，一路串起來，讀的時候一定看得到。</p>
+    <p>記憶體模型官方文件開頭的建議很直接：如果你得讀完整份文件才能理解自己的程式在做什麼，代表你寫得太聰明了。照這一章的規矩用 channel、鎖、atomic、Once、WaitGroup，就不必擔心這些細節。</p>
+
+    <section class="deep" aria-labelledby="hb-rules">
+      <p class="tag">深入：第一次讀可以先跳過</p>
+      <h3 id="hb-rules">7.1 哪些操作建立 happens-before</h3>
+      <ul class="notes">
+        <li><code>go f()</code> 這個敘述先於 f 開始執行：go 之前寫好的值，goroutine 裡看得到。反過來，goroutine 結束<strong>不</strong>保證先於任何事，要等它就用 WaitGroup 或 channel。</li>
+        <li>channel：送出先於對應的收完成；close 先於「因為 channel 已關閉而收到零值」的那次收；無緩衝的 channel，收先於對應的送完成。容量 C 的 channel，第 k 次收先於第 k+C 次送完成，這也是用 buffered channel 限制同時數量的依據（「<a href="19-concurrency-patterns.html">並行模式</a>」那一章）。</li>
+        <li>Mutex：第 n 次 Unlock 先於第 n+1 次 Lock 返回，所以上一個人在鎖裡寫的東西，下一個拿到鎖的人看得到。</li>
+        <li>Once：f 返回先於任何一次 Do 返回；OnceValue 等函式也一樣。</li>
+        <li>WaitGroup：Done（或 wg.Go 裡的 f 返回）先於它放行的那次 Wait 返回，所以 Wait 之後可以直接讀 goroutine 寫好的格子。</li>
+        <li>atomic：如果 B 讀到了 A 寫入的值，A 就先於 B；所有 atomic 操作看起來像是照某一個全域的順序執行，和 Java 的 volatile 語意相同。</li>
+      </ul>
+    </section>
+  </section>
+
+  <section aria-labelledby="pitfalls">
+    <h2 id="pitfalls">常見錯誤</h2>
+    <h3 id="pit-read">1. 只有寫的時候上鎖</h3>
+    <p>「讀而已，不會改壞東西」是錯的：讀和寫同時發生就是 data race，讀到的可能是寫到一半的值。共用資料的每一次存取都要在同一把鎖底下（第 2 節）。</p>
+
+    <h3 id="pit-split">2. 先查再改，分成兩次上鎖</h3>
+    <div class="compare">
+      <p class="label bad">錯：查和改各自上鎖，中間會被插隊</p>
+      <pre class="code bad" data-src="chapters/17-sync/stock.go#Stock.takeSplit"><code>func (s *Stock) takeSplit() bool {
+	n := s.Left()
+	if n == 0 {
+		return false
+	}
+	s.set(n - 1)
+	return true
+}</code></pre>
+      <p class="label good">對：查和改在同一段鎖裡</p>
+      <pre class="code good" data-src="chapters/17-sync/stock.go#Stock.Take"><code>func (s *Stock) Take() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.left == 0 {
+		return false
+	}
+	s.left--
+	return true
+}</code></pre>
+    </div>
+    <p>race detector 抓不到這種錯（第 2 節的 race condition）。設計方法時就要想好：哪些步驟必須是一個整體，就放進同一個方法、同一段鎖。</p>
+
+    <h3 id="pit-copy">3. 複製了含有 Mutex 的值</h3>
+    <pre class="code bad" data-vet-error><code>package main
+
+import (
+	"fmt"
+	"sync"
+)
+
+type Stock struct {
+	mu   sync.Mutex
+	left int
+}
+
+// Take 用了值 receiver：每次呼叫都複製一份 Stock，連同裡面的 Mutex。
+func (s Stock) Take() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.left == 0 {
+		return false
+	}
+	s.left--
+	return true
 }
 
 func main() {
-	var c Counter
-	var hits atomic.Int64
-	var wg sync.WaitGroup
-	for range 1000 {
-		wg.Go(func() { c.Inc(); hits.Add(1) })
-	}
-	wg.Wait()
-	fmt.Println(c.n, hits.Load())
+	s := Stock{left: 1}
+	fmt.Println(s.Take(), s.Take())
 }</code></pre>
-    <p class="label">輸出</p>
-    <pre class="out"><code>1000 1000</code></pre>
-  </section>
+    <p class="label">go vet</p>
+    <pre class="out err"><code>main.go:14:9: Take passes lock by value: example.Stock contains sync.Mutex</code></pre>
+    <p>值 receiver 讓每次呼叫都拿到一份複本：鎖的是複本的鎖，減的是複本的份數。這個程式可以編譯，執行會印出 <code>true true</code>，只有 1 份卻賣了 2 次。含有 Mutex、RWMutex、WaitGroup、atomic 型別的 struct，方法一律用指標 receiver，傳遞時也傳指標。go vet 會抓到大部分的複製。</p>
 
-  <section aria-labelledby="notes">
-    <h2 id="notes">工程師筆記</h2>
-    <ul class="notes">
-      <li>有疑慮就跑 <code>go test -race</code>：它在執行時抓出真的發生的 data race。CI 建議一直開著。</li>
-      <li><code>sync.Mutex</code> 不可重入：同一個 goroutine 重複 Lock 會卡死。</li>
-      <li>含有 Mutex 的 struct 不要複製，用指標傳遞；<code>go vet</code> 的 copylocks 檢查會抓這個錯。</li>
-      <li>讀多寫少用 <code>sync.RWMutex</code>；只有一個數字時，用 <code>atomic.Int64</code> 這類型別比較簡單。</li>
-      <li><code>sync.OnceValue</code>（Go 1.21）把「只做一次」和「回傳結果」包在一起，適合延遲初始化。</li>
-      <li>鎖的範圍越小越好；拿著鎖時不要做 I/O，也不要等 channel。</li>
-    </ul>
+    <h3 id="pit-reentrant">4. 拿著鎖，再呼叫一個也要拿同一把鎖的方法</h3>
+    <p>Go 的 Mutex 不能重複進入（Java 的 synchronized 可以）：同一個 goroutine 拿著鎖又 Lock 一次，會等自己 Unlock，永遠等不到（練習 6）。常見的整理方式是：公開的方法負責上鎖，真正的工作寫在一個「假設已經拿著鎖」的私有方法裡，公開方法之間互相呼叫時改呼叫私有的版本。</p>
+
+    <h3 id="pit-slow">5. 拿著鎖做慢的事</h3>
+    <p>鎖裡面讀檔、打 API、送 channel，其他所有要這把鎖的 goroutine 都跟著等；送 channel 時對方如果也在等這把鎖，還會卡成死結。在鎖裡把需要的資料複製出來，Unlock 之後再做慢的事。</p>
+
+    <h3 id="pit-norace">6. 以為 -race 沒報錯就沒問題</h3>
+    <p>它只抓得到這次執行真的發生的 data race（第 1 節），也抓不到 race condition（常見錯誤 2）。測試要真的讓好幾個 goroutine 同時打同一個東西，邏輯上的整體性要靠你自己設計。</p>
+
+    <h3 id="pit-flag">7. 用普通變數當訊號</h3>
+    <p>用 bool 或 int 告訴另一個 goroutine「好了」，沒有 happens-before，看不看得到都沒有保證（第 7 節）。要通知就用 channel（close 一個 done）、WaitGroup，或 <code>atomic.Bool</code>。</p>
   </section>
 
   <section aria-labelledby="java">
@@ -118,32 +755,193 @@ func main() {
       <table class="vs">
         <thead><tr><th scope="col">主題</th><th scope="col">Java</th><th scope="col">Go</th></tr></thead>
         <tbody>
-          <tr><th scope="row">互斥鎖</th><td class="java"><code>synchronized</code>、<code>ReentrantLock</code>（可重入）</td><td><code>sync.Mutex</code>（不可重入）</td></tr>
-          <tr><th scope="row">讀寫鎖</th><td class="java"><code>ReentrantReadWriteLock</code></td><td><code>sync.RWMutex</code></td></tr>
-          <tr><th scope="row">原子操作</th><td class="java"><code>AtomicLong</code></td><td><code>atomic.Int64</code></td></tr>
-          <tr><th scope="row">只執行一次</th><td class="java">靜態初始化、double-checked locking</td><td><code>sync.Once</code>、<code>sync.OnceValue</code></td></tr>
-          <tr><th scope="row">找出 race</th><td class="java">JDK 沒有內建工具</td><td><code>go test -race</code>、<code>go run -race</code></td></tr>
+          <tr><th scope="row">互斥鎖</th><td class="java"><code>synchronized</code>、<code>ReentrantLock</code>（可重入）</td><td><code>sync.Mutex</code>（不可重入、不能複製）</td></tr>
+          <tr><th scope="row">讀寫鎖</th><td class="java"><code>ReentrantReadWriteLock</code>（寫鎖可降級成讀鎖）</td><td><code>sync.RWMutex</code>（不能升級也不能降級）</td></tr>
+          <tr><th scope="row">原子操作</th><td class="java"><code>AtomicLong</code>、<code>AtomicBoolean</code>、<code>AtomicReference</code></td><td><code>atomic.Int64</code>、<code>atomic.Bool</code>、<code>atomic.Pointer[T]</code></td></tr>
+          <tr><th scope="row"><code>volatile</code></th><td class="java">讀寫之間建立 happens-before、不會被重排</td><td>沒有 volatile，用 atomic 型別</td></tr>
+          <tr><th scope="row">延遲初始化</th><td class="java">holder class、double-checked locking</td><td><code>sync.OnceValue</code></td></tr>
+          <tr><th scope="row">並行的 map</th><td class="java"><code>ConcurrentHashMap</code></td><td>map 加 Mutex；特定情況用 <code>sync.Map</code></td></tr>
+          <tr><th scope="row">物件池</th><td class="java">自己寫或用第三方函式庫</td><td><code>sync.Pool</code>（隨時可能被清空）</td></tr>
+          <tr><th scope="row">記憶體模型</th><td class="java">JMM 的 happens-before</td><td>Go memory model 的 synchronized before</td></tr>
+          <tr><th scope="row">找出 data race</th><td class="java">JDK 沒有內建</td><td><code>go test -race</code>、<code>go run -race</code></td></tr>
         </tbody>
       </table>
     </div>
   </section>
 
+  <section aria-labelledby="exercises">
+    <h2 id="exercises">練習</h2>
+    <p>題目在 <code>exercises/17-sync/exercises.go</code>。這一章的題目<strong>一定要加 -race</strong>：少了鎖的寫法，常常不加 -race 也能通過。</p>
+    <pre class="shell"><code>go test -race ./exercises/17-sync/                <span class="c"># 跑全部練習</span>
+go test -race ./exercises/17-sync/ -run TestJar   <span class="c"># 只跑一題</span>
+go test -race -tags solution ./exercises/17-sync/ <span class="c"># 跑參考解答</span></code></pre>
+    <ol class="exercises">
+      <li>
+        <h3><span class="level l1">入門</span>練習 1：小費箱</h3>
+        <p>好幾個客人同時投錢，次數和金額要對得起來。欄位由你決定。</p>
+        <pre class="code" data-src="exercises/17-sync/exercises.go#Jar,Jar.Put,Jar.Count"><code>type Jar struct {
+	// TODO: 加上需要的欄位
+}
+
+func (j *Jar) Put(amount int) {
+	// TODO: 實作
+}
+
+func (j *Jar) Count() (times, total int) {
+	// TODO: 實作
+	return 0, 0
+}</code></pre>
+        <p>測試：<code>TestJar</code>。測試一邊投錢一邊不停呼叫 Count，看到的金額必須剛好是次數的 10 倍。</p>
+        <details><summary>提示</summary><p>兩個 int 加一把 Mutex，Put 和 Count 都在鎖裡做（第 2 節）。用兩個 atomic.Int64 不行：Count 可能讀到次數加了、金額還沒加（第 5 節最後一段）。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l1">入門</span>練習 2：拉下鐵捲門</h3>
+        <p>好幾個店員同時去拉鐵捲門，只有真正拉下來的那個人回報成功。</p>
+        <pre class="code" data-src="exercises/17-sync/exercises.go#Shutter,Shutter.Close,Shutter.Closed"><code>type Shutter struct {
+	// TODO: 加上需要的欄位
+}
+
+func (s *Shutter) Close() bool {
+	// TODO: 實作
+	return false
+}
+
+func (s *Shutter) Closed() bool {
+	// TODO: 實作
+	return false
+}</code></pre>
+        <p>測試：<code>TestShutter</code>。</p>
+        <details><summary>提示</summary><p>一個 <code>atomic.Bool</code>。Close 用 <code>CompareAndSwap(false, true)</code>：只有「目前還是 false」的那一次會成功（第 5 節）。先 Load 判斷、再 Store，就是先查再改。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l2">進階</span>練習 3：訂位</h3>
+        <p>五十個人同時搶 5 號桌，只能有一個人訂到，其他人拿到 ErrTaken。</p>
+        <pre class="code" data-src="exercises/17-sync/doc.go#ErrTaken"><code>var ErrTaken = errors.New("這張桌子已經有人訂了")</code></pre>
+        <pre class="code" data-src="exercises/17-sync/exercises.go#Reservations,NewReservations,Reservations.Book,Reservations.Who"><code>type Reservations struct {
+	// TODO: 加上需要的欄位
+}
+
+func NewReservations() *Reservations {
+	// TODO: 實作
+	return &amp;Reservations{}
+}
+
+func (r *Reservations) Book(table int, name string) error {
+	// TODO: 實作
+	return nil
+}
+
+func (r *Reservations) Who(table int) (string, bool) {
+	// TODO: 實作
+	return "", false
+}</code></pre>
+        <p>測試：<code>TestReservations</code>。</p>
+        <details><summary>提示</summary><p><code>map[int]string</code> 加一把 Mutex。Book 在同一段鎖裡查那一桌有沒有人、沒有才寫入（常見錯誤 2）。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l2">進階</span>練習 4：換設定</h3>
+        <p>很多 goroutine 讀設定，也有很多 goroutine 同時修改，每個人的修改都不能遺失。</p>
+        <pre class="code" data-src="exercises/17-sync/doc.go#Settings"><code>type Settings struct {
+	Open     bool
+	Discount int // 打幾折，0 表示不打折
+	Served   int // 今天賣出幾份
+}</code></pre>
+        <pre class="code" data-src="exercises/17-sync/exercises.go#Current,Current.Get,Current.Update"><code>type Current struct {
+	// TODO: 加上需要的欄位
+}
+
+func (c *Current) Get() Settings {
+	// TODO: 實作
+	return Settings{}
+}
+
+func (c *Current) Update(fn func(Settings) Settings) {
+	// TODO: 實作
+}</code></pre>
+        <p>測試：<code>TestCurrent</code>。</p>
+        <details><summary>提示</summary><p>用 Mutex 寫最簡單。想試試 atomic 的話：欄位用 <code>atomic.Pointer[Settings]</code>，Update 在迴圈裡 Load 舊指標、複製一份算出新的、用 <code>CompareAndSwap(old, &amp;next)</code> 換上去，失敗就重來（第 5 節的 raiseTo）。零值時 Load 回傳 nil，要當成 Settings 的零值。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l3">挑戰</span>練習 5：失敗可以重試的 Once</h3>
+        <p>和 OnceValues 一樣只成功一次，但失敗時不記住錯誤，下次呼叫再試。</p>
+        <pre class="code" data-src="exercises/17-sync/exercises.go#OnceOK"><code>func OnceOK[T any](f func() (T, error)) func() (T, error) {
+	// TODO: 實作
+	return func() (T, error) {
+		var zero T
+		return zero, nil
+	}
+}</code></pre>
+        <p>測試：<code>TestOnceOK</code>。</p>
+        <details><summary>提示</summary><p>在回傳的函式外面宣告 <code>mu sync.Mutex</code>、<code>done bool</code>、<code>val T</code>，讓 closure 共用它們。回傳的函式一開始就 Lock，整段（包括呼叫 f）都拿著鎖：done 就直接回傳 val；否則呼叫 f，成功才把 done 設成 true。</p></details>
+      </li>
+      <li>
+        <h3><span class="level fix">找錯</span>練習 6：候位說明</h3>
+        <p>候位名單的 Join 和 Len 都沒問題，但新加的 Summary 一呼叫就再也不會回來。</p>
+        <pre class="code" data-src="exercises/17-sync/doc.go#Queue,Queue.Join,Queue.Len"><code>type Queue struct {
+	mu    sync.Mutex
+	names []string
+}
+
+func (q *Queue) Join(name string) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	q.names = append(q.names, name)
+}
+
+func (q *Queue) Len() int {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	return len(q.names)
+}</code></pre>
+        <pre class="code" data-src="exercises/17-sync/exercises.go#Queue.Summary"><code>func (q *Queue) Summary() string {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if q.Len() == 0 {
+		return "目前不用等"
+	}
+	return fmt.Sprintf("%d 組候位，下一組：%s", q.Len(), q.names[0])
+}</code></pre>
+        <p>測試：<code>TestQueueSummary</code>。測試在另一個 goroutine 呼叫 Summary，一秒內沒有回傳就判定失敗。</p>
+        <details><summary>提示</summary><p>常見錯誤 4。</p></details>
+      </li>
+    </ol>
+    <p><a href="https://github.com/xinqilin/GO-Playground/blob/main/exercises/17-sync/solution.go">參考解答</a>：先自己寫完再看。測試通過、而且 <code>-race</code> 沒有警告的寫法都是對的。</p>
+  </section>
+
+  <section aria-labelledby="recap">
+    <h2 id="recap">重點回顧</h2>
+    <ul class="recap">
+      <li>好幾個 goroutine 同時存取同一個變數、至少一個在寫、又沒有同步，就是 data race，結果無法預期。</li>
+      <li>並行程式的測試一律加 <code>-race</code>；它只抓得到真的發生的 race，抓不到邏輯上的 race condition。</li>
+      <li>Mutex 保護共用資料：讀寫都要上鎖、<code>defer Unlock</code>、不能複製、臨界區要短。</li>
+      <li>先查再改必須在同一段鎖裡；Go 的 Mutex 不能重複進入。</li>
+      <li>map 不能同時寫，偵測到時整個程式直接結束。</li>
+      <li>RWMutex 適合讀很多、寫很少，不能升級或降級；不確定時先用 Mutex。</li>
+      <li><code>sync.OnceValue</code>、<code>OnceValues</code>、<code>OnceFunc</code> 做只執行一次的初始化，錯誤和 panic 也只會發生一次。</li>
+      <li>atomic 適合單一的值：Add 拿號碼、CompareAndSwap 做先查再改、Pointer 整份換掉；好幾個值要一致就用 Mutex。</li>
+      <li>sync.Map 和 sync.Pool 是特定情況的工具，預設用 map 加鎖、直接配置。</li>
+      <li>不同 goroutine 之間，只有同步操作能保證「先發生、看得到」，不要用普通變數當訊號。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="further">
+    <h2 id="further">延伸閱讀</h2>
+    <ul class="notes">
+      <li><a href="https://go.dev/ref/mem">The Go Memory Model</a>：happens-before 的正式定義，以及 data race 的後果。</li>
+      <li><a href="https://go.dev/doc/articles/race_detector">Data Race Detector</a>：-race 的用法、報告格式和成本。</li>
+      <li>套件文件：<a href="https://pkg.go.dev/sync">sync</a>、<a href="https://pkg.go.dev/sync/atomic">sync/atomic</a>。</li>
+    </ul>
+  </section>
+
   <section aria-labelledby="run">
     <h2 id="run">動手跑</h2>
     <p class="label">在 repo 根目錄</p>
-    <pre class="shell"><code>go run ./chapters/17-sync
-go test -race ./chapters/17-sync
-go run -race ./chapters/17-sync/race   <span class="c"># 故意寫錯的版本</span></code></pre>
-    <p class="label">故意寫錯的版本會印出（節錄）</p>
-    <pre class="out"><code>==================
-WARNING: DATA RACE
-Read at 0x00c00011c038 by goroutine 9:
-  main.main.func1()
-      .../chapters/17-sync/race/main.go:18 +0x2c
-...
-count = 853 （應該是 1000）
-Found 2 data race(s)</code></pre>
-    <p><a href="https://github.com/xinqilin/GO-Playground/tree/main/chapters/17-sync">在 GitHub 看完整程式碼</a></p>
+    <pre class="shell"><code>go run ./chapters/17-sync                     <span class="c"># 執行本章的示範</span>
+go run -race ./chapters/17-sync/race          <span class="c"># 看 race detector 的報告</span>
+go run ./chapters/17-sync/mapcrash            <span class="c"># 同時寫 map，程式直接結束</span>
+go test -race ./chapters/17-sync              <span class="c"># 驗證頁面上的每一段輸出</span>
+go test -race ./exercises/17-sync/            <span class="c"># 做練習</span></code></pre>
+    <p><a href="https://github.com/xinqilin/GO-Playground/tree/main/chapters/17-sync">在 GitHub 看本章完整程式碼</a>，或看<a href="https://github.com/xinqilin/GO-Playground/tree/main/exercises/17-sync">練習題</a>。</p>
   </section>
 </main>
 

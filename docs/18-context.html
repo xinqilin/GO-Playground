@@ -4,96 +4,565 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>context｜Go 圖解手冊</title>
-<meta name="description" content="Go 的 context：取消與逾時如何沿著樹往下傳、ctx.Err 與 context.Cause，以及 WithValue 的使用時機。">
+<meta name="description" content="Go 的 context：為什麼需要它、取消樹與一定要呼叫 cancel、WithTimeout 與期限只能縮短、Canceled 和 DeadlineExceeded、WithCancelCause 與 context.Cause、寫一個聽 ctx 的函式和 API 慣例、WithValue 的正確用途、WithoutCancel 與 AfterFunc，附用 synctest 假時間測試的練習題。">
 <link rel="stylesheet" href="assets/style.css">
 </head>
 <body>
 <header class="site">
   <a href="index.html">Go 圖解手冊</a>
-  <span class="count">18 / 24</span>
+  <span class="count">18 / 33</span>
 </header>
 
-<main class="page">
+<main class="page long">
   <header class="hero">
     <div class="num" aria-hidden="true">18</div>
     <p class="eyebrow">Part 3 · 並行 · 第 18 章</p>
     <h1>context</h1>
-    <p class="analogy">context 是一條往下傳的取消繩：上層一拉，拿著這條繩子的工作都知道該停了。</p>
+    <p class="analogy">context 是跟著訂單一路傳下去的單據：櫃台、廚房、外送員手上都有一張。客人一取消，或是超過說好的時間，每個拿著單據的人都知道該停手；單據上也能寫著這張訂單的編號。</p>
   </header>
 
-  <section aria-labelledby="look">
-    <h2 id="look">看圖</h2>
-    <div class="figs">
-      <figure class="fig">
-        <svg viewBox="0 0 480 240" role="img" aria-label="context 是一棵樹：取消 WithCancel 節點，它底下的 WithTimeout 和 WithValue 都會收到 Done，上面的 Background 不受影響">
-          <title>取消會往下傳</title>
-          <rect class="soft" x="170" y="16" width="140" height="36" rx="6"/>
-          <text class="small mono" x="240" y="39" text-anchor="middle">Background()</text>
-          <path class="wire" d="M240 52 V84"/>
-          <rect class="hot" x="170" y="84" width="140" height="36" rx="6"/>
-          <text class="small mono" x="240" y="107" text-anchor="middle">WithCancel</text>
-          <text class="small bold t-hot" x="322" y="107">cancel()</text>
-          <path class="wire hot-ln" d="M240 120 V138 H135 V156 M240 138 H345 V156"/>
-          <rect class="hot" x="60" y="156" width="150" height="36" rx="6"/>
-          <rect class="hot" x="270" y="156" width="150" height="36" rx="6"/>
-          <text class="small mono" x="135" y="179" text-anchor="middle">WithTimeout</text>
-          <text class="small mono" x="345" y="179" text-anchor="middle">WithValue</text>
-          <text class="sm t-hot" x="135" y="220" text-anchor="middle">工作 A 收到 Done</text>
-          <text class="sm t-hot" x="345" y="220" text-anchor="middle">工作 B 收到 Done</text>
-        </svg>
-        <figcaption>context 是一棵樹。取消某一個節點，它底下的所有節點都會一起收到 Done；上面的節點不受影響。</figcaption>
-      </figure>
+  <nav class="toc-inline" aria-labelledby="toc-title">
+    <p class="label" id="toc-title">本章內容</p>
+    <ol>
+      <li><a href="#goals">本章你會學到</a></li>
+      <li><a href="#why">為什麼需要 context</a></li>
+      <li><a href="#tree">取消樹</a></li>
+      <li><a href="#deadline">期限</a></li>
+      <li><a href="#cause">取消的原因</a></li>
+      <li><a href="#listen">寫一個聽 ctx 的函式</a></li>
+      <li><a href="#value">帶值</a></li>
+      <li><a href="#detach">WithoutCancel 與 AfterFunc</a></li>
+      <li><a href="#pitfalls">常見錯誤</a></li>
+      <li><a href="#java">從 Java 來的你</a></li>
+      <li><a href="#exercises">練習</a></li>
+      <li><a href="#recap">重點回顧</a></li>
+      <li><a href="#further">延伸閱讀</a></li>
+    </ol>
+  </nav>
 
-      <figure class="fig">
-        <svg viewBox="0 0 480 176" role="img" aria-label="WithTimeout 設 50 毫秒；工作原本要做一小時，時間一到 Done 關閉，工作放棄並回傳 context deadline exceeded">
-          <title>逾時：時間一到就拉繩子</title>
-          <rect class="acc" x="40" y="60" width="120" height="24" rx="4"/>
-          <rect class="soft dash" x="160" y="60" width="280" height="24" rx="4"/>
-          <text class="sm" x="300" y="77" text-anchor="middle">原本要做 1 小時</text>
-          <path class="wire" d="M40 120 H440"/>
-          <path class="tip" d="M452 120 L440 114 L440 126 Z"/>
-          <text class="sm mono" x="40" y="140" text-anchor="middle">0</text>
-          <text class="sm" x="446" y="144" text-anchor="end">時間</text>
-          <path class="wire hot-ln" d="M160 44 V128"/>
-          <text class="small t-hot" x="168" y="46">Done() 關閉</text>
-          <text class="sm mono t-hot" x="160" y="140" text-anchor="middle">50ms</text>
-          <text class="small mono t-hot" x="160" y="166" text-anchor="middle">context deadline exceeded</text>
-        </svg>
-        <figcaption><code>WithTimeout</code> 時間一到，<code>ctx.Done()</code> 就會關閉，正在等的工作馬上放棄，回傳 <code>context.DeadlineExceeded</code>。</figcaption>
-      </figure>
-    </div>
+  <section aria-labelledby="goals">
+    <h2 id="goals">本章你會學到</h2>
+    <ul class="notes">
+      <li>context 解決什麼問題，以及 Context 介面的四個方法。</li>
+      <li>WithCancel 建立的取消樹：取消怎麼傳、為什麼一定要呼叫 cancel。</li>
+      <li>WithTimeout、WithDeadline 的期限規則，分辨 Canceled 和 DeadlineExceeded。</li>
+      <li>用 WithCancelCause、context.Cause 記下取消的真正原因。</li>
+      <li>寫出會聽 ctx 的函式，以及 ctx 在 API 裡的傳遞慣例。</li>
+      <li>WithValue 該放什麼、不該放什麼，key 怎麼設計。</li>
+      <li>WithoutCancel 和 AfterFunc 的用途。</li>
+    </ul>
+    <p>先備：<a href="16-select.html">16 select</a>，尤其是<a href="16-select.html#done">用 done 叫送的一方停下來</a>；<a href="11-errors.html">11 錯誤處理</a>的 errors.Is。</p>
   </section>
 
-  <section aria-labelledby="code">
-    <h2 id="code">最小範例</h2>
-    <pre class="code"><code>func slowWork(ctx context.Context) error {
+  <section aria-labelledby="why">
+    <h2 id="why">1. 為什麼需要 context</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 166" role="img" aria-label="客人、櫃台、廚房、外送四個方塊排成一列，每一層把 ctx 傳給下一層；客人取消時，一條取消線通到每一層">
+        <title>同一張單據一路傳下去</title>
+        <text class="sm" x="240" y="26" text-anchor="middle">每一層都把同一個 ctx（或從它衍生的）傳下去</text>
+        <rect class="soft" x="16" y="60" width="88" height="44" rx="8"/>
+        <text class="small" x="60" y="88" text-anchor="middle">客人</text>
+        <rect class="soft" x="136" y="60" width="88" height="44" rx="8"/>
+        <text class="small" x="180" y="88" text-anchor="middle">櫃台</text>
+        <rect class="soft" x="256" y="60" width="88" height="44" rx="8"/>
+        <text class="small" x="300" y="88" text-anchor="middle">廚房</text>
+        <rect class="soft" x="376" y="60" width="88" height="44" rx="8"/>
+        <text class="small" x="420" y="88" text-anchor="middle">外送</text>
+        <path class="wire" d="M104 82 H124"/>
+        <path class="tip" d="M136 82 L124 76 L124 88 Z"/>
+        <path class="wire" d="M224 82 H244"/>
+        <path class="tip" d="M256 82 L244 76 L244 88 Z"/>
+        <path class="wire" d="M344 82 H364"/>
+        <path class="tip" d="M376 82 L364 76 L364 88 Z"/>
+        <text class="sm mono" x="120" y="54" text-anchor="middle">ctx</text>
+        <text class="sm mono" x="240" y="54" text-anchor="middle">ctx</text>
+        <text class="sm mono" x="360" y="54" text-anchor="middle">ctx</text>
+        <path class="wire hot-ln dash" d="M60 104 V126 H420 V116"/>
+        <path class="wire hot-ln dash" d="M180 126 V116"/>
+        <path class="wire hot-ln dash" d="M300 126 V116"/>
+        <path class="tip hot-tip" d="M180 104 L174 116 L186 116 Z"/>
+        <path class="tip hot-tip" d="M300 104 L294 116 L306 116 Z"/>
+        <path class="tip hot-tip" d="M420 104 L414 116 L426 116 Z"/>
+        <text class="sm t-hot" x="240" y="152" text-anchor="middle">客人一取消，拿著這個 ctx 的工作全部知道</text>
+      </svg>
+      <figcaption>一個請求會經過好幾層函式、開好幾個 goroutine。context 讓「不用做了」這個訊號，從最上層一路傳到最底層。</figcaption>
+    </figure>
+    <p><a href="16-select.html#done">16 章</a>用一個 done channel 叫送的一方停下來。真實的程式裡，一個請求會經過櫃台、廚房、外送好幾層函式，每一層可能又開 goroutine、打資料庫、呼叫其他服務。每一層都要知道「客人取消了」「已經超過時間了」，而且這個訊號要能一路往下傳。標準庫的 <code>context</code> 套件就是這件事的標準做法，HTTP 伺服器、資料庫、gRPC 都用它。</p>
+    <p><code>context.Context</code> 是一個介面，只有四個方法：</p>
+    <div class="table-wrap">
+      <table class="vs">
+        <thead><tr><th scope="col">方法</th><th scope="col">回傳什麼</th></tr></thead>
+        <tbody>
+          <tr><th scope="row"><code>Done() &lt;-chan struct{}</code></th><td>被取消時會被 close 的 channel，放進 select 裡等</td></tr>
+          <tr><th scope="row"><code>Err() error</code></th><td>還沒取消時是 nil；取消後是 <code>context.Canceled</code> 或 <code>context.DeadlineExceeded</code></td></tr>
+          <tr><th scope="row"><code>Deadline() (time.Time, bool)</code></th><td>期限是什麼時候；沒有期限時 ok 是 false</td></tr>
+          <tr><th scope="row"><code>Value(key any) any</code></th><td>跟著這個請求的值（第 6 節）</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>最上層的 ctx 是 <code>context.Background()</code>：永遠不會被取消、沒有期限、沒有值。其他的 ctx 都是從某一個 ctx 衍生出來的。一個會聽 ctx 的函式，最基本的樣子是這樣：</p>
+    <pre class="code" data-src="chapters/18-context/basics.go#cook,basicsDemo"><code>func cook(ctx context.Context, d time.Duration) error {
 	select {
-	case &lt;-time.After(time.Hour):
+	case &lt;-time.After(d):
 		return nil
 	case &lt;-ctx.Done():
 		return ctx.Err()
 	}
 }
 
-func main() {
-	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+func basicsDemo() {
+	if err := cook(context.Background(), time.Millisecond); err == nil {
+		fmt.Println("滷蛋 好了")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
 	defer cancel()
-	fmt.Println(slowWork(ctx))
+	if err := cook(ctx, time.Hour); err != nil {
+		fmt.Println("佛跳牆 放棄：", err)
+	}
 }</code></pre>
     <p class="label">輸出</p>
-    <pre class="out"><code>context deadline exceeded</code></pre>
+    <pre class="out" data-example="chapters/18-context#Example_basicsDemo"><code>滷蛋 好了
+佛跳牆 放棄： context deadline exceeded</code></pre>
+    <p>cook 同時等兩件事：菜煮好，或是 ctx 被取消，和 16 章的逾時一模一樣，只是取消的訊號換成了 <code>ctx.Done()</code>。佛跳牆要煮一小時，但 ctx 只給 10 毫秒，時間一到 Done 被 close，cook 回傳 <code>ctx.Err()</code> 告訴呼叫的人為什麼停下來。</p>
   </section>
 
-  <section aria-labelledby="notes">
-    <h2 id="notes">工程師筆記</h2>
+  <section aria-labelledby="tree">
+    <h2 id="tree">2. 取消樹</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 216" role="img" aria-label="總店底下有東區和西區，東區底下有一張訂單；取消東區之後，東區和它的訂單都被取消，總店和西區不受影響">
+        <title>取消只往下傳</title>
+        <rect class="soft" x="180" y="16" width="120" height="44" rx="8"/>
+        <text class="small" x="240" y="36" text-anchor="middle">總店</text>
+        <text class="sm" x="240" y="53" text-anchor="middle">沒事</text>
+        <path class="wire" d="M240 60 V78 H120 V96"/>
+        <path class="wire" d="M240 78 H360 V96"/>
+        <rect class="hot" x="60" y="96" width="120" height="44" rx="8"/>
+        <text class="small" x="120" y="114" text-anchor="middle">東區</text>
+        <text class="sm mono" x="120" y="132" text-anchor="middle">cancel()</text>
+        <rect class="soft" x="300" y="96" width="120" height="44" rx="8"/>
+        <text class="small" x="360" y="114" text-anchor="middle">西區</text>
+        <text class="sm" x="360" y="132" text-anchor="middle">沒事</text>
+        <path class="wire hot-ln" d="M120 140 V164"/>
+        <rect class="hot" x="60" y="164" width="120" height="44" rx="8"/>
+        <text class="small" x="120" y="182" text-anchor="middle">東區的訂單</text>
+        <text class="sm" x="120" y="200" text-anchor="middle">跟著取消</text>
+        <text class="sm" x="360" y="182" text-anchor="middle">取消只往下傳，</text>
+        <text class="sm" x="360" y="200" text-anchor="middle">不往上、不往旁邊</text>
+      </svg>
+      <figcaption>每個 ctx 都有一個上層。取消一個 ctx，它和所有從它衍生出來的 ctx 都會被取消；上層和兄弟不受影響。</figcaption>
+    </figure>
+    <p><code>context.WithCancel(parent)</code> 從 parent 衍生出一個新的 ctx，同時回傳一個 <code>cancel</code> 函式。衍生出來的 ctx 會在兩種情況被取消：呼叫它自己的 cancel，或是它的上層被取消。一層一層衍生下去，就形成一棵樹：</p>
+    <pre class="code" data-src="chapters/18-context/tree.go#treeDemo"><code>func treeDemo() {
+	shop, closeShop := context.WithCancel(context.Background())
+	defer closeShop()
+	east, closeEast := context.WithCancel(shop)
+	defer closeEast()
+	west, closeWest := context.WithCancel(shop)
+	defer closeWest()
+	order, closeOrder := context.WithTimeout(east, time.Hour)
+	defer closeOrder()
+
+	closeEast()
+	&lt;-order.Done()
+	fmt.Println("總店", shop.Err())
+	fmt.Println("東區", east.Err())
+	fmt.Println("東區的訂單", order.Err())
+	fmt.Println("西區", west.Err())
+
+	closeShop()
+	&lt;-west.Done()
+	fmt.Println("總店關門之後，西區", west.Err())
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/18-context#Example_treeDemo"><code>總店 &lt;nil&gt;
+東區 context canceled
+東區的訂單 context canceled
+西區 &lt;nil&gt;
+總店關門之後，西區 context canceled</code></pre>
     <ul class="notes">
-      <li>context 一律當第一個參數傳：<code>func Do(ctx context.Context, …)</code>，不要存在 struct 裡。</li>
-      <li>拿到 <code>cancel</code> 就 <code>defer cancel()</code>，逾時版本也一樣，否則計時器要等到時間到才會釋放。</li>
-      <li>取消是請求不是強制：被呼叫的函式要自己檢查 <code>ctx.Done()</code>，或把 ctx 交給會檢查的函式（<code>http.NewRequestWithContext</code>、資料庫查詢等）。</li>
-      <li><code>ctx.Err()</code> 只告訴你是取消還是逾時；想留下原因，用 <code>WithCancelCause</code> 搭配 <code>context.Cause</code>。</li>
-      <li><code>WithValue</code> 只放 request 範圍的資料（request ID、登入資訊），不要拿來傳一般參數；key 用不匯出的型別。</li>
-      <li>沒有上層 context 時用 <code>context.Background()</code>；還沒想好要傳什麼時用 <code>context.TODO()</code> 做記號。</li>
+      <li>取消東區，東區底下的訂單跟著取消；總店和西區不受影響。最後關掉總店，西區也被取消。</li>
+      <li>這就是為什麼函式要「從收到的 ctx 衍生」，而不是自己用 Background 重新開始：重新開始就和上層斷了線，上層的取消傳不下來（練習 6）。</li>
+      <li><strong>cancel 一定要呼叫</strong>，即使工作已經順利做完。cancel 會把這個 ctx 從上層的名單上拿掉、停掉計時器；不呼叫的話，這些資源要等到上層被取消才會釋放。慣例是拿到 cancel 的下一行就寫 <code>defer cancel()</code>。</li>
+      <li>cancel 呼叫好幾次沒關係，第二次之後什麼都不做。示範裡 closeEast 被呼叫了兩次（一次直接呼叫，一次是 defer），就是這個原因。</li>
     </ul>
+    <p>忘記呼叫 cancel，go vet 抓得到：</p>
+    <pre class="code bad" data-vet-error><code>package main
+
+import (
+	"context"
+	"fmt"
+	"time"
+)
+
+func main() {
+	ctx, _ := context.WithTimeout(context.Background(), time.Second)
+	fmt.Println(ctx.Err())
+}</code></pre>
+    <p class="label">go vet</p>
+    <pre class="out err"><code>main.go:10:7: the cancel function returned by context.WithTimeout should be called, not discarded, to avoid a context leak</code></pre>
+  </section>
+
+  <section aria-labelledby="deadline">
+    <h2 id="deadline">3. 期限</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 190" role="img" aria-label="時間軸上，上層的期限是 1 秒；衍生的 ctx 要了 1 小時，實際期限仍然是上層的 1 秒；另一個要了 10 毫秒，就照自己的 10 毫秒">
+        <title>期限只能縮短</title>
+        <rect class="acc" x="40" y="24" width="240" height="26" rx="4"/>
+        <text class="sm" x="160" y="42" text-anchor="middle">上層：1 秒</text>
+        <rect class="box dash" x="40" y="64" width="400" height="26" rx="4"/>
+        <rect class="acc" x="40" y="64" width="240" height="26" rx="4"/>
+        <text class="sm" x="160" y="82" text-anchor="middle">要 1 小時，實際 1 秒</text>
+        <text class="sm mute" x="360" y="82" text-anchor="middle">要求的被截掉</text>
+        <rect class="hot" x="40" y="104" width="30" height="26" rx="4"/>
+        <text class="sm" x="80" y="122">要 10 毫秒，照自己的</text>
+        <path class="wire dash" d="M280 18 V150"/>
+        <path class="wire" d="M40 150 H440"/>
+        <path class="tip" d="M452 150 L440 144 L440 156 Z"/>
+        <text class="sm" x="40" y="172" text-anchor="middle">現在</text>
+        <text class="sm" x="280" y="172" text-anchor="middle">上層的期限</text>
+        <text class="sm" x="448" y="172" text-anchor="end">時間</text>
+      </svg>
+      <figcaption>衍生的 ctx 的期限，是「自己要的」和「上層的」比較早的那一個。下層不可能比上層撐得久。</figcaption>
+    </figure>
+    <p><code>context.WithTimeout(parent, d)</code> 從現在算起 d 之後自動取消；<code>context.WithDeadline(parent, t)</code> 在指定的時間點 t 自動取消。兩者都回傳 cancel，時間還沒到也可以提早取消。被取消的原因有兩種，用 errors.Is 分辨：</p>
+    <pre class="code" data-src="chapters/18-context/deadline.go#errDemo"><code>func errDemo() {
+	canceled, cancel := context.WithCancel(context.Background())
+	cancel()
+	expired, cancel2 := context.WithTimeout(context.Background(), time.Millisecond)
+	defer cancel2()
+
+	for _, ctx := range []context.Context{canceled, expired} {
+		&lt;-ctx.Done()
+		err := ctx.Err()
+		fmt.Printf("%v：Canceled=%t DeadlineExceeded=%t\n",
+			err, errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded))
+	}
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/18-context#Example_errDemo"><code>context canceled：Canceled=true DeadlineExceeded=false
+context deadline exceeded：Canceled=false DeadlineExceeded=true</code></pre>
+    <p>呼叫的人主動取消（例如 HTTP 的客戶端斷線）是 Canceled；時間到了是 DeadlineExceeded。前者通常不用當成錯誤處理，後者常常要記錄下來，看看哪裡太慢。</p>
+    <p>期限也會沿著樹往下：衍生的 ctx 期限只能比上層早，不能比較晚：</p>
+    <pre class="code" data-src="chapters/18-context/deadline.go#deadlineDemo"><code>func deadlineDemo() {
+	parent, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	long, cancelLong := context.WithTimeout(parent, time.Hour)
+	defer cancelLong()
+	short, cancelShort := context.WithTimeout(parent, 10*time.Millisecond)
+	defer cancelShort()
+
+	pd, _ := parent.Deadline()
+	ld, _ := long.Deadline()
+	sd, _ := short.Deadline()
+	fmt.Printf("要 1 小時，實際期限和上層一樣：%t\n", ld.Equal(pd))
+	fmt.Printf("要 10 毫秒，期限比上層早：%t\n", sd.Before(pd))
+
+	_, ok := context.Background().Deadline()
+	fmt.Printf("Background 有期限：%t\n", ok)
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/18-context#Example_deadlineDemo"><code>要 1 小時，實際期限和上層一樣：true
+要 10 毫秒，期限比上層早：true
+Background 有期限：false</code></pre>
+    <p>整個請求只有 1 秒，底下哪一層要求 1 小時都沒有用。這讓「整個請求最多 1 秒」這種規定只要在最上層設一次，底下每一層自動遵守。反過來，底下也可以用 <code>ctx.Deadline()</code> 看還剩多少時間，時間不夠就不要開始做一件注定做不完的事（練習 2）。</p>
+  </section>
+
+  <section aria-labelledby="cause">
+    <h2 id="cause">4. 取消的原因</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 170" role="img" aria-label="用 cancel 帶著原因取消 ctx 之後，ctx.Err 只回傳 context canceled，context.Cause 回傳真正的原因：排骨賣完了">
+        <title>Err 和 Cause</title>
+        <rect class="hot" x="16" y="60" width="160" height="44" rx="8"/>
+        <text class="sm mono" x="96" y="87" text-anchor="middle">cancel(errSoldOut)</text>
+        <path class="wire" d="M176 82 H188"/>
+        <path class="tip" d="M200 82 L188 76 L188 88 Z"/>
+        <rect class="box" x="200" y="60" width="80" height="44" rx="8"/>
+        <text class="small bold mono" x="240" y="88" text-anchor="middle">ctx</text>
+        <path class="wire" d="M280 74 H300 V42 H308"/>
+        <path class="tip" d="M320 42 L308 36 L308 48 Z"/>
+        <path class="wire acc-ln" d="M280 90 H300 V122 H308"/>
+        <path class="tip acc-tip" d="M320 122 L308 116 L308 128 Z"/>
+        <rect class="soft" x="320" y="20" width="144" height="44" rx="8"/>
+        <text class="sm mono" x="392" y="38" text-anchor="middle">ctx.Err()</text>
+        <text class="sm mono" x="392" y="56" text-anchor="middle">context canceled</text>
+        <rect class="acc" x="320" y="100" width="144" height="44" rx="8"/>
+        <text class="sm mono" x="392" y="118" text-anchor="middle">context.Cause(ctx)</text>
+        <text class="sm" x="392" y="136" text-anchor="middle">排骨賣完了</text>
+        <text class="sm" x="240" y="164" text-anchor="middle">Err 只說「被取消了」，Cause 說為什麼</text>
+      </svg>
+      <figcaption>Err 的值只有兩種，方便呼叫的人用 errors.Is 判斷；真正的原因另外存著，用 context.Cause 取出。</figcaption>
+    </figure>
+    <p>ctx.Err() 只會告訴你「被取消了」或「超過期限了」，看 log 時常常不知道到底是誰、為什麼取消的。Go 1.20 加入 <code>context.WithCancelCause</code>：它的 cancel 收一個 error 當原因，之後用 <code>context.Cause</code> 取出；Go 1.21 再加入 <code>WithTimeoutCause</code>、<code>WithDeadlineCause</code>，指定時間到的時候用什麼原因：</p>
+    <pre class="code" data-src="chapters/18-context/cause.go#causeDemo"><code>func causeDemo() {
+	ctx, cancel := context.WithCancelCause(context.Background())
+	child, cancelChild := context.WithCancel(ctx)
+	defer cancelChild()
+	cancel(errSoldOut)
+	fmt.Println(ctx.Err(), "/", context.Cause(ctx))
+	fmt.Println("衍生的 ctx 也拿得到原因：", context.Cause(child))
+
+	slow, cancelSlow := context.WithTimeoutCause(context.Background(), 10*time.Millisecond, errSlow)
+	defer cancelSlow()
+	&lt;-slow.Done()
+	fmt.Println(slow.Err(), "/", context.Cause(slow))
+
+	plain, cancelPlain := context.WithCancel(context.Background())
+	cancelPlain()
+	fmt.Println("沒有指定原因：", context.Cause(plain))
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/18-context#Example_causeDemo"><code>context canceled / 排骨賣完了
+衍生的 ctx 也拿得到原因： 排骨賣完了
+context deadline exceeded / 廚房出餐太慢
+沒有指定原因： context canceled</code></pre>
+    <ul class="notes">
+      <li>Err 照舊是 Canceled 或 DeadlineExceeded，原本用 errors.Is 判斷的程式不必改。</li>
+      <li>從它衍生出來的 ctx，Cause 也拿得到同一個原因。</li>
+      <li>沒有指定原因時，Cause 回傳和 Err 一樣的值，所以記錄 log 時一律寫 <code>context.Cause(ctx)</code> 就好。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="listen">
+    <h2 id="listen">5. 寫一個聽 ctx 的函式</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 200" role="img" aria-label="三種聽 ctx 的方式：在等東西時把 ctx.Done 放進 select；一直在算時每做一段檢查 ctx.Err；呼叫別人時把 ctx 原封不動傳下去">
+        <title>三種聽 ctx 的方式</title>
+        <rect class="soft" x="16" y="30" width="140" height="120" rx="10"/>
+        <text class="small bold" x="86" y="58" text-anchor="middle">在等東西</text>
+        <text class="sm mono" x="86" y="94" text-anchor="middle">&lt;-ctx.Done()</text>
+        <text class="sm" x="86" y="120" text-anchor="middle">放進 select</text>
+        <rect class="soft" x="170" y="30" width="140" height="120" rx="10"/>
+        <text class="small bold" x="240" y="58" text-anchor="middle">一直在算</text>
+        <text class="sm mono" x="240" y="94" text-anchor="middle">ctx.Err()</text>
+        <text class="sm" x="240" y="120" text-anchor="middle">每做一段看一次</text>
+        <rect class="soft" x="324" y="30" width="140" height="120" rx="10"/>
+        <text class="small bold" x="394" y="58" text-anchor="middle">呼叫別人</text>
+        <text class="sm mono" x="394" y="94" text-anchor="middle">f(ctx, …)</text>
+        <text class="sm" x="394" y="120" text-anchor="middle">原封不動傳下去</text>
+        <text class="sm t-hot" x="240" y="184" text-anchor="middle">不聽 ctx 的函式，取消就傳不到它那裡</text>
+      </svg>
+      <figcaption>ctx 不會強制停止任何東西，它只是一個訊號。函式要自己在適當的地方檢查它。</figcaption>
+    </figure>
+    <p>context 不會強迫任何 goroutine 停下來，它只是一個訊號，要每個函式自己去聽。依照函式在做什麼，有三種聽法。第一種是<strong>在等東西</strong>的時候（等 channel、等計時器），把 <code>ctx.Done()</code> 放進同一個 select。把 16 章的 done channel 換成 ctx：</p>
+    <pre class="code" data-src="chapters/18-context/listen.go#prepare,listenDemo"><code>func prepare(ctx context.Context, items ...string) &lt;-chan string {
+	out := make(chan string)
+	go func() {
+		defer close(out)
+		for _, it := range items {
+			select {
+			case out &lt;- it:
+			case &lt;-ctx.Done():
+				return
+			}
+		}
+	}()
+	return out
+}
+
+func listenDemo() {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	for o := range prepare(ctx, "排骨飯", "雞腿飯", "魚排飯", "滷肉飯") {
+		fmt.Println(o)
+		if o == "雞腿飯" {
+			break
+		}
+	}
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/18-context#Example_listenDemo"><code>排骨飯
+雞腿飯</code></pre>
+    <p>收到雞腿飯就 break，離開時 defer 的 cancel 讓 prepare 的 goroutine 選到 Done、結束並 close channel，不會洩漏。和 done channel 比起來，ctx 多了期限、原因和整棵取消樹，而且呼叫的人可以直接把自己手上的 ctx 傳進來。</p>
+    <p>第二種是<strong>一直在算</strong>、沒有在等任何東西的工作，沒有 channel 可以 select，就每做一段檢查一次 <code>ctx.Err()</code>：</p>
+    <pre class="code" data-src="chapters/18-context/listen.go#tally,tallyDemo"><code>func tally(ctx context.Context, amounts []int) (int, error) {
+	sum := 0
+	for i, a := range amounts {
+		if i%1000 == 0 {
+			if err := ctx.Err(); err != nil {
+				return 0, err
+			}
+		}
+		sum += a
+	}
+	return sum, nil
+}
+
+func tallyDemo() {
+	amounts := make([]int, 5000)
+	for i := range amounts {
+		amounts[i] = i + 1
+	}
+	fmt.Println(tally(context.Background(), amounts))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	fmt.Println(tally(ctx, amounts))
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/18-context#Example_tallyDemo"><code>12502500 &lt;nil&gt;
+0 context canceled</code></pre>
+    <p>不用每一圈都檢查：ctx.Err() 本身有成本，每一千筆看一次，取消之後最多多算一千筆，已經夠快了。第三種是<strong>呼叫別人</strong>：把 ctx 原封不動傳下去，或從它衍生一個加了期限的。標準庫裡會等待的 API 大多有收 ctx 的版本，例如 <code>http.NewRequestWithContext</code>、<code>(*sql.DB).QueryContext</code>；HTTP 伺服器的 handler 用 <code>r.Context()</code> 拿到這個請求的 ctx，客戶端斷線時它就會被取消（「<a href="26-http.html">HTTP 服務</a>」那一章）。</p>
+    <p>ctx 在 API 裡的慣例，<a href="https://pkg.go.dev/context">context 套件文件</a>寫得很清楚：</p>
+    <ul class="notes">
+      <li>ctx 是函式的<strong>第一個參數</strong>，名字叫 <code>ctx</code>：<code>func Deliver(ctx context.Context, o Order) error</code>。</li>
+      <li><strong>不要把 ctx 存在 struct 裡</strong>，每個需要它的方法都明確地收一個。ctx 代表「這一次呼叫」，存起來就分不清是哪一次了。</li>
+      <li>不要傳 nil。還不確定要用哪個 ctx 時，傳 <code>context.TODO()</code>，它和 Background 一樣，但標明「這裡之後要接上真正的 ctx」。</li>
+      <li><code>context.Background()</code> 只出現在最上層：main、程式初始化、測試。測試裡更好的選擇是 Go 1.24 加入的 <code>t.Context()</code>，測試結束前它會被取消。</li>
+      <li>因為 ctx 而停下來時，回傳 <code>ctx.Err()</code>（或包住它），呼叫的人才能用 errors.Is 判斷。</li>
+      <li>同一個 ctx 可以同時交給好幾個 goroutine 使用，它是並行安全的。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="value">
+    <h2 id="value">6. 帶值</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 170" role="img" aria-label="Background 被 WithValue 包住，帶著訂單編號 A-07，再被 WithTimeout 包住，成為手上的 ctx；查 Value 時從手上的 ctx 一層一層往上找，找到 A-07">
+        <title>Value 一層一層往上找</title>
+        <text class="sm" x="240" y="30" text-anchor="middle">每次衍生，都包住上一層</text>
+        <rect class="soft" x="16" y="50" width="100" height="40" rx="8"/>
+        <text class="sm mono" x="66" y="75" text-anchor="middle">Background</text>
+        <rect class="acc" x="132" y="50" width="100" height="40" rx="8"/>
+        <text class="sm mono" x="182" y="68" text-anchor="middle">WithValue</text>
+        <text class="sm" x="182" y="84" text-anchor="middle">A-07</text>
+        <rect class="soft" x="248" y="50" width="100" height="40" rx="8"/>
+        <text class="sm mono" x="298" y="75" text-anchor="middle">WithTimeout</text>
+        <rect class="box" x="364" y="50" width="100" height="40" rx="8"/>
+        <text class="sm" x="414" y="75" text-anchor="middle">手上的 ctx</text>
+        <path class="tip" d="M116 70 L128 64 L128 76 Z"/>
+        <path class="tip" d="M232 70 L244 64 L244 76 Z"/>
+        <path class="tip" d="M348 70 L360 64 L360 76 Z"/>
+        <path class="wire acc-ln dash" d="M414 90 V124 H182 V102"/>
+        <path class="tip acc-tip" d="M182 90 L176 102 L188 102 Z"/>
+        <text class="sm t-acc" x="298" y="148" text-anchor="middle">Value(orderIDKey{})：自己沒有，就問上一層</text>
+      </svg>
+      <figcaption>WithValue 只是在外面多包一層。查 Value 時從最外層往內找，找到第一個 key 相同的就回傳。</figcaption>
+    </figure>
+    <p><code>context.WithValue(parent, key, val)</code> 衍生一個帶著一組 key/值的 ctx，之後從它衍生的 ctx 都查得到。適合放的是<strong>跟著這個請求、跨越 API 邊界</strong>的資料：請求編號、追蹤用的 trace ID、登入的使用者。標準的寫法是一個不匯出的 key 型別，加上一對存取函式：</p>
+    <pre class="code" data-src="chapters/18-context/value.go#orderIDKey,withOrderID,orderID,logLine,valueDemo"><code>type orderIDKey struct{}
+
+func withOrderID(ctx context.Context, id string) context.Context {
+	return context.WithValue(ctx, orderIDKey{}, id)
+}
+
+func orderID(ctx context.Context) (string, bool) {
+	id, ok := ctx.Value(orderIDKey{}).(string)
+	return id, ok
+}
+
+func logLine(ctx context.Context, msg string) {
+	id, ok := orderID(ctx)
+	if !ok {
+		id = "-"
+	}
+	fmt.Printf("[%s] %s\n", id, msg)
+}
+
+func valueDemo() {
+	ctx := withOrderID(context.Background(), "A-07")
+	ctx, cancel := context.WithTimeout(ctx, time.Second)
+	defer cancel()
+	logLine(ctx, "開始備餐")
+	logLine(context.Background(), "沒有訂單的紀錄")
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/18-context#Example_valueDemo"><code>[A-07] 開始備餐
+[-] 沒有訂單的紀錄</code></pre>
+    <ul class="notes">
+      <li><strong>key 用自己定義、不匯出的型別</strong>。用 string 當 key，兩個套件都用 <code>"id"</code> 就會互相蓋掉；不匯出的型別，別的套件根本寫不出來。<code>struct{}</code> 型別的 key 不佔空間。</li>
+      <li>只透過 withOrderID / orderID 存取，型別斷言集中在一個地方，呼叫的人拿到的是有型別的值。</li>
+      <li><strong>不要用它傳一般參數</strong>。函式需要的東西寫在參數列上，看簽名就知道它需要什麼；藏在 ctx 裡的依賴，編譯器不會檢查，讀程式的人也看不到。資料庫連線、設定這類依賴，放在 struct 欄位或參數裡。</li>
+      <li>放進去的值要當成唯讀的：同一個 ctx 可能同時被好幾個 goroutine 讀（練習 3）。</li>
+      <li>查詢是一層一層往上找，層數多時會慢一點。不要把它當成可以頻繁讀寫的 map。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="detach">
+    <h2 id="detach">7. WithoutCancel 與 AfterFunc</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 186" role="img" aria-label="左邊：已取消的請求 ctx 經過 WithoutCancel 得到對帳 ctx，訂單編號還在、不會被取消；右邊：ctx 被取消時，AfterFunc 另開一個 goroutine 執行 f">
+        <title>切斷取消、取消時執行</title>
+        <rect class="hot" x="16" y="30" width="150" height="44" rx="8"/>
+        <text class="small" x="91" y="50" text-anchor="middle">請求 ctx</text>
+        <text class="sm" x="91" y="67" text-anchor="middle">已取消</text>
+        <path class="wire" d="M91 74 V108"/>
+        <path class="tip" d="M91 120 L85 108 L97 108 Z"/>
+        <text class="sm mono" x="101" y="100">WithoutCancel</text>
+        <rect class="acc" x="16" y="120" width="150" height="44" rx="8"/>
+        <text class="small" x="91" y="140" text-anchor="middle">對帳 ctx</text>
+        <text class="sm" x="91" y="157" text-anchor="middle">A-07 還在、沒取消</text>
+        <path class="wire faint dash" d="M240 24 V170"/>
+        <rect class="hot" x="290" y="30" width="150" height="44" rx="8"/>
+        <text class="small" x="365" y="58" text-anchor="middle">ctx 被取消</text>
+        <path class="wire" d="M365 74 V108"/>
+        <path class="tip" d="M365 120 L359 108 L371 108 Z"/>
+        <text class="sm mono" x="375" y="100">AfterFunc</text>
+        <rect class="acc" x="290" y="120" width="150" height="44" rx="8"/>
+        <text class="sm" x="365" y="139" text-anchor="middle">另開 goroutine</text>
+        <text class="sm" x="365" y="156" text-anchor="middle">執行 f</text>
+      </svg>
+      <figcaption>WithoutCancel 保留值、切斷取消；AfterFunc 在 ctx 被取消時執行一個函式，用來接上不認得 ctx 的東西。</figcaption>
+    </figure>
+    <p>Go 1.21 加入兩個比較少用、但遇到時很好用的函式。第一個是 <code>context.WithoutCancel</code>：請求已經結束（ctx 被取消）了，還有事情要做，例如寫對帳紀錄、更新快取。直接用請求的 ctx 會馬上被取消；用 Background 又會丟掉請求編號這些值。WithoutCancel 回傳一個保留值、但不會被取消的 ctx：</p>
+    <pre class="code" data-src="chapters/18-context/detach.go#detachDemo"><code>func detachDemo() {
+	req, cancel := context.WithCancel(withOrderID(context.Background(), "A-07"))
+	audit := context.WithoutCancel(req)
+	cancel()
+
+	id, _ := orderID(audit)
+	fmt.Println("請求：", req.Err())
+	fmt.Println("對帳紀錄：", audit.Err(), id)
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/18-context#Example_detachDemo"><code>請求： context canceled
+對帳紀錄： &lt;nil&gt; A-07</code></pre>
+    <p>它也沒有期限，所以背景工作通常要自己再加一個：<code>context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)</code>，不然卡住時就永遠不會結束。</p>
+    <p>第二個是 <code>context.AfterFunc</code>：ctx 被取消時，在另一個 goroutine 執行一個函式。它用來把取消接到「不認得 ctx」的東西上，例如關掉一條網路連線，讓卡在讀取的 goroutine 醒過來：</p>
+    <pre class="code" data-src="chapters/18-context/detach.go#afterDemo"><code>func afterDemo() {
+	ctx, cancel := context.WithCancel(context.Background())
+	notified := make(chan struct{})
+	context.AfterFunc(ctx, func() {
+		fmt.Println("通知外送員：訂單取消")
+		close(notified)
+	})
+	cancel()
+	&lt;-notified
+
+	ctx2, cancel2 := context.WithCancel(context.Background())
+	stop := context.AfterFunc(ctx2, func() {
+		fmt.Println("這一行不會印出來")
+	})
+	fmt.Println("撤回通知：", stop())
+	cancel2()
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/18-context#Example_afterDemo"><code>通知外送員：訂單取消
+撤回通知： true</code></pre>
+    <ul class="notes">
+      <li>f 是在另一個 goroutine 執行的，所以示範用一個 channel 等它做完。</li>
+      <li>AfterFunc 回傳 stop。在 ctx 被取消前呼叫 stop，就撤回這個安排，stop 回傳 true；f 已經開始執行的話回傳 false。stop 不會等 f 做完。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="pitfalls">
+    <h2 id="pitfalls">常見錯誤</h2>
+    <h3 id="pit-cancel">1. 沒有呼叫 cancel</h3>
+    <p>WithCancel、WithTimeout、WithDeadline 拿到的 cancel 都要呼叫，最簡單的方法是下一行就寫 <code>defer cancel()</code>。go vet 會檢查（第 2 節）。</p>
+
+    <h3 id="pit-background">2. 在函式中間用 Background 重新開始</h3>
+    <p>收到了 ctx，卻寫 <code>context.WithTimeout(context.Background(), d)</code>，上層的取消和期限就傳不下來了：呼叫的人早就放棄，這裡還在做。永遠從收到的 ctx 衍生（練習 6）。</p>
+
+    <h3 id="pit-ignore">3. 收了 ctx 卻不聽</h3>
+    <p>函式簽名上有 ctx，裡面卻用 <code>time.Sleep</code>、沒有 select 的 channel 收送、不帶 ctx 的 API。取消時它照樣做完。會等待的地方都要放 <code>ctx.Done()</code>（第 5 節，練習 1）。</p>
+
+    <h3 id="pit-struct">4. 把 ctx 存在 struct 裡</h3>
+    <p>ctx 屬於某一次呼叫，存在 struct 裡，之後的每一次呼叫都會用到同一個、可能早就被取消的 ctx。每個方法各自收一個 ctx 參數。</p>
+
+    <h3 id="pit-value">5. 用 Value 傳參數、用 string 當 key</h3>
+    <p>函式需要的東西寫在參數上；Value 只放跟著請求、跨越 API 邊界的資料。key 一律用不匯出的自訂型別（第 6 節）。</p>
+
+    <h3 id="pit-err">6. 被取消了卻回傳 nil，或把 Canceled 當嚴重錯誤</h3>
+    <p>因為 ctx 停下來就回傳 ctx.Err()，呼叫的人才知道結果不完整。反過來，客戶端主動取消（Canceled）通常是正常現象，不必當成系統錯誤發警報；DeadlineExceeded 才代表某個地方太慢。</p>
   </section>
 
   <section aria-labelledby="java">
@@ -102,21 +571,126 @@ func main() {
       <table class="vs">
         <thead><tr><th scope="col">主題</th><th scope="col">Java</th><th scope="col">Go</th></tr></thead>
         <tbody>
-          <tr><th scope="row">取消工作</th><td class="java"><code>Future.cancel(true)</code>、interrupt</td><td><code>context.WithCancel</code>，呼叫 <code>cancel()</code></td></tr>
-          <tr><th scope="row">逾時</th><td class="java"><code>future.get(timeout)</code>、各個 client 自己設定</td><td><code>context.WithTimeout</code>，一路往下傳</td></tr>
-          <tr><th scope="row">請求範圍的值</th><td class="java"><code>ThreadLocal</code></td><td><code>context.WithValue</code></td></tr>
+          <tr><th scope="row">取消工作</th><td class="java"><code>Future.cancel(true)</code>、<code>Thread.interrupt()</code></td><td><code>context.WithCancel</code>，呼叫 <code>cancel()</code></td></tr>
+          <tr><th scope="row">檢查是否被取消</th><td class="java"><code>Thread.currentThread().isInterrupted()</code></td><td><code>ctx.Err() != nil</code>、select <code>&lt;-ctx.Done()</code></td></tr>
+          <tr><th scope="row">逾時</th><td class="java"><code>future.get(timeout)</code>、每個 client 各自設定</td><td><code>context.WithTimeout</code>，一路往下傳、只能縮短</td></tr>
+          <tr><th scope="row">取消的原因</th><td class="java">interrupt 不帶原因</td><td><code>WithCancelCause</code>、<code>context.Cause</code></td></tr>
+          <tr><th scope="row">請求範圍的值</th><td class="java"><code>ThreadLocal</code>（綁在執行緒上）</td><td><code>context.WithValue</code>（跟著 ctx 明確傳遞）</td></tr>
           <tr><th scope="row">怎麼傳</th><td class="java">隱含在執行緒上</td><td>明確當成第一個參數</td></tr>
         </tbody>
       </table>
     </div>
+    <p>Java 的 interrupt 綁在執行緒上，Go 沒有辦法從外面打斷一個 goroutine，取消一律靠 ctx 這個明確傳遞的訊號。ThreadLocal 在 goroutine 之間也行不通：一個請求常常跨好幾個 goroutine，值必須跟著 ctx 走。</p>
+  </section>
+
+  <section aria-labelledby="exercises">
+    <h2 id="exercises">練習</h2>
+    <p>題目在 <code>exercises/18-context/exercises.go</code>。和時間有關的題目，測試在 synctest 的泡泡裡執行：WithTimeout、time.Sleep 都用假時間，一下子就跑完，而且可以精確檢查花了多久。</p>
+    <pre class="shell"><code>go test ./exercises/18-context/                   <span class="c"># 跑全部練習</span>
+go test ./exercises/18-context/ -run TestSleep    <span class="c"># 只跑一題</span>
+go test -race ./exercises/18-context/             <span class="c"># 檢查 data race</span>
+go test -tags solution ./exercises/18-context/    <span class="c"># 跑參考解答</span></code></pre>
+    <ol class="exercises">
+      <li>
+        <h3><span class="level l1">入門</span>練習 1：會被叫醒的 Sleep</h3>
+        <p>time.Sleep 不聽 ctx；寫一個會聽的。</p>
+        <pre class="code" data-src="exercises/18-context/exercises.go#Sleep"><code>func Sleep(ctx context.Context, d time.Duration) error {
+	// TODO: 實作
+	return nil
+}</code></pre>
+        <p>測試：<code>TestSleep</code>。</p>
+        <details><summary>提示</summary><p>和第 1 節的 cook 一樣：select 等 <code>time.After(d)</code> 和 <code>ctx.Done()</code>。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l1">入門</span>練習 2：來得及嗎</h3>
+        <p>剩下的時間不夠，就不要開始一件做不完的事。</p>
+        <pre class="code" data-src="exercises/18-context/exercises.go#ShouldStart"><code>func ShouldStart(ctx context.Context, need time.Duration) bool {
+	// TODO: 實作
+	return false
+}</code></pre>
+        <p>測試：<code>TestShouldStart</code>。</p>
+        <details><summary>提示</summary><p>先看 <code>ctx.Err()</code>；再用 <code>ctx.Deadline()</code>，ok 是 false 代表沒有期限。剩下的時間是 <code>time.Until(deadline)</code>。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l2">進階</span>練習 3：外送路線</h3>
+        <p>每經過一站就從上一個 ctx 衍生一個新的。同一個 ctx 分出去的兩條路線，互相不能影響。</p>
+        <pre class="code" data-src="exercises/18-context/exercises.go#WithStop,Route"><code>func WithStop(ctx context.Context, stop string) context.Context {
+	// TODO: 實作
+	return ctx
+}
+
+func Route(ctx context.Context) []string {
+	// TODO: 實作
+	return nil
+}</code></pre>
+        <p>測試：<code>TestRoute</code>。</p>
+        <details><summary>提示</summary><p>不匯出的 key 型別，值存 <code>[]string</code>。陷阱在 append：上一層的 slice 底層陣列還有空間時，兩條分支 append 會寫到同一格（<a href="06-arrays-slices.html">slice 那一章</a>）。WithStop 做一份新的 slice 再 append（<code>slices.Clip</code> 或 <code>slices.Clone</code>），Route 也回傳複本。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l2">進階</span>練習 4：轉送站</h3>
+        <p>把一個 channel 的東西轉送到另一個 channel，卡在收或卡在送時都要能被取消。</p>
+        <pre class="code" data-src="exercises/18-context/exercises.go#Pump"><code>func Pump[T any](ctx context.Context, in &lt;-chan T, out chan&lt;- T) error {
+	// TODO: 實作
+	return nil
+}</code></pre>
+        <p>測試：<code>TestPump</code>。</p>
+        <details><summary>提示</summary><p>每一圈兩個 select：第一個收 in（ok 為 false 就回傳 nil）或等 ctx.Done()；第二個送 out 或等 ctx.Done()。只在收的地方聽 ctx 不夠，out 沒人收時會永遠卡在送。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l3">挑戰</span>練習 5：哪一間最快</h3>
+        <p>同時向好幾間分店下單，用最先做好的那一份，其他的通知取消，而且要等它們真的停下來。</p>
+        <pre class="code" data-src="exercises/18-context/exercises.go#Fastest"><code>func Fastest(ctx context.Context, kitchens ...func(context.Context) (string, error)) (string, error) {
+	// TODO: 實作
+	return "", nil
+}</code></pre>
+        <p>測試：<code>TestFastest</code>。</p>
+        <details><summary>提示</summary><p>先 <code>ctx, cancel := context.WithCancel(ctx)</code> 並 defer cancel，把這個 ctx 交給每一間。結果用容量 len(kitchens) 的 channel 收，誰送都不會卡住；每間用 wg.Go 開。收到第一個成功的：cancel()、wg.Wait()、回傳。失敗的錯誤存起來，全部失敗就 <code>errors.Join</code>。</p></details>
+      </li>
+      <li>
+        <h3><span class="level fix">找錯</span>練習 6：問不到的等候時間</h3>
+        <p>客人已經離開了，系統還在等廚房回答。</p>
+        <pre class="code" data-src="exercises/18-context/exercises.go#Quote"><code>func Quote(ctx context.Context, ask func(context.Context) (time.Duration, error)) (time.Duration, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	return ask(ctx)
+}</code></pre>
+        <p>測試：<code>TestQuote</code>。</p>
+        <details><summary>提示</summary><p>常見錯誤 2。</p></details>
+      </li>
+    </ol>
+    <p><a href="https://github.com/xinqilin/GO-Playground/blob/main/exercises/18-context/solution.go">參考解答</a>：先自己寫完再看。測試通過、而且 <code>-race</code> 沒有警告的寫法都是對的。</p>
+  </section>
+
+  <section aria-labelledby="recap">
+    <h2 id="recap">重點回顧</h2>
+    <ul class="recap">
+      <li>context 把取消、期限和請求範圍的值，從最上層一路傳到最底層。</li>
+      <li>最上層用 <code>context.Background()</code>，其他 ctx 都從上層衍生；取消只往下傳。</li>
+      <li>WithCancel、WithTimeout、WithDeadline 回傳的 cancel 一定要呼叫，慣例是 <code>defer cancel()</code>。</li>
+      <li>衍生的 ctx 期限只能比上層早；用 errors.Is 分辨 Canceled 和 DeadlineExceeded。</li>
+      <li>用 WithCancelCause、WithTimeoutCause 記下原因，<code>context.Cause</code> 取出，log 一律記 Cause。</li>
+      <li>聽 ctx 的三種方式：select 等 Done、一直在算就定期看 Err、呼叫別人就把 ctx 傳下去。</li>
+      <li>ctx 是第一個參數，不存在 struct 裡，不傳 nil；測試用 <code>t.Context()</code>。</li>
+      <li>WithValue 只放跟著請求的資料，key 用不匯出的型別，值當成唯讀。</li>
+      <li>WithoutCancel 保留值、切斷取消；AfterFunc 在取消時執行一個函式。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="further">
+    <h2 id="further">延伸閱讀</h2>
+    <ul class="notes">
+      <li>套件文件：<a href="https://pkg.go.dev/context">context</a>，開頭的使用規則值得完整讀一次；<a href="https://pkg.go.dev/context#WithCancelCause">WithCancelCause</a>、<a href="https://pkg.go.dev/context#WithoutCancel">WithoutCancel</a>、<a href="https://pkg.go.dev/context#AfterFunc">AfterFunc</a>。</li>
+      <li>Go blog：<a href="https://go.dev/blog/context">Go Concurrency Patterns: Context</a>、<a href="https://go.dev/blog/context-and-structs">Contexts and structs</a>。</li>
+    </ul>
   </section>
 
   <section aria-labelledby="run">
     <h2 id="run">動手跑</h2>
     <p class="label">在 repo 根目錄</p>
-    <pre class="shell"><code>go run ./chapters/18-context
-go test -race ./chapters/18-context</code></pre>
-    <p><a href="https://github.com/xinqilin/GO-Playground/tree/main/chapters/18-context">在 GitHub 看完整程式碼</a></p>
+    <pre class="shell"><code>go run ./chapters/18-context                  <span class="c"># 執行本章的示範</span>
+go test -race ./chapters/18-context           <span class="c"># 驗證頁面上的每一段輸出和 synctest 測試</span>
+go test ./exercises/18-context/               <span class="c"># 做練習</span></code></pre>
+    <p><a href="https://github.com/xinqilin/GO-Playground/tree/main/chapters/18-context">在 GitHub 看本章完整程式碼</a>，或看<a href="https://github.com/xinqilin/GO-Playground/tree/main/exercises/18-context">練習題</a>。</p>
   </section>
 </main>
 

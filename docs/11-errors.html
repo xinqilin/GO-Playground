@@ -4,123 +4,618 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>錯誤處理｜Go 圖解手冊</title>
-<meta name="description" content="Go 的錯誤處理：error 是值、用 %w 包裝、errors.Is 與 errors.As 的差別，以及 panic 與 recover。">
+<meta name="description" content="Go 的錯誤處理：error 是一個值、sentinel error、用 %w 包裝與錯誤鏈、errors.Is、errors.As 與 errors.AsType、自訂錯誤型別、errors.Join、Close 的錯誤、panic 的正確用途，以及分層處理錯誤的策略，附可執行的練習題。">
 <link rel="stylesheet" href="assets/style.css">
 </head>
 <body>
 <header class="site">
   <a href="index.html">Go 圖解手冊</a>
-  <span class="count">11 / 24</span>
+  <span class="count">11 / 33</span>
 </header>
 
-<main class="page">
+<main class="page long">
   <header class="hero">
     <div class="num" aria-hidden="true">11</div>
     <p class="eyebrow">Part 2 · 型別系統 · 第 11 章</p>
     <h1>錯誤處理</h1>
-    <p class="analogy">錯誤是一個普通的值：函式把它交給你，你決定要處理還是往上交。</p>
+    <p class="analogy">Go 沒有例外。錯誤是一個普通的值，函式把它和結果一起交給你；每一層補上自己知道的事再往上傳，最外層決定怎麼回應。</p>
   </header>
 
-  <section aria-labelledby="look">
-    <h2 id="look">看圖</h2>
-    <div class="figs">
-      <figure class="fig">
-        <svg viewBox="0 0 480 246" role="img" aria-label="錯誤像俄羅斯娃娃一層包一層：下單失敗包著查庫存，查庫存包著最裡面的 ErrNotFound；errors.Is 一層一層打開去找">
-          <title>錯誤一層一層包起來</title>
-          <rect class="soft" x="16" y="20" width="448" height="210" rx="14"/>
-          <text class="small mono" x="32" y="46">下單失敗：%w</text>
-          <rect class="soft" x="40" y="62" width="400" height="144" rx="12"/>
-          <text class="small mono" x="56" y="88">查庫存 "香蕉"：%w</text>
-          <rect class="hot" x="64" y="106" width="220" height="76" rx="10"/>
-          <text class="mono bold t-hot" x="174" y="140" text-anchor="middle">ErrNotFound</text>
-          <text class="small" x="174" y="166" text-anchor="middle">找不到</text>
-          <path class="wire acc-ln" d="M420 144 H302"/>
-          <path class="tip acc-tip" d="M290 144 L302 138 L302 150 Z"/>
-          <text class="small mono t-acc" x="360" y="132" text-anchor="middle">errors.Is</text>
-          <text class="sm" x="360" y="172" text-anchor="middle">一層層往內找</text>
-        </svg>
-        <figcaption>每一層用 <code>%w</code> 把下面的錯誤包起來，再補上自己的說明。<code>errors.Is</code> 會一層一層打開，找到最裡面的 <code>ErrNotFound</code>。</figcaption>
-      </figure>
+  <nav class="toc-inline" aria-labelledby="toc-title">
+    <p class="label" id="toc-title">本章內容</p>
+    <ol>
+      <li><a href="#goals">本章你會學到</a></li>
+      <li><a href="#values">錯誤是一個值</a></li>
+      <li><a href="#sentinel">sentinel error</a></li>
+      <li><a href="#wrap">包裝與錯誤鏈</a></li>
+      <li><a href="#types">自訂錯誤型別</a></li>
+      <li><a href="#join">多個錯誤</a></li>
+      <li><a href="#close">Close 也會失敗</a></li>
+      <li><a href="#panic">什麼時候用 panic</a></li>
+      <li><a href="#layers">分層處理錯誤</a></li>
+      <li><a href="#pitfalls">常見錯誤</a></li>
+      <li><a href="#java">從 Java 來的你</a></li>
+      <li><a href="#exercises">練習</a></li>
+      <li><a href="#recap">重點回顧</a></li>
+      <li><a href="#further">延伸閱讀</a></li>
+    </ol>
+  </nav>
 
-      <figure class="fig">
-        <svg viewBox="0 0 480 252" role="img" aria-label="errors.Is 比對是不是同一個錯誤值；errors.As 檢查是不是某種錯誤型別，是的話取出來讀它的欄位">
-          <title>Is 比對值，As 取出型別</title>
-          <path class="wire faint" d="M240 12 V242"/>
-          <text class="mono bold" x="117" y="28" text-anchor="middle">errors.Is</text>
-          <text class="sm" x="117" y="50" text-anchor="middle">是不是同一個錯誤值</text>
-          <rect class="hot" x="24" y="72" width="186" height="40" rx="6"/>
-          <text class="small mono" x="117" y="97" text-anchor="middle">ErrNotFound</text>
-          <text class="bold" x="117" y="142" text-anchor="middle">==</text>
-          <rect class="acc" x="24" y="156" width="186" height="40" rx="6"/>
-          <text class="small mono" x="117" y="181" text-anchor="middle">ErrNotFound</text>
-          <text class="bold t-acc" x="117" y="230" text-anchor="middle">true</text>
-
-          <text class="mono bold" x="363" y="28" text-anchor="middle">errors.As</text>
-          <text class="sm" x="363" y="50" text-anchor="middle">是不是這種型別，是就取出來</text>
-          <rect class="hot" x="270" y="72" width="186" height="64" rx="6"/>
-          <text class="small mono" x="363" y="97" text-anchor="middle">*ValidationError</text>
-          <text class="small mono" x="363" y="122" text-anchor="middle">Field: qty  Value: -1</text>
-          <path class="wire" d="M363 140 V164"/>
-          <path class="tip" d="M363 174 L356 161 L370 161 Z"/>
-          <rect class="acc" x="270" y="178" width="186" height="40" rx="6"/>
-          <text class="small mono" x="363" y="203" text-anchor="middle">ve.Field == "qty"</text>
-          <text class="sm" x="363" y="244" text-anchor="middle">Go 1.26 起也可以用 errors.AsType</text>
-        </svg>
-        <figcaption><code>errors.Is</code> 問「是不是這個錯誤」；<code>errors.As</code> 問「是不是這種錯誤」，是的話把它取出來，讀裡面的欄位。</figcaption>
-      </figure>
-
-      <figure class="fig">
-        <svg viewBox="0 0 480 256" role="img" aria-label="a 除以 0 發生 panic，沿著呼叫鏈往上，被 safeDivide 裡 defer 的 recover 接住，轉成 error 回傳給 main">
-          <title>panic 與 recover</title>
-          <rect class="soft" x="120" y="16" width="240" height="46" rx="8"/>
-          <text class="mono" x="240" y="45" text-anchor="middle">main</text>
-          <path class="wire acc-ln" d="M240 92 V74"/>
-          <path class="tip acc-tip" d="M240 64 L233 77 L247 77 Z"/>
-          <text class="small t-acc" x="250" y="84">回傳 error</text>
-          <rect class="acc" x="120" y="92" width="240" height="56" rx="8"/>
-          <text class="mono" x="240" y="117" text-anchor="middle">safeDivide</text>
-          <text class="small mono t-acc" x="240" y="139" text-anchor="middle">defer + recover()</text>
-          <path class="wire acc-ln dash" d="M130 172 H350"/>
-          <text class="small t-acc" x="140" y="166">recover 接住</text>
-          <path class="wire hot-ln" d="M300 196 V188"/>
-          <path class="tip hot-tip" d="M300 176 L293 189 L307 189 Z"/>
-          <text class="small bold t-hot" x="312" y="192">panic</text>
-          <rect class="hot" x="120" y="196" width="240" height="50" rx="8"/>
-          <text class="mono t-hot" x="240" y="227" text-anchor="middle">a / b，b 是 0</text>
-        </svg>
-        <figcaption>panic 會沿著呼叫鏈往上衝，直到被 defer 裡的 <code>recover</code> 接住。接住之後轉成 error 回傳，程式就不會整個掛掉。</figcaption>
-      </figure>
-    </div>
+  <section aria-labelledby="goals">
+    <h2 id="goals">本章你會學到</h2>
+    <ul class="notes">
+      <li><code>error</code> 是什麼，以及「回傳、檢查、往上傳」這套慣例。</li>
+      <li>用 sentinel error 讓呼叫的人分辨錯誤的種類。</li>
+      <li>用 <code>%w</code> 包裝錯誤、補上前後文，用 <code>errors.Is</code> 在錯誤鏈裡比對。</li>
+      <li>自訂錯誤型別，用 <code>errors.As</code> 和 Go 1.26 的 <code>errors.AsType</code> 取出細節。</li>
+      <li>用 <code>errors.Join</code> 一次回報好幾個錯誤，不漏掉 <code>Close</code> 的錯誤。</li>
+      <li>分清楚什麼該回傳 error、什麼該 panic。</li>
+      <li>在多層的程式裡，錯誤該在哪裡包裝、在哪裡處理、在哪裡翻譯。</li>
+    </ul>
+    <p>先備：<a href="10-interfaces.html">10 interface</a>（特別是 <a href="10-interfaces.html#nil">nil interface 陷阱</a>）、<a href="04-functions.html#defer">04 章的 defer</a> 與 <a href="04-functions.html#panic">panic</a>。</p>
   </section>
 
-  <section aria-labelledby="code">
-    <h2 id="code">最小範例</h2>
-    <pre class="code"><code>var ErrNotFound = errors.New("找不到")
+  <section aria-labelledby="values">
+    <h2 id="values">1. 錯誤是一個值</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 218" role="img" aria-label="parsePeople 有兩個出口：成功時回傳人數和 nil，失敗時回傳 0 和一個 error。呼叫的人先檢查 err，再決定要不要用人數">
+        <title>結果和錯誤一起回傳</title>
+        <rect class="acc" x="16" y="80" width="140" height="52" rx="8"/>
+        <text class="mono bold" x="86" y="111" text-anchor="middle">parsePeople</text>
+        <path class="wire acc-ln" d="M156 96 H190 V46 H206"/>
+        <path class="tip acc-tip" d="M216 46 L204 40 L204 52 Z"/>
+        <path class="wire hot-ln" d="M156 116 H190 V166 H206"/>
+        <path class="tip hot-tip" d="M216 166 L204 160 L204 172 Z"/>
+        <rect class="soft" x="218" y="24" width="110" height="44" rx="6"/>
+        <text class="mono" x="273" y="51" text-anchor="middle">4, nil</text>
+        <rect class="hot" x="218" y="144" width="110" height="44" rx="6"/>
+        <text class="mono" x="273" y="171" text-anchor="middle">0, err</text>
+        <text class="sm" x="342" y="42">成功：err 是 nil</text>
+        <text class="sm" x="342" y="62">才使用結果</text>
+        <text class="sm t-hot" x="342" y="162">失敗：先處理 err</text>
+        <text class="sm t-hot" x="342" y="182">結果不能用</text>
+        <text class="sm mono" x="86" y="160" text-anchor="middle">(int, error)</text>
+      </svg>
+      <figcaption>會失敗的函式多回傳一個 error。err 是 nil 才代表成功；不是 nil 時，其他回傳值通常只是零值，不要使用。</figcaption>
+    </figure>
+    <p><code>error</code> 是 Go 內建的一個 interface，只有一個方法：<code>type error interface { Error() string }</code>。任何有 <code>Error() string</code> 方法的型別都是一種錯誤（<a href="10-interfaces.html">10 章</a>）。慣例是把它放在回傳值的最後一個：</p>
+    <pre class="code" data-src="chapters/11-errors/basics.go#parsePeople,basicsDemo"><code>func parsePeople(s string) (int, error) {
+	n, err := strconv.Atoi(s)
+	if err != nil {
+		return 0, err
+	}
+	if n &lt; 1 || n &gt; 12 {
+		return 0, fmt.Errorf("人數 %d 不在 1 到 12 之間", n)
+	}
+	return n, nil
+}
 
-func find(name string) error {
-	return fmt.Errorf("查詢 %q：%w", name, ErrNotFound)
+func basicsDemo() {
+	for _, s := range []string{"4", "四", "20"} {
+		n, err := parsePeople(s)
+		if err != nil {
+			fmt.Printf("錯誤：%v\n", err)
+			continue
+		}
+		fmt.Println("人數", n)
+	}
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/11-errors#Example_basicsDemo"><code>人數 4
+錯誤：strconv.Atoi: parsing "四": invalid syntax
+錯誤：人數 20 不在 1 到 12 之間</code></pre>
+    <ul class="notes">
+      <li>呼叫完立刻寫 <code>if err != nil { … }</code>：先處理錯誤，正常的流程留在左邊不縮排（<a href="03-control-flow.html#if">03 章的 guard clause</a>）。</li>
+      <li>失敗時其他回傳值給零值（<code>return 0, err</code>），呼叫的人看到 err 不是 nil，就不該再用它們。少數例外會寫在文件裡，例如 <code>io.Reader</code> 的 Read 可能同時回傳讀到的 n 個 byte 和一個錯誤。</li>
+      <li><code>errors.New("…")</code> 建立一個固定訊息的錯誤，<code>fmt.Errorf</code> 用格式化的方式建立，例如加上使用者輸入的值。</li>
+      <li>錯誤訊息會被一層一層串起來，所以 Go 的慣例是：英文小寫開頭、結尾不加句號，內容寫「在做什麼、對誰、為什麼失敗」。<code>strconv.Atoi: parsing "四": invalid syntax</code> 就是標準庫的示範。</li>
+    </ul>
+    <p>這和 Java 的例外差很多：錯誤寫在函式簽名上，看得到；處理錯誤的流程就是一般的 if，沒有看不見的跳躍。代價是程式裡會有很多 <code>if err != nil</code>。這是刻意的取捨：Go 要你在每一個可能失敗的地方，明確決定要怎麼辦。</p>
+  </section>
+
+  <section aria-labelledby="sentinel">
+    <h2 id="sentinel">2. sentinel error</h2>
+    <p>呼叫的人常常需要分辨是<strong>哪一種</strong>錯誤：賣完了要請客人改點別的，菜單上沒有的東西則是輸入有問題。最簡單的做法是在 package 層級事先建立幾個錯誤值，叫做 <strong>sentinel error</strong>，名稱慣例用 <code>Err</code> 開頭：</p>
+    <pre class="code" data-src="chapters/11-errors/sentinel.go#ErrSoldOut,dish,menu,price,sentinelDemo"><code>var (
+	ErrSoldOut   = errors.New("賣完了")
+	ErrNotOnMenu = errors.New("菜單上沒有")
+)
+
+type dish struct {
+	price int
+	left  int
+}
+
+var menu = map[string]dish{
+	"排骨飯": {price: 85, left: 10},
+	"雞腿飯": {price: 95, left: 0},
+}
+
+func price(name string) (int, error) {
+	d, ok := menu[name]
+	if !ok {
+		return 0, ErrNotOnMenu
+	}
+	if d.left == 0 {
+		return 0, ErrSoldOut
+	}
+	return d.price, nil
+}
+
+func sentinelDemo() {
+	for _, name := range []string{"排骨飯", "雞腿飯", "珍奶"} {
+		p, err := price(name)
+		switch {
+		case err == nil:
+			fmt.Println(name, p)
+		case errors.Is(err, ErrSoldOut):
+			fmt.Println(name, "今天賣完了，明天請早")
+		default:
+			fmt.Printf("%s 錯誤：%v\n", name, err)
+		}
+	}
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/11-errors#Example_sentinelDemo"><code>排骨飯 85
+雞腿飯 今天賣完了，明天請早
+珍奶 錯誤：菜單上沒有</code></pre>
+    <ul class="notes">
+      <li>比對 sentinel 用 <code>errors.Is(err, ErrSoldOut)</code>。為什麼不直接寫 <code>err == ErrSoldOut</code>，下一節就會看到。</li>
+      <li>sentinel 必須是同一個值：每次呼叫 <code>errors.New</code> 都會產生一個新的錯誤，就算訊息一模一樣也不相等。所以它一定是 package 層級的變數，只建立一次。</li>
+      <li>標準庫的例子：<code>io.EOF</code>（讀到結尾，其實是「沒有更多資料了」的訊號）、<code>fs.ErrNotExist</code>（檔案不存在，<code>os.Open</code> 回傳的錯誤可以用 <code>errors.Is(err, fs.ErrNotExist)</code> 判斷）、<code>context.Canceled</code>。</li>
+      <li>匯出的 sentinel 是 API 的一部分：別人的程式會開始依賴它，之後就不能隨便拿掉或改變意思。只有呼叫的人真的需要分辨時，才匯出。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="wrap">
+    <h2 id="wrap">3. 包裝：%w 與錯誤鏈</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 214" role="img" aria-label="三層錯誤一層包一層：最外面是訂單 17，裡面是報價 雞腿飯，最裡面是 ErrSoldOut。等號只比對最外面那一層，errors.Is 會一層一層拆開往裡找">
+        <title>錯誤鏈：一層包一層</title>
+        <rect class="soft" x="16" y="16" width="448" height="150" rx="12"/>
+        <text class="small mono" x="32" y="40">訂單 17：%w</text>
+        <rect class="soft" x="48" y="52" width="400" height="102" rx="10"/>
+        <text class="small mono" x="64" y="76">報價 雞腿飯：%w</text>
+        <rect class="hot" x="80" y="90" width="200" height="50" rx="8"/>
+        <text class="mono bold" x="180" y="121" text-anchor="middle">ErrSoldOut</text>
+        <text class="sm t-acc" x="300" y="112">errors.Is 一層一層</text>
+        <text class="sm t-acc" x="300" y="132">拆開往裡找</text>
+        <text class="sm" x="240" y="190" text-anchor="middle">err == ErrSoldOut 只比對最外面那一層，所以是 false</text>
+      </svg>
+      <figcaption>每一層用 <code>%w</code> 把下一層的錯誤包起來。印出來是一整串訊息，裡面的錯誤仍然完整地留著。</figcaption>
+    </figure>
+    <p>只回傳「賣完了」，最上層的人不知道是哪一張單、哪一道菜。每一層應該補上<strong>自己知道的資訊</strong>再往上傳。<code>fmt.Errorf</code> 的 <code>%w</code> 動詞會產生一個新的錯誤：訊息照格式組好，同時把原本的錯誤包在裡面：</p>
+    <pre class="code" data-src="chapters/11-errors/wrap.go#quote,placeOrder,wrapDemo"><code>func quote(name string, qty int) (int, error) {
+	p, err := price(name)
+	if err != nil {
+		return 0, fmt.Errorf("報價 %s：%w", name, err)
+	}
+	return p * qty, nil
+}
+
+func placeOrder(no int, name string, qty int) error {
+	total, err := quote(name, qty)
+	if err != nil {
+		return fmt.Errorf("訂單 %d：%w", no, err)
+	}
+	fmt.Println("訂單", no, "合計", total)
+	return nil
+}
+
+func wrapDemo() {
+	err := placeOrder(17, "雞腿飯", 2)
+	fmt.Println(err)
+	fmt.Println(err == ErrSoldOut, errors.Is(err, ErrSoldOut))
+
+	for e := err; e != nil; e = errors.Unwrap(e) {
+		fmt.Printf("%T：%v\n", e, e)
+	}
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/11-errors#Example_wrapDemo"><code>訂單 17：報價 雞腿飯：賣完了
+false true
+*fmt.wrapError：訂單 17：報價 雞腿飯：賣完了
+*fmt.wrapError：報價 雞腿飯：賣完了
+*errors.errorString：賣完了</code></pre>
+    <ul class="notes">
+      <li>印出來的訊息從外到內讀起來就像一條路徑：訂單 17，在報價雞腿飯的時候，發現賣完了。每一層只加自己的部分，不要再加「失敗」「錯誤」這種字，串起來才不會囉嗦。</li>
+      <li>包裝之後，err 已經不是 ErrSoldOut 本身了，<code>==</code> 是 false。<code>errors.Is</code> 會呼叫 <code>errors.Unwrap</code> 一層一層拆開，每一層都比對一次，所以找得到。<strong>比對錯誤一律用 errors.Is</strong>，不管現在有沒有包裝，以後有人加上包裝也不會壞。</li>
+      <li>最後的迴圈自己用 Unwrap 拆給你看：兩層 <code>*fmt.wrapError</code>（%w 產生的型別），最裡面是 errors.New 產生的 <code>*errors.errorString</code>。平常不需要自己拆，交給 errors.Is 和 errors.As 就好。</li>
+    </ul>
+
+    <section class="deep" aria-labelledby="w-or-v">
+      <p class="tag">深入：第一次讀可以先跳過</p>
+      <h3 id="w-or-v">3.1 %w 還是 %v</h3>
+      <pre class="code" data-src="chapters/11-errors/wrap.go#wrapVsFormat"><code>func wrapVsFormat() {
+	_, err := price("雞腿飯")
+	w := fmt.Errorf("報價：%w", err)
+	v := fmt.Errorf("報價：%v", err)
+	fmt.Println(w, errors.Is(w, ErrSoldOut))
+	fmt.Println(v, errors.Is(v, ErrSoldOut))
+}</code></pre>
+      <p class="label">輸出</p>
+      <pre class="out" data-example="chapters/11-errors#Example_wrapVsFormat"><code>報價：賣完了 true
+報價：賣完了 false</code></pre>
+      <p>兩個錯誤印出來一模一樣，差別在 <code>%v</code> 只把訊息變成文字，原本的錯誤沒有被包進去，errors.Is 就找不到了。</p>
+      <p>那什麼時候該故意用 %v？用 %w 包裝等於把裡面的錯誤公開給呼叫的人：假設你的 package 裡面用了某個資料庫，把資料庫的錯誤用 %w 包出去，呼叫的人就可能開始寫 <code>errors.Is(err, 資料庫的某個錯誤)</code>，以後你換資料庫，他們的程式就壞了。這種內部實作的細節，應該翻譯成你自己的 sentinel（例如 ErrNotFound）再回傳，或用 %v 只留下文字。</p>
+      <p>Go 1.20 起，一個 fmt.Errorf 裡可以用好幾個 %w，產生的錯誤同時包著好幾個原因，errors.Is 會每一個都找。這種錯誤的 Unwrap 方法回傳的是 <code>[]error</code>，所以 <code>errors.Unwrap</code> 對它回傳 nil，要走訪就得自己處理兩種 Unwrap（練習 5）。</p>
+    </section>
+  </section>
+
+  <section aria-labelledby="types">
+    <h2 id="types">4. 自訂錯誤型別</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 214" role="img" aria-label="OrderError 裡包著一個 StockError。errors.As 和 errors.AsType 沿著錯誤鏈往裡找，找到型別相符的 StockError 後交給你，可以讀它的 Item 和 Left 欄位">
+        <title>errors.As：在錯誤鏈裡找出某個型別</title>
+        <rect class="soft" x="16" y="20" width="270" height="170" rx="12"/>
+        <text class="small mono" x="32" y="46">*OrderError  No: 18</text>
+        <text class="sm" x="32" y="70">Unwrap() 回傳裡面的 Err</text>
+        <rect class="acc" x="40" y="86" width="222" height="88" rx="8"/>
+        <text class="small mono t-acc" x="56" y="110">*StockError</text>
+        <text class="mono" x="56" y="138">Item: 排骨飯</text>
+        <text class="mono" x="56" y="162">Left: 3</text>
+        <path class="wire acc-ln" d="M262 130 H340"/>
+        <path class="tip acc-tip" d="M350 130 L338 124 L338 136 Z"/>
+        <rect class="box" x="352" y="100" width="112" height="60" rx="8"/>
+        <text class="sm mono" x="408" y="126" text-anchor="middle">se.Item</text>
+        <text class="sm mono" x="408" y="148" text-anchor="middle">se.Left</text>
+        <text class="sm" x="408" y="84" text-anchor="middle">AsType 交給你</text>
+      </svg>
+      <figcaption>呼叫的人需要的不只是「哪一種錯誤」，還要細節時，就用自訂的錯誤型別。errors.As 和 errors.AsType 在錯誤鏈裡找出那個型別。</figcaption>
+    </figure>
+    <p>庫存不夠時，呼叫的人可能想告訴客人「只剩 3 份」。這種需要攜帶資料的錯誤，就定義一個 struct 型別，替它寫 Error 方法：</p>
+    <pre class="code" data-src="chapters/11-errors/types.go#StockError,StockError.Error,stock,reserve"><code>type StockError struct {
+	Item string
+	Left int
+}
+
+func (e *StockError) Error() string {
+	return fmt.Sprintf("%s 只剩 %d 份", e.Item, e.Left)
+}
+
+var stock = map[string]int{"排骨飯": 3, "雞腿飯": 0}
+
+func reserve(item string, qty int) error {
+	if left := stock[item]; qty &gt; left {
+		return &amp;StockError{Item: item, Left: left}
+	}
+	return nil
+}</code></pre>
+    <p>Error 用指標 receiver，所以滿足 error 的是 <code>*StockError</code>，回傳時寫 <code>&amp;StockError{…}</code>。reserve 沒問題時直接寫 <code>return nil</code>，避開 <a href="10-interfaces.html#nil">10 章的 nil 陷阱</a>。</p>
+    <h3>讓自己的型別也能包裝：Unwrap</h3>
+    <pre class="code" data-src="chapters/11-errors/types.go#OrderError,OrderError.Error,OrderError.Unwrap,asDemo"><code>type OrderError struct {
+	No  int
+	Err error
+}
+
+func (e *OrderError) Error() string {
+	return fmt.Sprintf("訂單 %d：%v", e.No, e.Err)
+}
+
+func (e *OrderError) Unwrap() error {
+	return e.Err
+}
+
+func asDemo() {
+	err := &amp;OrderError{No: 18, Err: reserve("排骨飯", 5)}
+	fmt.Println(err)
+
+	var se *StockError
+	if errors.As(err, &amp;se) {
+		fmt.Println("As", se.Item, se.Left)
+	}
+
+	if se, ok := errors.AsType[*StockError](err); ok {
+		fmt.Println("AsType", se.Item, se.Left)
+	}
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/11-errors#Example_asDemo"><code>訂單 18：排骨飯 只剩 3 份
+As 排骨飯 3
+AsType 排骨飯 3</code></pre>
+    <ul class="notes">
+      <li>OrderError 有一個 <code>Unwrap() error</code> 方法，回傳它包著的錯誤。errors.Is、errors.As 拆錯誤鏈時，就是在呼叫這個方法，所以自己的型別只要寫了 Unwrap，就和 %w 一樣能參與錯誤鏈。</li>
+      <li><code>errors.As(err, &amp;se)</code> 是傳統寫法：先宣告一個目標變數，傳它的<strong>地址</strong>進去，找到型別相符的錯誤時，As 把它存進 se 並回傳 true。</li>
+      <li><code>errors.AsType[*StockError](err)</code> 是 Go 1.26 加入的泛型版本：把要找的型別寫在中括號裡，直接回傳找到的值和 ok，不必先宣告變數，型別寫錯在編譯時就會發現。新程式用它；<code>go fix</code> 會建議把 errors.As 改成這個寫法，本章刻意保留一個 errors.As 來對照。中括號的語法在 <a href="12-generics.html">12 泛型</a>說明。</li>
+    </ul>
+    <h3>三種錯誤，怎麼選</h3>
+    <div class="table-wrap">
+      <table class="vs">
+        <thead><tr><th scope="col">種類</th><th scope="col">呼叫的人需要什麼</th><th scope="col">怎麼做</th></tr></thead>
+        <tbody>
+          <tr><th scope="row">不透明的錯誤</th><td>只需要知道失敗了，訊息給人看</td><td><code>fmt.Errorf("…：%w", err)</code> 或 <code>errors.New</code>，不匯出任何東西</td></tr>
+          <tr><th scope="row">sentinel</th><td>要分辨是哪一種</td><td>匯出 <code>var ErrX = errors.New(…)</code>，用 errors.Is 比對</td></tr>
+          <tr><th scope="row">錯誤型別</th><td>要分辨，還要取出細節</td><td>匯出 struct 型別，用 errors.AsType 取出</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>大部分的錯誤應該是第一種。每匯出一個 sentinel 或錯誤型別，就多一個要長期維護的承諾，所以等到有人真的需要分辨時才加。</p>
+  </section>
+
+  <section aria-labelledby="join">
+    <h2 id="join">5. 一次回報多個錯誤：errors.Join</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 196" role="img" aria-label="errors.Join 把三個錯誤合成一個：要留名字、人數不對、ErrBadPhone。印出來每個錯誤一行，errors.Is 會檢查每一個">
+        <title>errors.Join：一個錯誤裡裝好幾個</title>
+        <rect class="acc" x="160" y="16" width="160" height="44" rx="8"/>
+        <text class="mono bold" x="240" y="44" text-anchor="middle">errors.Join</text>
+        <path class="wire" d="M240 60 V84 M80 84 H400 M80 84 V104 M240 84 V104 M400 84 V104"/>
+        <rect class="soft" x="16" y="106" width="128" height="40" rx="6"/>
+        <text class="sm" x="80" y="131" text-anchor="middle">要留名字</text>
+        <rect class="soft" x="176" y="106" width="128" height="40" rx="6"/>
+        <text class="sm" x="240" y="131" text-anchor="middle">人數 20 不對</text>
+        <rect class="hot" x="336" y="106" width="128" height="40" rx="6"/>
+        <text class="sm mono" x="400" y="131" text-anchor="middle">ErrBadPhone</text>
+        <text class="sm" x="240" y="180" text-anchor="middle">Error() 每個錯誤一行；errors.Is 每一個都會檢查</text>
+      </svg>
+      <figcaption>errors.Join 把好幾個錯誤合成一個。裡面全部都是 nil（或根本沒有錯誤）時，它回傳 nil。</figcaption>
+    </figure>
+    <pre class="code" data-src="chapters/11-errors/join.go#ErrBadPhone,Booking,validate,joinDemo"><code>var ErrBadPhone = errors.New("電話要 10 碼")
+
+type Booking struct {
+	Name   string
+	People int
+	Phone  string
+}
+
+func validate(b Booking) error {
+	var errs []error
+	if b.Name == "" {
+		errs = append(errs, errors.New("要留名字"))
+	}
+	if b.People &lt; 1 || b.People &gt; 12 {
+		errs = append(errs, fmt.Errorf("人數 %d 不在 1 到 12 之間", b.People))
+	}
+	if len(b.Phone) != 10 {
+		errs = append(errs, ErrBadPhone)
+	}
+	return errors.Join(errs...)
+}
+
+func joinDemo() {
+	err := validate(Booking{People: 20, Phone: "0912"})
+	fmt.Println(err)
+	fmt.Println(errors.Is(err, ErrBadPhone))
+	fmt.Println(validate(Booking{Name: "王小明", People: 4, Phone: "0912345678"}))
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/11-errors#Example_joinDemo"><code>要留名字
+人數 20 不在 1 到 12 之間
+電話要 10 碼
+true
+&lt;nil&gt;</code></pre>
+    <p>驗證表單時，一次只回報第一個問題，使用者就得改一次、送一次、再看到下一個問題。validate 把所有問題收集起來，最後交給 <code>errors.Join</code>（Go 1.20 起）：</p>
+    <ul class="notes">
+      <li>Error() 把每個錯誤的訊息用換行接起來。</li>
+      <li><code>errors.Is</code>、<code>errors.As</code> 會檢查裡面的每一個錯誤，所以 ErrBadPhone 找得到。</li>
+      <li>傳進去的錯誤全部是 nil，或一個都沒有時，回傳 nil。所以 validate 不用特別判斷 errs 是不是空的，最後一行就能同時處理兩種情況。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="close">
+    <h2 id="close">6. Close 也會失敗</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 208" role="img" aria-label="saveReceipt 的時間順序：先寫入，把寫入的錯誤放進 err；return 之後 defer 執行 Close，用 errors.Join 把 Close 的錯誤併進 err；呼叫的人拿到的是兩者合起來的結果">
+        <title>defer 裡把 Close 的錯誤併進回傳值</title>
+        <path class="wire faint" d="M40 40 V180"/>
+        <circle class="acc" cx="40" cy="44" r="8"/>
+        <circle class="acc" cx="40" cy="104" r="8"/>
+        <circle class="hot" cx="40" cy="164" r="8"/>
+        <text class="small mono" x="64" y="40">err = Fprintf(w, …)</text>
+        <text class="sm" x="64" y="62">寫入的錯誤先放進具名回傳值 err</text>
+        <text class="small mono" x="64" y="100">return err</text>
+        <text class="sm" x="64" y="122">函式要結束了，但 defer 還沒跑</text>
+        <text class="small mono" x="64" y="160">err = errors.Join(err, w.Close())</text>
+        <text class="sm t-hot" x="64" y="182">defer 執行：Close 的錯誤也併進 err</text>
+      </svg>
+      <figcaption>回傳值有名字，defer 才改得到它。errors.Join 讓寫入和關閉的錯誤都不會遺失，兩個都是 nil 時結果還是 nil。</figcaption>
+    </figure>
+    <p>檔案、網路連線、HTTP 回應的 Body 用完都要 Close，而 <code>Close() error</code> 也會回傳錯誤。對<strong>寫入</strong>來說這個錯誤很重要：寫進去的資料可能還在緩衝區裡，Close 時才真正寫出去，這時候發生的錯誤（例如磁碟滿了）只能從 Close 拿到。直接寫 <code>defer w.Close()</code> 會把它丟掉，呼叫的人以為存好了，資料其實不見了。</p>
+    <pre class="code" data-src="chapters/11-errors/close.go#receiptFile,receiptFile.Write,receiptFile.Close,saveReceipt,closeDemo"><code>type receiptFile struct {
+	closeErr error
+}
+
+func (f *receiptFile) Write(p []byte) (int, error) {
+	return len(p), nil
+}
+
+func (f *receiptFile) Close() error {
+	return f.closeErr
+}
+
+func saveReceipt(w io.WriteCloser, total int) (err error) {
+	defer func() {
+		err = errors.Join(err, w.Close())
+	}()
+	_, err = fmt.Fprintf(w, "合計 %d 元\n", total)
+	return err
+}
+
+func closeDemo() {
+	fmt.Println(saveReceipt(&amp;receiptFile{}, 290))
+	fmt.Println(saveReceipt(&amp;receiptFile{closeErr: errors.New("磁碟滿了，收據沒有存進去")}, 290))
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/11-errors#Example_closeDemo"><code>&lt;nil&gt;
+磁碟滿了，收據沒有存進去</code></pre>
+    <ul class="notes">
+      <li>receiptFile 是一個假的 <code>io.WriteCloser</code>，用來模擬「寫入成功、關閉失敗」，不必真的把磁碟塞滿（<a href="10-interfaces.html#design">10 章的假實作</a>）。</li>
+      <li>saveReceipt 的回傳值有名字 <code>(err error)</code>，defer 裡的函式在 return 之後執行，還能修改它（<a href="04-functions.html#defer">04 章</a>）。</li>
+      <li><code>errors.Join(err, w.Close())</code>：兩個都是 nil 就是 nil；只有一個有錯就是那一個；兩個都有錯就兩個都留著。</li>
+      <li>只讀不寫的檔案，Close 失敗通常不影響結果，直接 <code>defer f.Close()</code> 是常見而且可以接受的寫法。檔案的完整用法在「檔案與 I/O」那一章。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="panic">
+    <h2 id="panic">7. 什麼時候用 panic</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 196" role="img" aria-label="左邊是回傳 error 的情況：使用者輸入錯誤、檔案不存在、網路斷線、賣完了。右邊是 panic 的情況：程式本身寫錯、不可能發生的狀態、啟動時寫死的設定有誤">
+        <title>error 還是 panic</title>
+        <rect class="soft" x="16" y="16" width="216" height="166" rx="10"/>
+        <rect class="hot" x="248" y="16" width="216" height="166" rx="10"/>
+        <text class="mono bold" x="124" y="44" text-anchor="middle">回傳 error</text>
+        <text class="mono bold" x="356" y="44" text-anchor="middle">panic</text>
+        <text class="sm" x="124" y="74" text-anchor="middle">預期中會發生的失敗</text>
+        <text class="sm" x="124" y="102" text-anchor="middle">使用者輸入錯誤</text>
+        <text class="sm" x="124" y="124" text-anchor="middle">檔案不存在、網路斷線</text>
+        <text class="sm" x="124" y="146" text-anchor="middle">賣完了</text>
+        <text class="sm" x="356" y="74" text-anchor="middle">程式本身有 bug</text>
+        <text class="sm" x="356" y="102" text-anchor="middle">索引超出範圍</text>
+        <text class="sm" x="356" y="124" text-anchor="middle">不可能發生的狀態</text>
+        <text class="sm" x="356" y="146" text-anchor="middle">寫死的設定有誤</text>
+      </svg>
+      <figcaption>外面的世界造成的失敗，回傳 error 讓呼叫的人決定怎麼辦；程式自己寫錯了，就 panic。</figcaption>
+    </figure>
+    <p>panic 的機制在 <a href="04-functions.html#panic">04 章</a>已經看過了。這裡要回答的是什麼時候該用它。判斷的方法是問：<strong>這個失敗是誰的錯？</strong></p>
+    <ul class="notes">
+      <li>使用者打錯字、檔案被刪掉、網路斷線、便當賣完，這些都是正常運作中一定會遇到的狀況，程式應該好好處理，所以回傳 error。</li>
+      <li>索引超出範圍、對 nil map 寫入、走到了「照理說不可能」的 switch 分支，代表程式本身寫錯了，繼續執行只會產生更難追的錯誤，這時候 panic。Go 執行時期自己發出的 panic 都屬於這一類。</li>
+    </ul>
+    <h3>Must 模式</h3>
+    <pre class="code" data-src="chapters/11-errors/panic.go#mustPrice,comboPrice,mustDemo"><code>func mustPrice(name string) int {
+	p, err := price(name)
+	if err != nil {
+		panic(fmt.Sprintf("mustPrice(%q)：%v", name, err))
+	}
+	return p
+}
+
+var comboPrice = mustPrice("排骨飯") + 25
+
+func mustDemo() {
+	fmt.Println(comboPrice)
+
+	defer func() {
+		fmt.Println("panic:", recover())
+	}()
+	fmt.Println(mustPrice("珍奶"))
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/11-errors#Example_mustDemo"><code>110
+panic: mustPrice("珍奶")：菜單上沒有</code></pre>
+    <p>有些值是寫死在程式裡的，例如套餐的價格建立在「排骨飯」這個品名上。如果查不到，那是寫程式的人打錯字，不是執行時的意外。這時候可以提供一個 <code>mustX</code> 版本：成功就直接回傳值，失敗就 panic。搭配 package 層級的變數使用，打錯字時程式一啟動就會當掉，不會等到客人點餐才發現。標準庫的 <code>regexp.MustCompile</code>、<code>template.Must</code> 都是這個模式。</p>
+    <h3>在邊界 recover</h3>
+    <p>不要用 recover 來處理一般的錯誤。它真正的用途是在<strong>邊界</strong>保護整個程式：例如 HTTP 伺服器處理每一個請求時，<code>net/http</code> 會 recover 那個請求裡發生的 panic，記錄下來，然後繼續服務其他請求，一個有 bug 的請求不會讓整個伺服器停掉。自己寫的程式很少需要 recover；需要時，也只在這種最外層的地方使用。</p>
+  </section>
+
+  <section aria-labelledby="layers">
+    <h2 id="layers">8. 分層處理錯誤</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 226" role="img" aria-label="錯誤從最底層的 price 產生，經過 quote 和 placeOrder 時各被包裝一層、補上資訊，到了最上層的 HTTP handler 才被處理：翻譯成狀態碼並記錄一次">
+        <title>產生、包裝、處理</title>
+        <rect class="hot" x="16" y="160" width="100" height="48" rx="6"/>
+        <text class="mono" x="66" y="182" text-anchor="middle">price</text>
+        <text class="sm" x="66" y="200" text-anchor="middle">產生</text>
+        <rect class="soft" x="132" y="112" width="100" height="48" rx="6"/>
+        <text class="mono" x="182" y="134" text-anchor="middle">quote</text>
+        <text class="sm" x="182" y="152" text-anchor="middle">包裝</text>
+        <rect class="soft" x="248" y="64" width="100" height="48" rx="6"/>
+        <text class="mono" x="298" y="86" text-anchor="middle">placeOrder</text>
+        <text class="sm" x="298" y="104" text-anchor="middle">包裝</text>
+        <rect class="acc" x="364" y="16" width="100" height="48" rx="6"/>
+        <text class="mono" x="414" y="38" text-anchor="middle">handler</text>
+        <text class="sm" x="414" y="56" text-anchor="middle">處理一次</text>
+        <path class="wire" d="M116 172 H150 V164"/>
+        <path class="wire" d="M232 124 H266 V116"/>
+        <path class="wire" d="M348 76 H382 V68"/>
+        <text class="sm" x="414" y="96" text-anchor="middle">翻譯成狀態碼</text>
+        <text class="sm" x="414" y="118" text-anchor="middle">記錄 log</text>
+        <text class="sm" x="240" y="218" text-anchor="middle">中間的每一層只補資訊、往上傳，不處理</text>
+      </svg>
+      <figcaption>錯誤在底層產生，每往上一層就補上那一層的資訊，到了最外層才真正處理：決定回應、記錄一次。</figcaption>
+    </figure>
+    <pre class="code" data-src="chapters/11-errors/layers.go#statusFor,layersDemo"><code>func statusFor(err error) int {
+	switch {
+	case err == nil:
+		return http.StatusOK
+	case errors.Is(err, ErrNotOnMenu):
+		return http.StatusNotFound
+	case errors.Is(err, ErrSoldOut):
+		return http.StatusConflict
+	}
+	if _, ok := errors.AsType[*StockError](err); ok {
+		return http.StatusConflict
+	}
+	return http.StatusInternalServerError
+}
+
+func layersDemo() {
+	errs := []error{
+		nil,
+		fmt.Errorf("訂單 19：%w", ErrNotOnMenu),
+		&amp;OrderError{No: 20, Err: reserve("排骨飯", 5)},
+		errors.New("資料庫連不上"),
+	}
+	for _, err := range errs {
+		fmt.Println(statusFor(err), err)
+	}
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/11-errors#Example_layersDemo"><code>200 &lt;nil&gt;
+404 訂單 19：菜單上沒有
+409 訂單 20：排骨飯 只剩 3 份
+500 資料庫連不上</code></pre>
+    <p>真實的程式通常分好幾層：存取資料的、處理商業邏輯的、對外提供 HTTP 介面的。錯誤在各層之間流動時，有幾條原則：</p>
+    <ul class="notes">
+      <li><strong>每一層只補自己知道的事</strong>，用 %w 往上傳。quote 知道品名，placeOrder 知道訂單號碼，它們都不知道最後會怎麼回應使用者，也不需要知道。</li>
+      <li><strong>只處理一次</strong>。「處理」是指記 log、重試、改用預設值、回應使用者這類動作。中間層如果記了 log 又把錯誤往上傳，上一層再記一次，同一個錯誤就會在 log 裡出現好幾次，反而更難追。要嘛處理，要嘛回傳，不要兩個都做。</li>
+      <li><strong>在邊界翻譯</strong>。只有最外層知道「這是 HTTP」或「這是命令列」，所以只有它把錯誤翻譯成 404、409、500 或程式的結束碼。statusFor 用 errors.Is 和 errors.AsType 判斷種類，不管錯誤被包了幾層。</li>
+      <li><strong>給客人看的和給開發者看的分開</strong>。500 的時候，log 要記下完整的錯誤鏈；回應給客人的只要「系統忙碌，請稍後再試」，不要把「資料庫連不上」這種內部細節送出去。</li>
+      <li><strong>不要比對 Error() 的文字</strong>。訊息是給人看的，隨時可能改寫；而且不同的錯誤可能剛好寫著一樣的字。練習 6 就是這個 bug。</li>
+    </ul>
+    <p>HTTP 伺服器怎麼把這些接起來，會在 <a href="26-http.html">HTTP 服務</a>那一章看到；log 的寫法在「<a href="25-logging.html">日誌</a>」那一章。</p>
+  </section>
+
+  <section aria-labelledby="pitfalls">
+    <h2 id="pitfalls">常見錯誤</h2>
+    <h3 id="pit-ignore">1. 拿到 error 卻不檢查</h3>
+    <p><code>n, _ := strconv.Atoi(s)</code> 把錯誤丟掉，輸入不對時 n 是 0，程式卻繼續往下跑（<a href="04-functions.html#pit-ignore-err">04 章</a>）。真的確定不會失敗才這樣寫，而且最好加一行註解說明為什麼。</p>
+
+    <h3 id="pit-string">2. 比對 Error() 的文字</h3>
+    <p><code>err.Error() == "賣完了"</code>：包裝過就比不到，別的錯誤剛好寫著一樣的字又會誤判，err 是 nil 時還會 panic。用 <code>errors.Is</code>（第 8 節、練習 6）。</p>
+
+    <h3 id="pit-v">3. 該用 %w 的地方用了 %v</h3>
+    <p>印出來一樣，錯誤鏈卻斷了，上層的 errors.Is 永遠是 false（3.1 節）。要讓上層判斷就用 %w；故意隱藏內部細節時才用 %v。</p>
+
+    <h3 id="pit-log-return">4. 記了 log 又回傳</h3>
+    <p>同一個錯誤在 log 裡出現好幾次，每一次的前後文還不太一樣，追查時更混亂。只在最外層處理一次（第 8 節）。</p>
+
+    <h3 id="pit-as-ptr">5. errors.As 的第二個參數不是指標</h3>
+    <pre class="code bad" data-vet-error><code>package main
+
+import (
+	"errors"
+	"fmt"
+)
+
+type StockError struct {
+	Item string
+	Left int
+}
+
+func (e *StockError) Error() string {
+	return fmt.Sprintf("%s 只剩 %d 份", e.Item, e.Left)
 }
 
 func main() {
-	err := fmt.Errorf("下單失敗：%w", find("香蕉"))
-	fmt.Println(err)
-	fmt.Println(errors.Is(err, ErrNotFound))
+	var err error = &StockError{Item: "排骨飯", Left: 3}
+	var se *StockError
+	if errors.As(err, se) {
+		fmt.Println(se.Item, se.Left)
+	}
 }</code></pre>
-    <p class="label">輸出</p>
-    <pre class="out"><code>下單失敗：查詢 "香蕉"：找不到
-true</code></pre>
-  </section>
+    <p class="label">go vet</p>
+    <pre class="out err"><code>main.go:20:5: second argument to errors.As must be a non-nil pointer to either a type that implements error, or to any interface type</code></pre>
+    <p>這支程式編譯得過，執行時 errors.As 卻會 panic。要傳 <code>&amp;se</code>，也就是「指向 *StockError 的指標」。<code>go vet</code> 抓得到這個錯誤；改用 <code>errors.AsType[*StockError](err)</code> 則從根本上避開它。</p>
 
-  <section aria-labelledby="notes">
-    <h2 id="notes">工程師筆記</h2>
-    <ul class="notes">
-      <li><code>if err != nil { return … }</code> 是日常。每一層補上自己的說明再往上傳，最後的錯誤訊息就是完整的路徑。</li>
-      <li>包裝用 <code>%w</code>，呼叫端才能用 <code>errors.Is</code> / <code>errors.As</code> 找到原本的錯誤；用 <code>%v</code> 只會變成一段文字。</li>
-      <li>呼叫端需要分辨的狀況用 sentinel error（<code>var ErrNotFound = errors.New(…)</code>）；需要帶資料就用自訂錯誤型別。</li>
-      <li>Go 1.26 起有 <code>errors.AsType[*T](err)</code>，不用先宣告一個變數；多個錯誤可以用 <code>errors.Join</code> 合在一起。</li>
-      <li>一個錯誤只處理一次：要嘛處理掉（記 log、降級），要嘛往上傳，不要兩件事都做。</li>
-      <li><code>panic</code> 留給程式寫錯的狀況；<code>recover</code> 只在 defer 裡有效，通常只放在 goroutine 或 HTTP handler 的最外層。</li>
-    </ul>
+    <h3 id="pit-typed-nil">6. 回傳裝著 nil 指標的 error</h3>
+    <p>先宣告 <code>var e *StockError</code>，最後 <code>return e</code>，呼叫的人看到的 err 永遠不是 nil（<a href="10-interfaces.html#nil">10 章</a>）。沒有錯誤就直接 <code>return nil</code>。</p>
+
+    <h3 id="pit-close">7. 寫入之後丟掉 Close 的錯誤</h3>
+    <p><code>defer w.Close()</code> 用在寫入的檔案上，磁碟滿了也不會知道（第 6 節、練習 7）。用具名回傳值加 <code>errors.Join</code>。</p>
+
+    <h3 id="pit-panic">8. 用 panic 處理預期中的錯誤</h3>
+    <p>使用者輸入錯誤就 panic，呼叫的人只能用 recover 接，程式變得難以理解（<a href="04-functions.html#pit-panic-error">04 章</a>）。預期中的失敗一律回傳 error（第 7 節）。</p>
   </section>
 
   <section aria-labelledby="java">
@@ -132,19 +627,152 @@ true</code></pre>
           <tr><th scope="row">錯誤傳遞</th><td class="java">丟例外，沿呼叫鏈往上找 catch</td><td>回傳 <code>error</code> 值，每一層自己檢查</td></tr>
           <tr><th scope="row">checked exception</th><td class="java">要宣告 <code>throws</code></td><td>沒有；簽名上的 <code>error</code> 就是宣告</td></tr>
           <tr><th scope="row">保留原因</th><td class="java"><code>new RuntimeException("…", cause)</code></td><td><code>fmt.Errorf("…：%w", err)</code></td></tr>
-          <tr><th scope="row">判斷種類</th><td class="java"><code>catch (NotFoundException e)</code></td><td><code>errors.Is</code> / <code>errors.As</code></td></tr>
+          <tr><th scope="row">取出原因</th><td class="java"><code>getCause()</code></td><td><code>errors.Unwrap</code>，通常直接用 errors.Is / AsType</td></tr>
+          <tr><th scope="row">判斷種類</th><td class="java"><code>catch (NotFoundException e)</code></td><td><code>errors.Is</code> / <code>errors.As</code> / <code>errors.AsType</code></td></tr>
+          <tr><th scope="row">多個錯誤</th><td class="java"><code>addSuppressed</code></td><td><code>errors.Join</code>、好幾個 <code>%w</code></td></tr>
+          <tr><th scope="row">清理資源</th><td class="java"><code>finally</code>、try-with-resources</td><td><code>defer</code>；寫入時記得收 Close 的錯誤</td></tr>
+          <tr><th scope="row">stack trace</th><td class="java">每個例外自動帶著</td><td>error 不帶；靠每一層包裝的訊息說明發生在哪裡</td></tr>
           <tr><th scope="row">不可恢復</th><td class="java"><code>Error</code>、沒人接的 <code>RuntimeException</code></td><td><code>panic</code>，可在 defer 裡用 <code>recover</code> 接住</td></tr>
         </tbody>
       </table>
     </div>
   </section>
 
+  <section aria-labelledby="exercises">
+    <h2 id="exercises">練習</h2>
+    <p>題目在 <code>exercises/11-errors/exercises.go</code>，用到的 sentinel 和型別定義在 <code>doc.go</code>。</p>
+    <pre class="code" data-src="exercises/11-errors/doc.go#ErrTimeFormat,LimitError"><code>var (
+	ErrTimeFormat = errors.New("格式要是 HH:MM")
+	ErrClosed     = errors.New("不在營業時間")
+	ErrSoldOut    = errors.New("賣完了")
+	ErrPermanent  = errors.New("不能重試")
+)
+
+type LimitError struct {
+	Item string
+	Max  int
+}</code></pre>
+    <pre class="shell"><code>go test ./exercises/11-errors/                        <span class="c"># 跑全部練習</span>
+go test ./exercises/11-errors/ -run TestParsePickup   <span class="c"># 只跑一題</span>
+go test -tags solution ./exercises/11-errors/         <span class="c"># 跑參考解答</span></code></pre>
+    <ol class="exercises">
+      <li>
+        <h3><span class="level l1">入門</span>練習 1：取餐時間</h3>
+        <p>把 "HH:MM" 轉成分鐘數，兩種不同的錯誤要包住不同的 sentinel。</p>
+        <pre class="code" data-src="exercises/11-errors/exercises.go#ParsePickup"><code>func ParsePickup(s string) (int, error) {
+	// TODO: 實作
+	return 0, nil
+}</code></pre>
+        <p><code>ParsePickup("1830")</code> 的錯誤訊息是 <code>取餐時間 "1830"：格式要是 HH:MM</code>，而且 <code>errors.Is(err, ErrTimeFormat)</code> 是 true。測試：<code>TestParsePickup</code>。</p>
+        <details><summary>提示</summary><p><code>strings.Cut(s, ":")</code> 切成兩半，第三個回傳值告訴你有沒有冒號。兩半各用 <code>strconv.Atoi</code> 轉換，任何一個失敗或超出範圍都是格式錯誤。營業時間的判斷用分鐘數比較：<code>11*60</code> 到 <code>20*60</code>。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l1">入門</span>練習 2：每人限購</h3>
+        <p>替 LimitError 寫 Error 方法，再寫 Buy：超過限購就回傳 *LimitError。</p>
+        <pre class="code" data-src="exercises/11-errors/exercises.go#LimitError.Error,Buy"><code>func (e *LimitError) Error() string {
+	// TODO: 實作
+	return ""
+}
+
+func Buy(item string, qty int, limits map[string]int) error {
+	// TODO: 實作
+	return nil
+}</code></pre>
+        <p>測試會檢查沒問題時 <code>err == nil</code>，也會用 errors.AsType 取出 Item 和 Max。測試：<code>TestBuy</code>。</p>
+        <details><summary>提示</summary><p><code>limit, ok := limits[item]</code>，ok 而且 qty 超過時 <code>return &amp;LimitError{…}</code>，其他情況直接 <code>return nil</code>。不要先宣告一個 *LimitError 變數再回傳它（常見錯誤 6）。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l2">進階</span>練習 3：檢查整台購物車</h3>
+        <p>用 Buy 檢查每一樣東西，把所有超過限購的錯誤一次回報。</p>
+        <pre class="code" data-src="exercises/11-errors/exercises.go#CheckCart"><code>func CheckCart(cart map[string]int, limits map[string]int) error {
+	// TODO: 實作
+	return nil
+}</code></pre>
+        <p>排骨飯買 3 份（限 2）、雞腿飯買 2 份（限 1）時，訊息是兩行：<code>排骨飯 每人限購 2 份</code> 和 <code>雞腿飯 每人限購 1 份</code>。測試：<code>TestCheckCart</code>。</p>
+        <details><summary>提示</summary><p>map 的走訪順序是隨機的，先用 <code>slices.Sorted(maps.Keys(cart))</code> 拿到排好的品名（<a href="07-maps.html#iterate">07 章</a>）。把每個 Buy 的結果都 append 進一個 <code>[]error</code>，nil 也沒關係，最後交給 errors.Join。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l2">進階</span>練習 4：重試</h3>
+        <p>網路之類的錯誤，多試幾次可能就好了；但有些錯誤再試也沒用，要立刻放棄。</p>
+        <pre class="code" data-src="exercises/11-errors/exercises.go#Retry"><code>func Retry(times int, op func() error) error {
+	// TODO: 實作
+	return nil
+}</code></pre>
+        <p>測試傳進去的 op 會記錄自己被呼叫了幾次。測試：<code>TestRetry</code>。</p>
+        <details><summary>提示</summary><p><code>for range times</code> 跑固定次數，每次 <code>err = op()</code>：nil 就 return nil；<code>errors.Is(err, ErrPermanent)</code> 就直接 return err（它可能被包裝過，所以不能用 ==）。迴圈結束後用 %w 包住最後一個 err。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l3">挑戰</span>練習 5：列出所有原因</h3>
+        <p>自己走訪錯誤鏈。錯誤可能只包著一個原因，也可能像 errors.Join 一樣包著好幾個，形成一棵樹。</p>
+        <pre class="code" data-src="exercises/11-errors/exercises.go#Causes"><code>func Causes(err error) []string {
+	// TODO: 實作
+	return nil
+}</code></pre>
+        <p><code>Causes(fmt.Errorf("b：%w", a))</code> 是 <code>["b：a", "a"]</code>。測試：<code>TestCauses</code>。</p>
+        <details><summary>提示</summary><p>用 type switch 問 err 有沒有 <code>interface{ Unwrap() error }</code> 或 <code>interface{ Unwrap() []error }</code> 這兩種方法（<a href="10-interfaces.html#assert">10 章</a>：assertion 的目標可以是 interface）。先放 <code>err.Error()</code>，再對每一個被包著的錯誤遞迴呼叫 Causes，把結果接在後面。</p></details>
+      </li>
+      <li>
+        <h3><span class="level fix">找錯</span>練習 6：認不出賣完了</h3>
+        <p>被包裝過的 ErrSoldOut 認不出來，另一個剛好寫著「賣完了」的錯誤卻被認錯。</p>
+        <pre class="code" data-src="exercises/11-errors/exercises.go#IsSoldOut"><code>func IsSoldOut(err error) bool {
+	return err != nil &amp;&amp; err.Error() == ErrSoldOut.Error()
+}</code></pre>
+        <p>測試：<code>TestIsSoldOut</code>。</p>
+        <details><summary>提示</summary><p>常見錯誤 2。一行就能修好。</p></details>
+      </li>
+      <li>
+        <h3><span class="level fix">找錯</span>練習 7：存檔失敗卻回報成功</h3>
+        <p>關閉失敗時，SaveLines 還是回傳 nil。</p>
+        <pre class="code" data-src="exercises/11-errors/exercises.go#SaveLines"><code>func SaveLines(w io.WriteCloser, lines []string) error {
+	defer w.Close()
+	for _, l := range lines {
+		if _, err := fmt.Fprintln(w, l); err != nil {
+			return err
+		}
+	}
+	return nil
+}</code></pre>
+        <p>測試用一個假的檔案，分別讓寫入、關閉、兩者都失敗。寫入失敗時也一定要關閉。測試：<code>TestSaveLines</code>。</p>
+        <details><summary>提示</summary><p>第 6 節的 saveReceipt：回傳值取名字，defer 裡用 errors.Join 把 Close 的錯誤併進去。迴圈裡要用 <code>=</code> 指定給具名的 err，不要用 <code>:=</code> 宣告一個新的。</p></details>
+      </li>
+    </ol>
+    <p><a href="https://github.com/xinqilin/GO-Playground/blob/main/exercises/11-errors/solution.go">參考解答</a>：先自己寫完再看。測試通過的寫法都是對的。</p>
+  </section>
+
+  <section aria-labelledby="recap">
+    <h2 id="recap">重點回顧</h2>
+    <ul class="recap">
+      <li>error 是只有 <code>Error() string</code> 的 interface，放在回傳值的最後一個；nil 代表成功。</li>
+      <li>呼叫完立刻檢查 <code>if err != nil</code>；失敗時不要使用其他回傳值。</li>
+      <li>sentinel error 是 package 層級的 <code>ErrX</code> 變數，讓呼叫的人分辨種類。</li>
+      <li>用 <code>fmt.Errorf("…：%w", err)</code> 補上這一層的資訊再往上傳；%v 會切斷錯誤鏈。</li>
+      <li>比對用 <code>errors.Is</code>，取出型別用 <code>errors.AsType</code>（舊寫法 <code>errors.As</code>），不要比對文字。</li>
+      <li>自己的錯誤型別寫了 <code>Unwrap</code> 方法，就能參與錯誤鏈。</li>
+      <li>大部分錯誤不必匯出；需要分辨時才匯出 sentinel，需要細節時才匯出型別。</li>
+      <li><code>errors.Join</code> 一次回報多個錯誤，全部是 nil 時回傳 nil。</li>
+      <li>寫入之後，用具名回傳值和 defer 把 Close 的錯誤也收進來。</li>
+      <li>外界造成的失敗回傳 error；程式自己寫錯才 panic；recover 只放在邊界。</li>
+      <li>錯誤在中間層只包裝，在最外層處理一次、翻譯成狀態碼或結束碼。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="further">
+    <h2 id="further">延伸閱讀</h2>
+    <ul class="notes">
+      <li>Go 語言規格：<a href="https://go.dev/ref/spec#Errors">Errors</a>、<a href="https://go.dev/ref/spec#Run_time_panics">Run-time panics</a>、<a href="https://go.dev/ref/spec#Handling_panics">Handling panics</a>、<a href="https://go.dev/ref/spec#Defer_statements">Defer statements</a>。</li>
+      <li>套件文件：<a href="https://pkg.go.dev/errors">errors</a>（Is、As、AsType、Join、Unwrap）、<a href="https://pkg.go.dev/fmt#Errorf">fmt.Errorf</a>、<a href="https://pkg.go.dev/io#Closer">io.Closer</a>。</li>
+      <li><a href="https://go.dev/blog/go1.13-errors">Go blog：Working with Errors in Go 1.13</a>（%w 與錯誤鏈的設計）。</li>
+      <li><a href="https://go.dev/doc/effective_go#errors">Effective Go：Errors</a>。</li>
+    </ul>
+  </section>
+
   <section aria-labelledby="run">
     <h2 id="run">動手跑</h2>
     <p class="label">在 repo 根目錄</p>
-    <pre class="shell"><code>go run ./chapters/11-errors
-go test ./chapters/11-errors</code></pre>
-    <p><a href="https://github.com/xinqilin/GO-Playground/tree/main/chapters/11-errors">在 GitHub 看完整程式碼</a></p>
+    <pre class="shell"><code>go run ./chapters/11-errors                 <span class="c"># 執行本章所有示範</span>
+go test ./chapters/11-errors                <span class="c"># 驗證頁面上的每一段輸出</span>
+go test ./exercises/11-errors/              <span class="c"># 做練習</span></code></pre>
+    <p><a href="https://github.com/xinqilin/GO-Playground/tree/main/chapters/11-errors">在 GitHub 看本章完整程式碼</a>，或看<a href="https://github.com/xinqilin/GO-Playground/tree/main/exercises/11-errors">練習題</a>。</p>
   </section>
 </main>
 

@@ -1,0 +1,659 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>值、變數與運算｜Go 圖解手冊</title>
+<meta name="description" content="給從來沒寫過程式的人：值與型別、變數、改變變數的值、交換兩個變數、算術與整數除法、比較與邏輯運算，以及用追蹤表一行一行模擬程式，附可執行的練習題。">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<header class="site">
+  <a href="index.html">Go 圖解手冊</a>
+  <span class="count">先修 2 / 4</span>
+</header>
+
+<main class="page long">
+  <header class="hero">
+    <div class="num" aria-hidden="true">P2</div>
+    <p class="eyebrow">先修 · 第 2 章</p>
+    <h1>值、變數與運算</h1>
+    <p class="analogy">變數是貼了名字的盒子。你可以把值放進去、拿出來用，也可以換成新的值；但一個盒子一次只裝得下一個值，放進新的，舊的就不見了。</p>
+  </header>
+
+  <nav class="toc-inline" aria-labelledby="toc-title">
+    <p class="label" id="toc-title">本章內容</p>
+    <ol>
+      <li><a href="#goals">本章你會學到</a></li>
+      <li><a href="#values">值與型別</a></li>
+      <li><a href="#variables">變數</a></li>
+      <li><a href="#assign">改變變數的值</a></li>
+      <li><a href="#swap">交換兩個變數</a></li>
+      <li><a href="#arith">算術與整數除法</a></li>
+      <li><a href="#logic">比較與邏輯</a></li>
+      <li><a href="#trace">追蹤表</a></li>
+      <li><a href="#pitfalls">常見錯誤</a></li>
+      <li><a href="#exercises">練習</a></li>
+      <li><a href="#recap">重點回顧</a></li>
+      <li><a href="#further">延伸閱讀</a></li>
+    </ol>
+  </nav>
+
+  <section aria-labelledby="goals">
+    <h2 id="goals">本章你會學到</h2>
+    <ul class="notes">
+      <li>值有種類，叫做型別：整數、小數、文字、真假各是不同的型別。</li>
+      <li>用變數替值取名字，用 <code>:=</code> 建立變數，用 <code>=</code> 換成新的值。</li>
+      <li>讀懂 <code>count = count + 1</code>，以及為什麼交換兩個變數需要第三個盒子。</li>
+      <li>加減乘除，整數相除時小數會被丟掉，以及用 <code>%</code> 算餘數。</li>
+      <li>用比較運算得到 true 或 false，再用「而且」「或」「不是」組合條件。</li>
+      <li>用追蹤表一行一行模擬電腦，在執行之前就知道程式會印出什麼。</li>
+    </ul>
+    <p>先備：<a href="pre-1-running.html">先修 1 程式怎麼跑起來</a>（會用終端機執行程式和測試）。</p>
+  </section>
+
+  <section aria-labelledby="values">
+    <h2 id="values">1. 值與型別</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 190" role="img" aria-label="四種值：85 是整數 int，3.5 是小數 float64，排骨是文字 string，true 是真假 bool">
+        <title>四種常見的值</title>
+        <text class="sm" x="66" y="30" text-anchor="middle">整數</text>
+        <text class="sm" x="182" y="30" text-anchor="middle">小數</text>
+        <text class="sm" x="298" y="30" text-anchor="middle">文字</text>
+        <text class="sm" x="414" y="30" text-anchor="middle">真假</text>
+        <rect class="soft" x="16" y="42" width="100" height="90" rx="10"/>
+        <rect class="soft" x="132" y="42" width="100" height="90" rx="10"/>
+        <rect class="soft" x="248" y="42" width="100" height="90" rx="10"/>
+        <rect class="soft" x="364" y="42" width="100" height="90" rx="10"/>
+        <text class="lg" x="66" y="98" text-anchor="middle">85</text>
+        <text class="lg" x="182" y="98" text-anchor="middle">3.5</text>
+        <text class="lg" x="298" y="98" text-anchor="middle">"排骨"</text>
+        <text class="lg" x="414" y="98" text-anchor="middle">true</text>
+        <text class="small mono t-acc" x="66" y="162" text-anchor="middle">int</text>
+        <text class="small mono t-acc" x="182" y="162" text-anchor="middle">float64</text>
+        <text class="small mono t-acc" x="298" y="162" text-anchor="middle">string</text>
+        <text class="small mono t-acc" x="414" y="162" text-anchor="middle">bool</text>
+      </svg>
+      <figcaption>每個值都有一個型別。型別決定了這個值能做什麼運算。</figcaption>
+    </figure>
+    <p>程式處理的每一筆資料都叫做<strong>值</strong>（value）：便當的價格 85、體重 3.5 公斤、菜名「排骨便當」、「是不是會員」的答案。值有不同的種類，叫做<strong>型別</strong>（type）。最常用的四種是：</p>
+    <pre class="code" data-src="chapters/pre-2-values/values.go#values"><code>func values() {
+	fmt.Println(85)
+	fmt.Println(3.5)
+	fmt.Println("排骨便當")
+	fmt.Println(true)
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/pre-2-values#Example_values"><code>85
+3.5
+排骨便當
+true</code></pre>
+    <p><code>fmt.Printf</code> 是依照格式來印的 Println：格式裡的 <code>%v</code> 換成值、<code>%T</code> 換成值的型別名稱、<code>\n</code> 是換行。用它來看看每個值的型別：</p>
+    <pre class="code" data-src="chapters/pre-2-values/values.go#valueTypes"><code>func valueTypes() {
+	fmt.Printf("%v 是 %T\n", 85, 85)
+	fmt.Printf("%v 是 %T\n", 3.5, 3.5)
+	fmt.Printf("%v 是 %T\n", "排骨便當", "排骨便當")
+	fmt.Printf("%v 是 %T\n", true, true)
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/pre-2-values#Example_valueTypes"><code>85 是 int
+3.5 是 float64
+排骨便當 是 string
+true 是 bool</code></pre>
+    <ul class="notes">
+      <li><code>int</code>：整數（integer），沒有小數點，可以是負數。數量、價格（以元計）、年齡都用它。</li>
+      <li><code>float64</code>：有小數點的數。名稱裡的 64 是它佔用的空間大小，現在不用管。</li>
+      <li><code>string</code>：文字，寫在雙引號裡。字串（string）的意思是「一串字」。</li>
+      <li><code>bool</code>：只有 <code>true</code>（真、是）和 <code>false</code>（假、否）兩個值，用來表示「是不是」。名稱來自數學家 Boole。</li>
+    </ul>
+
+    <h3>型別決定運算的意思</h3>
+    <pre class="code" data-src="chapters/pre-2-values/values.go#textVsNumber"><code>func textVsNumber() {
+	fmt.Println(85 + 3)
+	fmt.Println("85" + "3")
+	fmt.Println("排骨" + "便當")
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/pre-2-values#Example_textVsNumber"><code>88
+853
+排骨便當</code></pre>
+    <p>同樣是 <code>+</code>：兩個數字是相加，得到 88；兩段文字是接起來，得到 853。<code>"85"</code> 有雙引號，它是「8 和 5 這兩個字」，不是八十五。從鍵盤讀進來的東西都是文字，要先轉成數字才能計算，這在 <a href="02-input-output.html">02 輸入與輸出</a>會學到。</p>
+  </section>
+
+  <section aria-labelledby="variables">
+    <h2 id="variables">2. 變數</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 196" role="img" aria-label="兩個盒子，名字是 price 和 qty，分別裝著 85 和 3。price * qty 用名字把值拿出來相乘，得到 255">
+        <title>變數是有名字的盒子</title>
+        <text class="small mono bold" x="95" y="48" text-anchor="middle">price</text>
+        <text class="small mono bold" x="245" y="48" text-anchor="middle">qty</text>
+        <text class="sm mono" x="407" y="48" text-anchor="middle">price * qty</text>
+        <rect class="acc" x="40" y="60" width="110" height="70" rx="8"/>
+        <rect class="acc" x="190" y="60" width="110" height="70" rx="8"/>
+        <rect class="soft" x="352" y="60" width="110" height="70" rx="8"/>
+        <text class="lg" x="95" y="106" text-anchor="middle">85</text>
+        <text class="lg" x="245" y="106" text-anchor="middle">3</text>
+        <text class="lg" x="407" y="106" text-anchor="middle">255</text>
+        <path class="wire" d="M300 95 H336"/>
+        <path class="tip" d="M348 95 L335 88 L335 102 Z"/>
+        <text class="sm mono" x="95" y="168" text-anchor="middle">price := 85</text>
+        <text class="sm mono" x="245" y="168" text-anchor="middle">qty := 3</text>
+        <text class="sm" x="407" y="168" text-anchor="middle">用名字拿出來算</text>
+      </svg>
+      <figcaption>變數替值取一個名字。之後寫名字，電腦就會到盒子裡拿出值來用。</figcaption>
+    </figure>
+    <pre class="code" data-src="chapters/pre-2-values/variables.go#variables"><code>func variables() {
+	price := 85
+	qty := 3
+	fmt.Println(price * qty)
+
+	var name string = "小明"
+	fmt.Println(name, "買了", qty, "個便當")
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/pre-2-values#Example_variables"><code>255
+小明 買了 3 個便當</code></pre>
+    <p><code>price := 85</code> 讀作「建立一個叫 price 的變數，放進 85」。<code>:=</code> 會依照右邊的值決定盒子的型別：85 是整數，所以 price 是 int，之後只能裝整數。另一種寫法 <code>var name string = "小明"</code> 把型別寫出來，意思一樣；兩種寫法在 <a href="01-variables.html#declare">01 變數、常數與型別</a>會詳細比較。</p>
+    <p>用變數的好處是：同一個值只寫一次，用名字說明它的意思。<code>price * qty</code> 比 <code>85 * 3</code> 好懂得多；價格改了，也只要改一個地方。</p>
+    <p>變數的名字由英文字母、數字和底線組成，不能以數字開頭，而且分大小寫（price 和 Price 是兩個不同的變數）。習慣上用小寫開頭，好幾個字連在一起時，後面每個字的開頭大寫，例如 <code>unitPrice</code>、<code>totalCount</code>。</p>
+
+    <h3>Go 對變數的三個規定</h3>
+    <p>第一，建立了變數就一定要用到。寫到一半的程式常常會撞到這一條：</p>
+    <pre class="code bad" data-compile-error><code>package main
+
+import "fmt"
+
+func main() {
+	price := 85
+	qty := 3
+	fmt.Println(price)
+}</code></pre>
+    <p class="label">編譯錯誤</p>
+    <pre class="out err"><code>./main.go:7:2: declared and not used: qty</code></pre>
+    <p>第二，同一個名字只能建立一次。要換成新的值用 <code>=</code>（第 3 節），不是再 <code>:=</code> 一次：</p>
+    <pre class="code bad" data-compile-error><code>package main
+
+import "fmt"
+
+func main() {
+	price := 85
+	price := 90
+	fmt.Println(price)
+}</code></pre>
+    <p class="label">編譯錯誤</p>
+    <pre class="out err"><code>./main.go:7:8: no new variables on left side of :=</code></pre>
+    <p>第三，盒子的型別不能改。裝整數的盒子不能放進文字：</p>
+    <pre class="code bad" data-compile-error><code>package main
+
+import "fmt"
+
+func main() {
+	price := 85
+	price = "九十"
+	fmt.Println(price)
+}</code></pre>
+    <p class="label">編譯錯誤</p>
+    <pre class="out err"><code>./main.go:7:10: cannot use "九十" (untyped string constant) as int value in assignment</code></pre>
+    <p>這些規定看起來很囉嗦，但它們都在幫你：沒用到的變數通常代表程式寫錯了或沒寫完；型別不能改，就不會在某個地方不小心把價格變成文字。錯誤在執行之前就被抓出來，比跑到一半才出錯好得多。</p>
+  </section>
+
+  <section aria-labelledby="assign">
+    <h2 id="assign">3. 改變變數的值</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 214" role="img" aria-label="count = count + 1：先算右邊，拿出 count 的 0 加 1 得到 1，再把 1 放進左邊的 count，舊的 0 被換掉">
+        <title>先算右邊，再放進左邊</title>
+        <text class="mono" x="240" y="34" text-anchor="middle">count = count + 1</text>
+        <path class="wire hot-ln" d="M150 44 V50 H200 V44"/>
+        <path class="wire acc-ln" d="M236 44 V50 H330 V44"/>
+        <text class="sm t-hot" x="175" y="70" text-anchor="middle">2. 放進左邊</text>
+        <text class="sm t-acc" x="283" y="70" text-anchor="middle">1. 先算右邊</text>
+        <text class="sm mono" x="90" y="94" text-anchor="middle">count</text>
+        <text class="sm mono" x="392" y="94" text-anchor="middle">count</text>
+        <rect class="soft dash" x="40" y="100" width="100" height="70" rx="8"/>
+        <rect class="acc" x="342" y="100" width="100" height="70" rx="8"/>
+        <text class="lg" x="90" y="146" text-anchor="middle">0</text>
+        <text class="lg" x="392" y="146" text-anchor="middle">1</text>
+        <path class="wire" d="M140 135 H170"/>
+        <path class="tip" d="M182 135 L169 128 L169 142 Z"/>
+        <text class="mono" x="240" y="141" text-anchor="middle">0 + 1 = 1</text>
+        <path class="wire" d="M298 135 H326"/>
+        <path class="tip" d="M338 135 L325 128 L325 142 Z"/>
+        <text class="sm" x="240" y="204" text-anchor="middle">同一個盒子，舊的值被換掉</text>
+      </svg>
+      <figcaption>在程式裡，<code>=</code> 不是「等於」，而是「把右邊算出來的值放進左邊的變數」。</figcaption>
+    </figure>
+    <pre class="code" data-src="chapters/pre-2-values/variables.go#reassign"><code>func reassign() {
+	count := 0
+	fmt.Println(count)
+	count = count + 1
+	fmt.Println(count)
+	count = count + 1
+	fmt.Println(count)
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/pre-2-values#Example_reassign"><code>0
+1
+2</code></pre>
+    <p>在數學課，<code>count = count + 1</code> 是不可能成立的式子。但在程式裡，<code>=</code> 叫做<strong>指定</strong>（assignment），意思是一個動作：先把右邊算出來，再把結果放進左邊的盒子。所以這一行讀作「拿出 count 目前的值，加 1，再放回 count」。每執行一次，count 就多 1。這種「每次加 1 來數數」的變數叫<strong>計數器</strong>，先修 3 的迴圈會一直用到。</p>
+    <p>注意順序：右邊用的是<strong>執行這一行之前</strong>的值。第一次 count 是 0，算出 1 放回去；第二次 count 已經是 1，算出 2。</p>
+
+    <h3>簡寫</h3>
+    <pre class="code" data-src="chapters/pre-2-values/variables.go#shortcuts"><code>func shortcuts() {
+	points := 10
+	points += 5
+	fmt.Println(points)
+	points -= 3
+	fmt.Println(points)
+	points *= 2
+	fmt.Println(points)
+	points++
+	fmt.Println(points)
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/pre-2-values#Example_shortcuts"><code>15
+12
+24
+25</code></pre>
+    <p>「拿自己來算，再放回自己」太常見了，所以有簡寫：<code>points += 5</code> 就是 <code>points = points + 5</code>，<code>-=</code>、<code>*=</code>、<code>/=</code> 也一樣。<code>points++</code> 是加 1 的簡寫，<code>points--</code> 是減 1。在 Go 裡 <code>++</code> 自己就是一整行，不能寫在其他算式中間。</p>
+  </section>
+
+  <section aria-labelledby="swap">
+    <h2 id="swap">4. 交換兩個變數</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 222" role="img" aria-label="用 tmp 交換 a 和 b：開始時 a 是紅茶、b 是綠茶；tmp := a 後 tmp 是紅茶；a = b 後 a 是綠茶；b = tmp 後 b 是紅茶">
+        <title>用第三個杯子交換</title>
+        <text class="sm" x="16" y="30">步驟</text>
+        <text class="small mono bold" x="240" y="30" text-anchor="middle">a</text>
+        <text class="small mono bold" x="330" y="30" text-anchor="middle">b</text>
+        <text class="small mono bold" x="420" y="30" text-anchor="middle">tmp</text>
+        <text class="sm" x="16" y="67">開始</text>
+        <text class="sm mono" x="16" y="111">tmp := a</text>
+        <text class="sm mono" x="16" y="155">a = b</text>
+        <text class="sm mono" x="16" y="199">b = tmp</text>
+        <rect class="soft" x="200" y="44" width="80" height="36" rx="4"/>
+        <rect class="soft" x="290" y="44" width="80" height="36" rx="4"/>
+        <rect class="soft dash" x="380" y="44" width="80" height="36" rx="4"/>
+        <rect class="soft" x="200" y="88" width="80" height="36" rx="4"/>
+        <rect class="soft" x="290" y="88" width="80" height="36" rx="4"/>
+        <rect class="acc" x="380" y="88" width="80" height="36" rx="4"/>
+        <rect class="acc" x="200" y="132" width="80" height="36" rx="4"/>
+        <rect class="soft" x="290" y="132" width="80" height="36" rx="4"/>
+        <rect class="soft" x="380" y="132" width="80" height="36" rx="4"/>
+        <rect class="soft" x="200" y="176" width="80" height="36" rx="4"/>
+        <rect class="acc" x="290" y="176" width="80" height="36" rx="4"/>
+        <rect class="soft" x="380" y="176" width="80" height="36" rx="4"/>
+        <text x="240" y="68" text-anchor="middle">紅茶</text>
+        <text x="330" y="68" text-anchor="middle">綠茶</text>
+        <text x="240" y="112" text-anchor="middle">紅茶</text>
+        <text x="330" y="112" text-anchor="middle">綠茶</text>
+        <text x="420" y="112" text-anchor="middle">紅茶</text>
+        <text x="240" y="156" text-anchor="middle">綠茶</text>
+        <text x="330" y="156" text-anchor="middle">綠茶</text>
+        <text x="420" y="156" text-anchor="middle">紅茶</text>
+        <text x="240" y="200" text-anchor="middle">綠茶</text>
+        <text x="330" y="200" text-anchor="middle">紅茶</text>
+        <text x="420" y="200" text-anchor="middle">紅茶</text>
+      </svg>
+      <figcaption>每一列是執行完那一步之後三個變數的值，有底色的格子是這一步改變的。紅茶先倒進 tmp 暫放，才不會被綠茶蓋掉。</figcaption>
+    </figure>
+    <p>桌上有兩杯飲料，a 杯是紅茶、b 杯是綠茶，要把它們對調。直覺的寫法是這樣：</p>
+    <pre class="code" data-src="chapters/pre-2-values/swap.go#wrongSwap"><code>func wrongSwap() {
+	a := "紅茶"
+	b := "綠茶"
+	a = b
+	b = a
+	fmt.Println(a, b)
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/pre-2-values#Example_wrongSwap"><code>綠茶 綠茶</code></pre>
+    <p>兩杯都變成綠茶了。一行一行看：<code>a = b</code> 把綠茶放進 a，a 原本的紅茶就被換掉、不見了；接著 <code>b = a</code> 把 a 現在的值（綠茶）放進 b。這就是第 3 節說的：盒子放進新的值，舊的值就不見了。</p>
+    <p>現實中對調兩杯飲料，需要第三個空杯子。程式也一樣：</p>
+    <pre class="code" data-src="chapters/pre-2-values/swap.go#tempSwap"><code>func tempSwap() {
+	a := "紅茶"
+	b := "綠茶"
+	tmp := a
+	a = b
+	b = tmp
+	fmt.Println(a, b)
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/pre-2-values#Example_tempSwap"><code>綠茶 紅茶</code></pre>
+    <p>上圖就是這段程式每一步之後的狀態。Go 另外提供一個方便的寫法，一次指定好幾個變數：</p>
+    <pre class="code" data-src="chapters/pre-2-values/swap.go#goSwap"><code>func goSwap() {
+	a := "紅茶"
+	b := "綠茶"
+	a, b = b, a
+	fmt.Println(a, b)
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/pre-2-values#Example_goSwap"><code>綠茶 紅茶</code></pre>
+    <p><code>a, b = b, a</code> 會先把右邊的值<strong>全部</strong>拿好（綠茶、紅茶），才依序放進左邊，所以不會有被蓋掉的問題。實際寫 Go 時都用這種寫法；但先懂 tmp 的版本，才知道為什麼直覺的寫法會錯。練習 6 是三個人換座位的版本。</p>
+  </section>
+
+  <section aria-labelledby="arith">
+    <h2 id="arith">5. 算術與整數除法</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 200" role="img" aria-label="100 元平分給 3 個人：每人 33 元，剩下 1 元。100 / 3 等於 33，100 % 3 等於 1">
+        <title>整數除法和餘數</title>
+        <rect class="acc" x="30" y="50" width="96" height="70" rx="8"/>
+        <rect class="acc" x="140" y="50" width="96" height="70" rx="8"/>
+        <rect class="acc" x="250" y="50" width="96" height="70" rx="8"/>
+        <rect class="hot" x="372" y="50" width="78" height="70" rx="8"/>
+        <text class="lg" x="78" y="96" text-anchor="middle">33</text>
+        <text class="lg" x="188" y="96" text-anchor="middle">33</text>
+        <text class="lg" x="298" y="96" text-anchor="middle">33</text>
+        <text class="lg" x="411" y="96" text-anchor="middle">1</text>
+        <text class="sm" x="78" y="142" text-anchor="middle">第 1 人</text>
+        <text class="sm" x="188" y="142" text-anchor="middle">第 2 人</text>
+        <text class="sm" x="298" y="142" text-anchor="middle">第 3 人</text>
+        <text class="sm" x="411" y="142" text-anchor="middle">剩下</text>
+        <text class="small mono t-acc" x="188" y="182" text-anchor="middle">100 / 3 = 33</text>
+        <text class="small mono t-hot" x="411" y="182" text-anchor="middle">100 % 3 = 1</text>
+        <text class="sm" x="240" y="30" text-anchor="middle">100 元平分給 3 個人</text>
+      </svg>
+      <figcaption>兩個整數相除，<code>/</code> 只留下整數的部分，<code>%</code> 算出除不盡剩下的部分。</figcaption>
+    </figure>
+    <pre class="code" data-src="chapters/pre-2-values/arithmetic.go#arithmetic"><code>func arithmetic() {
+	fmt.Println(7 + 2)
+	fmt.Println(7 - 2)
+	fmt.Println(7 * 2)
+	fmt.Println(7 / 2)
+	fmt.Println(7 % 2)
+	fmt.Println(7.0 / 2)
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/pre-2-values#Example_arithmetic"><code>9
+5
+14
+3
+1
+3.5</code></pre>
+    <p>加、減、乘的結果都和數學課一樣。除法要特別注意：<strong>兩個整數相除，結果還是整數</strong>，小數部分直接丟掉（不是四捨五入），所以 <code>7 / 2</code> 是 3。只要其中一邊是小數，例如 <code>7.0 / 2</code>，結果才會是 3.5。</p>
+    <p><code>%</code> 是<strong>餘數</strong>（remainder），也就是除不盡剩下的部分：7 除以 2 得 3 餘 1，所以 <code>7 % 2</code> 是 1。整數除法和餘數常常一起用：</p>
+    <pre class="code" data-src="chapters/pre-2-values/arithmetic.go#splitBill,duration"><code>func splitBill() {
+	total := 100
+	people := 3
+	fmt.Println("每人", total/people, "元")
+	fmt.Println("剩下", total%people, "元")
+}
+
+func duration() {
+	minutes := 135
+	fmt.Println(minutes/60, "小時", minutes%60, "分")
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/pre-2-values#Example_splitBill"><code>每人 33 元
+剩下 1 元</code></pre>
+    <pre class="out" data-example="chapters/pre-2-values#Example_duration"><code>2 小時 15 分</code></pre>
+    <p>135 分鐘裡有幾個完整的 60 分鐘？<code>135 / 60</code> 是 2；剩下的 <code>135 % 60</code> 是 15。同樣的方法可以把秒換成分秒、把天數換成幾週又幾天（練習 2）、算找零要幾枚硬幣（練習 5）。餘數還有一個常見的用途：<code>n % 2</code> 是 0 就是偶數，是 1 就是奇數。</p>
+
+    <h3>整數和小數不能直接一起算</h3>
+    <pre class="code bad" data-compile-error><code>package main
+
+import "fmt"
+
+func main() {
+	price := 85
+	rate := 0.9
+	fmt.Println(price * rate)
+}</code></pre>
+    <p class="label">編譯錯誤</p>
+    <pre class="out err"><code>./main.go:8:14: invalid operation: price * rate (mismatched types int and float64)</code></pre>
+    <p>price 是 int，rate 是 float64，型別不同（mismatched types），Go 不會自動幫你轉換。要先明確地把其中一個轉成另一個的型別：</p>
+    <pre class="code" data-src="chapters/pre-2-values/arithmetic.go#discount"><code>func discount() {
+	price := 85
+	rate := 0.9
+	fmt.Println(float64(price) * rate)
+	fmt.Println(int(float64(price) * rate))
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/pre-2-values#Example_discount"><code>76.5
+76</code></pre>
+    <p><code>float64(price)</code> 把 85 轉成小數 85.0，乘以 0.9 得到 76.5。<code>int(…)</code> 再把小數轉回整數，小數部分一樣直接丟掉，得到 76。Go 要你自己寫出轉換，是為了讓「這裡會丟掉小數」這件事在程式裡看得見。小數的計算有時會有很小的誤差，詳細的原因在 <a href="01-variables.html#floats">01 章的浮點數</a>。</p>
+    <p>最後提醒一次 <a href="pre-1-running.html#kinds">先修 1</a> 看過的規則：先乘除後加減，有括號的先算。不確定的時候就加括號，多加的括號不會出錯。</p>
+  </section>
+
+  <section aria-labelledby="logic">
+    <h2 id="logic">6. 比較與邏輯</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 220" role="img" aria-label="兩張表。&amp;&amp;：只有兩邊都是 true 時結果才是 true。||：只要有一邊是 true，結果就是 true，兩邊都是 false 時才是 false">
+        <title>而且與或</title>
+        <text class="small" x="160" y="28" text-anchor="middle">&amp;&amp;：兩邊都 true 才 true</text>
+        <text class="small" x="390" y="28" text-anchor="middle">||：一邊 true 就 true</text>
+        <text class="sm mono" x="125" y="62" text-anchor="middle">true</text>
+        <text class="sm mono" x="195" y="62" text-anchor="middle">false</text>
+        <text class="sm mono" x="355" y="62" text-anchor="middle">true</text>
+        <text class="sm mono" x="425" y="62" text-anchor="middle">false</text>
+        <text class="sm mono" x="82" y="97" text-anchor="end">true</text>
+        <text class="sm mono" x="82" y="137" text-anchor="end">false</text>
+        <text class="sm mono" x="312" y="97" text-anchor="end">true</text>
+        <text class="sm mono" x="312" y="137" text-anchor="end">false</text>
+        <rect class="acc" x="90" y="72" width="70" height="40"/>
+        <rect class="soft" x="160" y="72" width="70" height="40"/>
+        <rect class="soft" x="90" y="112" width="70" height="40"/>
+        <rect class="soft" x="160" y="112" width="70" height="40"/>
+        <rect class="acc" x="320" y="72" width="70" height="40"/>
+        <rect class="acc" x="390" y="72" width="70" height="40"/>
+        <rect class="acc" x="320" y="112" width="70" height="40"/>
+        <rect class="soft" x="390" y="112" width="70" height="40"/>
+        <text class="small mono" x="125" y="97" text-anchor="middle">true</text>
+        <text class="small mono" x="195" y="97" text-anchor="middle">false</text>
+        <text class="small mono" x="125" y="137" text-anchor="middle">false</text>
+        <text class="small mono" x="195" y="137" text-anchor="middle">false</text>
+        <text class="small mono" x="355" y="97" text-anchor="middle">true</text>
+        <text class="small mono" x="425" y="97" text-anchor="middle">true</text>
+        <text class="small mono" x="355" y="137" text-anchor="middle">true</text>
+        <text class="small mono" x="425" y="137" text-anchor="middle">false</text>
+        <text class="sm" x="240" y="184" text-anchor="middle">左邊一欄是左邊的條件，上面一列是右邊的條件</text>
+        <text class="sm mono" x="240" y="208" text-anchor="middle">!true == false    !false == true</text>
+      </svg>
+      <figcaption><code>&amp;&amp;</code>（而且）很嚴格，兩個條件都要成立；<code>||</code>（或）很寬鬆，成立一個就夠了；<code>!</code>（不是）把結果反過來。</figcaption>
+    </figure>
+    <pre class="code" data-src="chapters/pre-2-values/compare.go#compare"><code>func compare() {
+	price := 85
+	fmt.Println(price &gt; 80)
+	fmt.Println(price == 90)
+	fmt.Println(price != 90)
+	fmt.Println(price &lt;= 85)
+	fmt.Println("排骨" == "排骨")
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/pre-2-values#Example_compare"><code>true
+false
+true
+true
+true</code></pre>
+    <p><strong>比較運算</strong>問的是一個是非題，答案是 bool：<code>&gt;</code> 大於、<code>&lt;</code> 小於、<code>&gt;=</code> 大於或等於、<code>&lt;=</code> 小於或等於、<code>==</code> 等於、<code>!=</code> 不等於。注意「等於」是<strong>兩個</strong>等號；一個等號是第 3 節的指定，意思完全不同。</p>
+    <p>真實的規則常常不只一個條件，例如「12 歲以下或 65 歲以上可以買半票」「會員而且消費滿 100 元才打折」。這時用<strong>邏輯運算</strong>把條件組合起來：</p>
+    <pre class="code" data-src="chapters/pre-2-values/compare.go#logic"><code>func logic() {
+	age := 70
+	member := false
+	total := 120
+	fmt.Println(age &lt; 12 || age &gt;= 65)
+	fmt.Println(member &amp;&amp; total &gt;= 100)
+	fmt.Println(!member)
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/pre-2-values#Example_logic"><code>true
+false
+true</code></pre>
+    <ul class="notes">
+      <li>第一行：70 歲，<code>age &lt; 12</code> 是 false，<code>age &gt;= 65</code> 是 true；<code>||</code> 只要一邊成立，所以結果是 true，可以買半票。</li>
+      <li>第二行：消費 120 元已經滿 100，但不是會員；<code>&amp;&amp;</code> 要兩邊都成立，所以是 false，不打折。</li>
+      <li>第三行：<code>!member</code> 是「不是會員」，member 是 false，反過來就是 true。</li>
+    </ul>
+    <p>把中文的規則翻成程式時，一個條件一個條件寫，再用 <code>&amp;&amp;</code>、<code>||</code> 接起來。「12 歲以下」要想清楚包不包含 12：題目說「未滿 12 歲」就是 <code>age &lt; 12</code>，說「12 歲以下」通常是 <code>age &lt;= 12</code>。邊界上的那一個值，是最容易寫錯的地方，練習 3 的測試就特別檢查了 11、12、64、65 這幾個年齡。下一章，這些 true 和 false 會用來決定程式要走哪一條路。</p>
+  </section>
+
+  <section aria-labelledby="trace">
+    <h2 id="trace">7. 追蹤表</h2>
+    <p>程式的結果不對時，最可靠的方法是把自己當成電腦，一行一行照著做，把每個變數的值記下來。記錄用的表格叫<strong>追蹤表</strong>（trace table）：每一行程式一列，每個變數一欄，格子裡寫<strong>執行完這一行之後</strong>變數的值。第 4 節的圖就是一張追蹤表。</p>
+    <p>先不要執行，用紙筆追蹤這段程式，猜猜看它會印出什麼：</p>
+    <pre class="code" data-src="chapters/pre-2-values/compare.go#traceMe"><code>func traceMe() {
+	x := 3
+	y := x * 2
+	x = y + 1
+	y = x - y
+	fmt.Println(x, y)
+}</code></pre>
+    <div class="table-wrap">
+      <table class="vs">
+        <thead><tr><th scope="col">程式</th><th scope="col">x</th><th scope="col">y</th><th scope="col">說明</th></tr></thead>
+        <tbody>
+          <tr><th scope="row"><code>x := 3</code></th><td>3</td><td></td><td>y 還不存在</td></tr>
+          <tr><th scope="row"><code>y := x * 2</code></th><td>3</td><td>6</td><td>用 x 目前的值 3</td></tr>
+          <tr><th scope="row"><code>x = y + 1</code></th><td>7</td><td>6</td><td>x 的 3 被換成 7</td></tr>
+          <tr><th scope="row"><code>y = x - y</code></th><td>7</td><td>1</td><td>右邊用的是新的 x（7）和舊的 y（6）</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/pre-2-values#Example_traceMe"><code>7 1</code></pre>
+    <p>追蹤時最常犯的錯，是用了「看起來」的值，而不是「這時候」的值。最後一行的 x 已經是 7，不是一開始的 3。只要每一步都回頭查表格上一列的值，就不會出錯。</p>
+    <p>追蹤表看起來很笨，卻是寫程式的人一輩子都在用的技巧。程式的結果和你預期的不同時，就是腦中的追蹤表和電腦實際做的事不一樣了；找出是哪一列開始不同，就找到了 bug。程式更長的時候，可以在中間加幾行 <code>fmt.Println</code> 印出變數，讓電腦替你填表格，先修 4 會再練習這個方法。練習 4 是一題追蹤題。</p>
+  </section>
+
+  <section aria-labelledby="pitfalls">
+    <h2 id="pitfalls">常見錯誤</h2>
+    <h3 id="pit-equals">1. 把 = 當成「等於」</h3>
+    <p>一個等號是指定（放進去），兩個等號才是比較。<code>count = count + 1</code> 是動作，不是等式；問「price 是不是 90」要寫 <code>price == 90</code>。</p>
+
+    <h3 id="pit-intdiv">2. 忘了整數除法會丟掉小數</h3>
+    <p><code>7 / 2</code> 是 3，<code>18 / 20</code> 是 0。需要小數時，先用 <code>float64(…)</code> 轉換<strong>再</strong>除；先除再轉換，小數早就被丟掉了。練習 7。</p>
+
+    <h3 id="pit-text">3. 把文字的數字當成數字</h3>
+    <p><code>"85" + "3"</code> 是 <code>"853"</code>。有雙引號的就是文字，不能拿來算數。</p>
+
+    <h3 id="pit-mixed">4. 整數和小數直接一起算</h3>
+    <p>Go 不會自動轉換型別，會得到 <code>mismatched types</code> 的編譯錯誤（第 5 節）。用 <code>float64(…)</code> 或 <code>int(…)</code> 明確轉換。</p>
+
+    <h3 id="pit-declare">5. := 和 = 用錯</h3>
+    <p>第一次建立變數用 <code>:=</code>，之後改值用 <code>=</code>。對已經存在的變數再用 <code>:=</code> 會得到 <code>no new variables</code>；對還沒建立的變數直接用 <code>=</code>，會得到 <code>undefined</code>。</p>
+
+    <h3 id="pit-overwrite">6. 先覆蓋了，後面才要用</h3>
+    <p>放進新的值，舊的值就不見了。交換、輪替這類操作，要先用 tmp 存起來，或用 <code>a, b = b, a</code> 一次指定（第 4 節、練習 6）。</p>
+  </section>
+
+  <section aria-labelledby="exercises">
+    <h2 id="exercises">練習</h2>
+    <p>題目在 <code>exercises/pre-2-values/exercises.go</code>，做法和<a href="pre-1-running.html#exercises">先修 1 的練習</a>一樣。</p>
+    <pre class="shell"><code>go test ./exercises/pre-2-values/                    <span class="c"># 跑全部練習</span>
+go test ./exercises/pre-2-values/ -run TestElapsed   <span class="c"># 只跑一題</span>
+go test -tags solution ./exercises/pre-2-values/     <span class="c"># 跑參考解答</span></code></pre>
+    <p>這幾題的函式會用 <code>return</code> 一次交回好幾個值，例如 <code>return 33, 1</code>，順序就是函式第一行括號裡寫的順序。函式的寫法在先修 4 會正式介紹。</p>
+    <ol class="exercises">
+      <li>
+        <h3><span class="level l1">入門</span>練習 1：經過幾分鐘</h3>
+        <p>算出同一天裡兩個時間之間經過了幾分鐘。</p>
+        <pre class="code" data-src="exercises/pre-2-values/exercises.go#Elapsed"><code>func Elapsed(startH, startM, endH, endM int) int {
+	// TODO: 實作
+	return 0
+}</code></pre>
+        <p>測試：<code>TestElapsed</code>。</p>
+        <details><summary>提示</summary><p>直接把小時減小時、分鐘減分鐘，遇到 50 分到 5 分就麻煩了。先把兩個時間都換成「從 0 點開始算的第幾分鐘」：小時乘以 60 再加分鐘，然後相減。可以先用兩個變數存起來，讓程式比較好讀。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l1">入門</span>練習 2：幾週又幾天</h3>
+        <p>把天數換成幾週又幾天。</p>
+        <pre class="code" data-src="exercises/pre-2-values/exercises.go#WeeksAndDays"><code>func WeeksAndDays(days int) (weeks, rest int) {
+	// TODO: 實作
+	return 0, 0
+}</code></pre>
+        <p>測試：<code>TestWeeksAndDays</code>。</p>
+        <details><summary>提示</summary><p>和第 5 節把分鐘換成小時的做法一樣，一週是 7 天。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l1">入門</span>練習 3：半票</h3>
+        <p>未滿 12 歲，或 65 歲以上，可以買半票。</p>
+        <pre class="code" data-src="exercises/pre-2-values/exercises.go#IsHalfFare"><code>func IsHalfFare(age int) bool {
+	// TODO: 實作
+	return false
+}</code></pre>
+        <p>測試：<code>TestIsHalfFare</code>。</p>
+        <details><summary>提示</summary><p>比較運算的結果本身就是 bool，可以直接 return。「未滿 12」包不包含 12？「65 歲以上」包不包含 65？</p></details>
+      </li>
+      <li>
+        <h3><span class="level l2">進階</span>練習 4：追蹤</h3>
+        <p>不要執行那段程式，畫一張追蹤表，把最後 a、b、c 的值填進 return。</p>
+        <pre class="code" data-src="exercises/pre-2-values/exercises.go#Predict"><code>func Predict() (a, b, c int) {
+	// TODO: 把 0, 0, 0 換成你追蹤出來的答案
+	return 0, 0, 0
+}</code></pre>
+        <p>測試：<code>TestPredict</code>。</p>
+        <details><summary>提示</summary><p>表格要有 a、b、c 三欄，一共六列。第二、三列用到整數除法和餘數：17 除以 5 是多少、餘多少？最後一列的 b 已經不是一開始的值了。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l3">挑戰</span>練習 5：找零</h3>
+        <p>找零時要用最少的硬幣。台灣常用的硬幣是 50 元、10 元、5 元、1 元。</p>
+        <pre class="code" data-src="exercises/pre-2-values/exercises.go#Coins"><code>func Coins(amount int) (c50, c10, c5, c1 int) {
+	// TODO: 實作
+	return 0, 0, 0, 0
+}</code></pre>
+        <p>測試：<code>TestCoins</code>。</p>
+        <details><summary>提示</summary><p>從最大的硬幣開始：<code>c50 = amount / 50</code> 是 50 元要幾枚，<code>amount % 50</code> 是剩下還要找的錢。把剩下的錢放回 amount，再用同樣的方法算 10 元、5 元，最後剩下的就是 1 元的枚數。具名的回傳值（c50、c10…）可以直接當變數用。</p></details>
+      </li>
+      <li>
+        <h3><span class="level fix">找錯</span>練習 6：換座位</h3>
+        <p>三個人往前換一格座位，結果有一個人不見了。</p>
+        <pre class="code" data-src="exercises/pre-2-values/exercises.go#Rotate"><code>func Rotate(a, b, c string) (string, string, string) {
+	a = b
+	b = c
+	c = a
+	return a, b, c
+}</code></pre>
+        <p>測試：<code>TestRotate</code>。</p>
+        <details><summary>提示</summary><p>畫追蹤表：執行到 <code>c = a</code> 時，a 裝的已經是誰了？可以先用 tmp 存起來，或用第 4 節一次指定的寫法。</p></details>
+      </li>
+      <li>
+        <h3><span class="level fix">找錯</span>練習 7：出席率</h3>
+        <p>出席率是出席次數除以總次數再乘 100，但除了全勤以外，算出來全部是 0。</p>
+        <pre class="code" data-src="exercises/pre-2-values/exercises.go#Attendance"><code>func Attendance(part, total int) float64 {
+	return float64(part / total * 100)
+}</code></pre>
+        <p>測試：<code>TestAttendance</code>。</p>
+        <details><summary>提示</summary><p>追蹤一次 <code>part / total * 100</code>：18 / 20 是兩個整數相除，得到 0，乘以 100 還是 0，最後轉成 float64 也只是 0.0。轉換要放在除法之前。</p></details>
+      </li>
+    </ol>
+    <p><a href="https://github.com/xinqilin/GO-Playground/blob/main/exercises/pre-2-values/solution.go">參考解答</a>：先自己寫完再看。</p>
+  </section>
+
+  <section aria-labelledby="recap">
+    <h2 id="recap">重點回顧</h2>
+    <ul class="recap">
+      <li>每個值都有型別：<code>int</code> 整數、<code>float64</code> 小數、<code>string</code> 文字、<code>bool</code> 真假。</li>
+      <li>型別決定運算的意思：數字的 <code>+</code> 是相加，文字的 <code>+</code> 是接起來。</li>
+      <li><code>:=</code> 建立變數，<code>=</code> 換成新的值；變數建立了就要用，型別不能改。</li>
+      <li><code>=</code> 是先算右邊、再放進左邊；放進新的值，舊的就不見了。</li>
+      <li>交換兩個變數要用 tmp，或用 <code>a, b = b, a</code>。</li>
+      <li>兩個整數相除會丟掉小數；<code>%</code> 是餘數。</li>
+      <li>int 和 float64 不能直接一起算，要用 <code>float64(…)</code>、<code>int(…)</code> 轉換。</li>
+      <li>比較的結果是 bool；<code>&amp;&amp;</code> 兩邊都要成立，<code>||</code> 一邊成立就好，<code>!</code> 反過來。<code>==</code> 是比較，<code>=</code> 是指定。</li>
+      <li>追蹤表一行一行記下變數的值，是理解程式和找 bug 最基本的方法。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="further">
+    <h2 id="further">延伸閱讀</h2>
+    <ul class="notes">
+      <li>Go 語言規格（英文，寫得很精確，現在讀不懂沒關係）：<a href="https://go.dev/ref/spec#Variables">Variables</a>、<a href="https://go.dev/ref/spec#Short_variable_declarations">Short variable declarations</a>、<a href="https://go.dev/ref/spec#Assignment_statements">Assignment statements</a>、<a href="https://go.dev/ref/spec#Arithmetic_operators">Arithmetic operators</a>、<a href="https://go.dev/ref/spec#Comparison_operators">Comparison operators</a>、<a href="https://go.dev/ref/spec#Logical_operators">Logical operators</a>。</li>
+      <li>套件文件：<a href="https://pkg.go.dev/fmt">fmt</a>（<code>%T</code>、<code>%v</code> 等格式）。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="run">
+    <h2 id="run">動手跑</h2>
+    <p class="label">在手冊的資料夾（GO-Playground）裡</p>
+    <pre class="shell"><code>go run ./chapters/pre-2-values             <span class="c"># 執行本章所有示範</span>
+go test ./chapters/pre-2-values            <span class="c"># 驗證頁面上的每一段輸出</span>
+go test ./exercises/pre-2-values/          <span class="c"># 做練習</span></code></pre>
+    <p><a href="https://github.com/xinqilin/GO-Playground/tree/main/chapters/pre-2-values">在 GitHub 看本章完整程式碼</a>，或看<a href="https://github.com/xinqilin/GO-Playground/tree/main/exercises/pre-2-values">練習題</a>。</p>
+  </section>
+</main>
+
+<nav class="pager" aria-label="章節導覽">
+  <a class="prev" href="pre-1-running.html">← 先修 1 程式怎麼跑起來</a>
+  <a class="home" href="index.html">目錄</a>
+  <a class="next" href="pre-3-decisions.html">先修 3 判斷與重複 →</a>
+</nav>
+</body>
+</html>

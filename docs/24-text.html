@@ -1,0 +1,829 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>文字處理｜Go 圖解手冊</title>
+<meta name="description" content="Go 的文字處理：用 strings.Lines、Cut、Fields 和 strconv 寫小型解析器、strconv.NumError、regexp 的比對、命名群組、取代與 RE2 的限制、text/template 的動作與錯誤、FuncMap 與 block 組合範本、html/template 的自動跳脫，附可執行的練習題。">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<header class="site">
+  <a href="index.html">Go 圖解手冊</a>
+  <span class="count">24 / 33</span>
+</header>
+
+<main class="page long">
+  <header class="hero">
+    <div class="num" aria-hidden="true">24</div>
+    <p class="eyebrow">Part 4 · 標準庫實戰 · 第 24 章</p>
+    <h1>文字處理</h1>
+    <p class="analogy">櫃台每天看的都是文字：手寫的點餐單要看懂，悠遊卡的紀錄要挑出車資，收據和公告要照固定的格式印出來。看懂文字靠解析和正規表示式，印出文字靠範本；印在網頁上的時候，還要小心客人寫進來的字。</p>
+  </header>
+
+  <nav class="toc-inline" aria-labelledby="toc-title">
+    <p class="label" id="toc-title">本章內容</p>
+    <ol>
+      <li><a href="#goals">本章你會學到</a></li>
+      <li><a href="#parse">寫一個小解析器</a></li>
+      <li><a href="#regexp">regexp：比對與擷取</a></li>
+      <li><a href="#replace">regexp：取代與限制</a></li>
+      <li><a href="#template">text/template</a></li>
+      <li><a href="#compose">函式與組合範本</a></li>
+      <li><a href="#html">html/template</a></li>
+      <li><a href="#pitfalls">常見錯誤</a></li>
+      <li><a href="#java">從 Java 來的你</a></li>
+      <li><a href="#exercises">練習</a></li>
+      <li><a href="#recap">重點回顧</a></li>
+      <li><a href="#further">延伸閱讀</a></li>
+    </ol>
+  </nav>
+
+  <section aria-labelledby="goals">
+    <h2 id="goals">本章你會學到</h2>
+    <ul class="notes">
+      <li>用 strings.Lines、Fields、Cut 和 strconv 寫一個會回報行號的小解析器。</li>
+      <li>分辨 strconv 的「不是數字」和「超出範圍」。</li>
+      <li>regexp：什麼時候該用、編譯一次重複用、錨點、命名群組、找出全部。</li>
+      <li>regexp 的取代：<code>${1}</code>、用函式計算取代的結果、QuoteMeta，以及 RE2 不支援的語法。</li>
+      <li>text/template：欄位、方法、range、if、with、空白控制，以及執行時的錯誤。</li>
+      <li>用 FuncMap 加函式、用 block 和 Clone 組合範本、用 embed 把範本檔編進程式。</li>
+      <li>html/template 依照位置自動跳脫，以及 template.HTML 什麼時候能用。</li>
+    </ul>
+    <p>先備：<a href="08-strings-runes.html#strings">08 章的 strings 套件</a>和 <a href="08-strings-runes.html#strconv">strconv</a>、<a href="13-iterators.html#stdlib">13 章的 strings.Lines</a>、<a href="20-files.html#fs">20 章的 embed</a>。08 章教過的 Split、Cut、Replacer、Builder 這一章直接拿來用，不再重複說明。</p>
+  </section>
+
+  <section aria-labelledby="parse">
+    <h2 id="parse">1. 寫一個小解析器</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 170" role="img" aria-label="點餐單的每一行依序經過：strings.Lines 一行一行取出、TrimSpace 並略過空行和註解、Fields 依空白切開、CutPrefix 拿掉 x、strconv.Atoi 轉成數量，最後組成 OrderLine">
+        <title>一行文字變成一個 struct</title>
+        <text class="sm mono" x="240" y="24" text-anchor="middle">"排骨飯 x2 少飯\n"</text>
+        <rect class="soft" x="16" y="42" width="100" height="40" rx="6"/>
+        <text class="sm mono" x="66" y="67" text-anchor="middle">Lines</text>
+        <rect class="soft" x="130" y="42" width="100" height="40" rx="6"/>
+        <text class="sm mono" x="180" y="67" text-anchor="middle">TrimSpace</text>
+        <rect class="soft" x="244" y="42" width="100" height="40" rx="6"/>
+        <text class="sm mono" x="294" y="67" text-anchor="middle">Fields</text>
+        <rect class="soft" x="358" y="42" width="106" height="40" rx="6"/>
+        <text class="sm mono" x="411" y="67" text-anchor="middle">CutPrefix</text>
+        <path class="wire" d="M116 62 H130"/>
+        <path class="wire" d="M230 62 H244"/>
+        <path class="wire" d="M344 62 H358"/>
+        <text class="sm mono" x="294" y="104" text-anchor="middle">[排骨飯 x2 少飯]</text>
+        <text class="sm mono" x="411" y="104" text-anchor="middle">"2"</text>
+        <path class="wire" d="M411 112 V122"/>
+        <path class="tip" d="M411 134 L405 122 L417 122 Z"/>
+        <rect class="acc" x="40" y="134" width="424" height="30" rx="6"/>
+        <text class="sm mono" x="252" y="154" text-anchor="middle">strconv.Atoi → OrderLine{排骨飯, 2, 少飯}</text>
+      </svg>
+      <figcaption>每一步只做一件事：切行、去空白、切欄位、認出數量、轉成數字。哪一步失敗，就知道是哪一行的哪個部分有問題。</figcaption>
+    </figure>
+    <p>很多文字格式根本不需要正規表示式。櫃台手打的點餐單，每一行是「品項 [x數量] [備註]」，用 08 章的 strings 函式一步一步拆就好：</p>
+    <pre class="code" data-src="chapters/24-text/parse.go#OrderLine,parseOrder"><code>type OrderLine struct {
+	Dish string
+	Qty  int
+	Note string
+}
+
+func parseOrder(text string) ([]OrderLine, error) {
+	var order []OrderLine
+	n := 0
+	for line := range strings.Lines(text) {
+		n++
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		fields := strings.Fields(line)
+		ol := OrderLine{Dish: fields[0], Qty: 1}
+		rest := fields[1:]
+		if len(rest) &gt; 0 {
+			if q, ok := strings.CutPrefix(rest[0], "x"); ok {
+				qty, err := strconv.Atoi(q)
+				if err != nil {
+					return nil, fmt.Errorf("第 %d 行：數量 %q：%w", n, q, err)
+				}
+				if qty &lt; 1 {
+					return nil, fmt.Errorf("第 %d 行：數量至少是 1", n)
+				}
+				ol.Qty = qty
+				rest = rest[1:]
+			}
+		}
+		ol.Note = strings.Join(rest, " ")
+		order = append(order, ol)
+	}
+	return order, nil
+}</code></pre>
+    <pre class="code" data-src="chapters/24-text/parse.go#parseDemo"><code>func parseDemo() {
+	const ticket = `# 第 7 桌
+排骨飯 x2 少飯
+滷肉飯
+
+珍珠奶茶 x1 微糖, 去冰
+`
+	order, err := parseOrder(ticket)
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	for _, ol := range order {
+		fmt.Printf("%s %d 份 %q\n", ol.Dish, ol.Qty, ol.Note)
+	}
+
+	_, err = parseOrder("排骨飯\n雞腿飯 x二\n")
+	fmt.Println(err)
+}</code></pre>
+    <pre class="out" data-example="chapters/24-text#Example_parseDemo"><code>排骨飯 2 份 "少飯"
+滷肉飯 1 份 ""
+珍珠奶茶 1 份 "微糖, 去冰"
+第 2 行：數量 "二"：strconv.Atoi: parsing "二": invalid syntax</code></pre>
+    <ul class="notes">
+      <li><code>strings.Lines</code>（Go 1.24 起）一次給一行，每一行帶著結尾的換行，所以先 TrimSpace。最後一行沒有換行也一樣會給。</li>
+      <li>行號自己數，錯誤訊息一定要帶著它。使用者看到「第 2 行：數量 "二"」就知道要改哪裡。</li>
+      <li><code>strings.Fields</code> 依任意長度的空白切開，連續的空白、Tab 都當成一個分隔，比 Split(" ") 適合處理人打的字。</li>
+      <li>用 %w 包住 strconv 的錯誤，呼叫的一方還能用 errors.Is 判斷原因。</li>
+    </ul>
+    <p>strconv 的錯誤是 <code>*strconv.NumError</code>，裡面記著是哪個函式、哪個字串，以及原因：<code>strconv.ErrSyntax</code>（根本不是數字）或 <code>strconv.ErrRange</code>（是數字，但放不下）。這兩種通常要給使用者不同的訊息：</p>
+    <pre class="code" data-src="chapters/24-text/parse.go#numErrorDemo"><code>func numErrorDemo() {
+	for _, s := range []string{"二", "99999999999999999999"} {
+		_, err := strconv.Atoi(s)
+		ne, _ := errors.AsType[*strconv.NumError](err)
+		fmt.Println(ne.Func, ne.Num, errors.Is(err, strconv.ErrSyntax), errors.Is(err, strconv.ErrRange))
+	}
+
+	_, err := strconv.ParseInt("300", 10, 8) // 第三個參數是位元數：int8 放不下 300
+	fmt.Println(err)
+
+	for _, s := range []string{"true", "1", "T", "yes"} {
+		b, err := strconv.ParseBool(s)
+		fmt.Println(s, b, err == nil)
+	}
+}</code></pre>
+    <pre class="out" data-example="chapters/24-text#Example_numErrorDemo"><code>Atoi 二 true false
+Atoi 99999999999999999999 false true
+strconv.ParseInt: parsing "300": value out of range
+true true true
+1 true true
+T true true
+yes false false</code></pre>
+    <ul class="notes">
+      <li><code>ParseInt(s, 進位, 位元數)</code> 的第三個參數決定範圍：8 就是 int8 的 -128 到 127，結果還是 int64，確認放得下之後再轉型。</li>
+      <li>ParseBool 只認得 1、t、T、TRUE、true、True 和對應的 false 寫法，<code>yes</code>、<code>on</code> 都不算。設定檔要接受這些字，要自己對照。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="regexp">
+    <h2 id="regexp">2. regexp：比對與擷取</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 176" role="img" aria-label="正規表示式 ^[A-Z]{2}-\d{8}$ 拆成五段：^ 是字串開頭，[A-Z]{2} 是兩個大寫英文字母，- 是一個減號，\d{8} 是八個數字，$ 是字串結尾。沒有 ^ 和 $ 時，字串裡只要有一段符合就算">
+        <title>一個正規表示式的每一段</title>
+        <rect class="hot" x="30" y="30" width="40" height="36" rx="6"/>
+        <text class="small mono" x="50" y="54" text-anchor="middle">^</text>
+        <rect class="acc" x="80" y="30" width="110" height="36" rx="6"/>
+        <text class="small mono" x="135" y="54" text-anchor="middle">[A-Z]{2}</text>
+        <rect class="soft" x="200" y="30" width="40" height="36" rx="6"/>
+        <text class="small mono" x="220" y="54" text-anchor="middle">-</text>
+        <rect class="acc" x="250" y="30" width="110" height="36" rx="6"/>
+        <text class="small mono" x="305" y="54" text-anchor="middle">\d{8}</text>
+        <rect class="hot" x="370" y="30" width="40" height="36" rx="6"/>
+        <text class="small mono" x="390" y="54" text-anchor="middle">$</text>
+        <text class="sm" x="50" y="88" text-anchor="middle">開頭</text>
+        <text class="sm" x="135" y="88" text-anchor="middle">兩個大寫字母</text>
+        <text class="sm" x="220" y="88" text-anchor="middle">減號</text>
+        <text class="sm" x="305" y="88" text-anchor="middle">八個數字</text>
+        <text class="sm" x="390" y="88" text-anchor="middle">結尾</text>
+        <text class="sm" x="240" y="130" text-anchor="middle">有 ^ 和 $：整個字串都要符合</text>
+        <text class="sm t-hot" x="240" y="156" text-anchor="middle">沒有：字串裡只要「有一段」符合就算</text>
+      </svg>
+      <figcaption>MatchString 預設是在字串裡「找」，不是「整個比」。驗證輸入時一定要加上 ^ 和 $。</figcaption>
+    </figure>
+    <p>格式有規則、但不是固定的分隔符號時（發票號碼、日期、交易紀錄），用正規表示式描述比較清楚。Go 的 <code>regexp</code> 套件先把字串編譯成 <code>*regexp.Regexp</code>，之後重複使用。編譯有成本，所以放在套件層級用 <code>MustCompile</code> 編譯一次：寫錯時程式一啟動就 panic，不會等到某個使用者剛好用到才發現。</p>
+    <pre class="code" data-src="chapters/24-text/match.go#invoiceNo,matchDemo"><code>var (
+	invoiceNo = regexp.MustCompile(`^[A-Z]{2}-\d{8}$`)
+	looseNo   = regexp.MustCompile(`[A-Z]{2}-\d{8}`) // 沒有 ^ 和 $：只要字串裡「有一段」符合就算
+)
+
+func matchDemo() {
+	for _, s := range []string{"AB-12345678", "AB-123456789", "發票 AB-12345678", "ab-12345678"} {
+		fmt.Printf("%q：完整比對 %v，部分比對 %v\n", s, invoiceNo.MatchString(s), looseNo.MatchString(s))
+	}
+}</code></pre>
+    <pre class="out" data-example="chapters/24-text#Example_matchDemo"><code>"AB-12345678"：完整比對 true，部分比對 true
+"AB-123456789"：完整比對 false，部分比對 true
+"發票 AB-12345678"：完整比對 false，部分比對 true
+"ab-12345678"：完整比對 false，部分比對 false</code></pre>
+    <ul class="notes">
+      <li>第二行是最常見的 bug：九位數字的號碼，在沒有錨點的版本裡「有一段」符合，就通過了（練習 6）。</li>
+      <li>正規表示式寫在反引號的原始字串裡，<code>\d</code> 不用寫成 <code>\\d</code>（<a href="08-strings-runes.html#basics">08 章</a>）。</li>
+      <li>*regexp.Regexp 可以被很多 goroutine 同時使用，放在套件層級是安全的。</li>
+    </ul>
+    <p>要的不只是「符不符合」，還要取出其中的幾段時，用括號分組。<code>(?&lt;name&gt;…)</code> 是有名字的群組（舊的程式碼常寫成 <code>(?P&lt;name&gt;…)</code>，意思一樣），<code>FindStringSubmatch</code> 回傳整段和每一個群組，<code>SubexpIndex</code> 用名字找出群組的位置。解析悠遊卡的交易紀錄：</p>
+    <pre class="code" data-src="chapters/24-text/match.go#trip,submatchDemo"><code>var trip = regexp.MustCompile(`^(?&lt;date&gt;\d{4}/\d{2}/\d{2}) (?&lt;time&gt;\d{2}:\d{2}) (?&lt;kind&gt;進站|出站) (?&lt;station&gt;\S+)(?: 扣款 (?&lt;fare&gt;\d+) 元)?$`)
+
+func submatchDemo() {
+	for _, line := range []string{
+		"2026/11/19 08:15 進站 台北車站",
+		"2026/11/19 08:41 出站 市政府 扣款 25 元",
+		"2026/11/19 08:41 轉乘 市政府",
+	} {
+		m := trip.FindStringSubmatch(line)
+		if m == nil {
+			fmt.Printf("看不懂：%s\n", line)
+			continue
+		}
+		fmt.Printf("%s %s %s 車資=%q\n",
+			m[trip.SubexpIndex("time")], m[trip.SubexpIndex("kind")],
+			m[trip.SubexpIndex("station")], m[trip.SubexpIndex("fare")])
+	}
+
+	amounts := regexp.MustCompile(`NT\$[\d,]+`)
+	fmt.Printf("%q\n", amounts.FindAllString("早餐 NT$85，午餐 NT$120，晚餐 NT$1,280", -1))
+}</code></pre>
+    <pre class="out" data-example="chapters/24-text#Example_submatchDemo"><code>08:15 進站 台北車站 車資=""
+08:41 出站 市政府 車資="25"
+看不懂：2026/11/19 08:41 轉乘 市政府
+["NT$85" "NT$120" "NT$1,280"]</code></pre>
+    <ul class="notes">
+      <li>回傳的 slice 第 0 個是整段符合的文字，第 1 個起是各個群組。用名字取，比數「第幾個括號」不容易出錯，以後在中間加一個群組也不會全部錯位。</li>
+      <li><code>(?:…)</code> 只分組、不擷取；後面的 <code>?</code> 讓整段可有可無。進站的紀錄沒有扣款，fare 群組就是空字串。</li>
+      <li>不符合時回傳 nil，一定要先檢查。</li>
+      <li>名稱裡有 All 的函式找出全部，第二個參數是最多幾個，-1 表示不限。另外還有回傳位置的 <code>Index</code> 系列，以及處理 []byte 的版本（沒有 String 的那些）。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="replace">
+    <h2 id="replace">3. regexp：取代與限制</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 186" role="img" aria-label="2026/11/19 被 (\d{4})/(\d{2})/(\d{2}) 分成三個群組 2026、11、19。取代字串 ${1}年${2}月${3}日 得到 2026年11月19日；寫成 $1年 時，Go 把 1年 整個當成群組名稱，找不到就變成空字串">
+        <title>取代字串裡引用群組</title>
+        <rect class="acc" x="60" y="20" width="80" height="34" rx="6"/>
+        <text class="sm mono" x="100" y="42" text-anchor="middle">2026</text>
+        <text class="sm mono" x="152" y="42" text-anchor="middle">/</text>
+        <rect class="acc" x="164" y="20" width="50" height="34" rx="6"/>
+        <text class="sm mono" x="189" y="42" text-anchor="middle">11</text>
+        <text class="sm mono" x="226" y="42" text-anchor="middle">/</text>
+        <rect class="acc" x="238" y="20" width="50" height="34" rx="6"/>
+        <text class="sm mono" x="263" y="42" text-anchor="middle">19</text>
+        <text class="sm mono t-acc" x="100" y="72" text-anchor="middle">$1</text>
+        <text class="sm mono t-acc" x="189" y="72" text-anchor="middle">$2</text>
+        <text class="sm mono t-acc" x="263" y="72" text-anchor="middle">$3</text>
+        <rect class="soft" x="16" y="92" width="448" height="34" rx="6"/>
+        <text class="sm mono" x="30" y="114">${1}年${2}月${3}日</text>
+        <text class="sm" x="300" y="114">→ 2026年11月19日</text>
+        <rect class="hot" x="16" y="134" width="448" height="34" rx="6"/>
+        <text class="sm mono" x="30" y="156">$1年$2月$3日</text>
+        <text class="sm" x="300" y="156">→ 空字串</text>
+        <text class="sm t-hot" x="240" y="182" text-anchor="middle">$1年 被讀成名稱「1年」的群組：不存在，就換成空的</text>
+      </svg>
+      <figcaption>群組名稱可以是字母、數字、底線，中文字也算字母。後面緊接著文字時，一律用大括號 ${1}。</figcaption>
+    </figure>
+    <p><code>ReplaceAllString</code> 把每一段符合的文字換掉，取代字串裡用 <code>$1</code> 或 <code>${1}</code> 引用群組，有名字的群組用 <code>${name}</code>。把斜線的日期換成其他格式：</p>
+    <pre class="code" data-src="chapters/24-text/replace.go#slashDate,replaceDemo"><code>var slashDate = regexp.MustCompile(`(\d{4})/(\d{2})/(\d{2})`)
+
+func replaceDemo() {
+	s := "訂位日期 2026/11/19，取消期限 2026/11/17"
+	fmt.Println(slashDate.ReplaceAllString(s, "$1-$2-$3"))
+	fmt.Printf("%q\n", slashDate.ReplaceAllString(s, "$1年$2月$3日"))
+	fmt.Println(slashDate.ReplaceAllString(s, "${1}年${2}月${3}日"))
+}</code></pre>
+    <pre class="out" data-example="chapters/24-text#Example_replaceDemo"><code>訂位日期 2026-11-19，取消期限 2026-11-17
+"訂位日期 ，取消期限 "
+訂位日期 2026年11月19日，取消期限 2026年11月17日</code></pre>
+    <p>第二行：日期全部不見了，也沒有任何錯誤。取代的結果需要計算時（換算、查表、統一格式），用 <code>ReplaceAllStringFunc</code>，它把每一段符合的文字交給你的函式，用回傳值取代。民國年換成西元年：</p>
+    <pre class="code" data-src="chapters/24-text/replace.go#rocDate,replaceFuncDemo"><code>var rocDate = regexp.MustCompile(`民國(\d+)年`)
+
+func replaceFuncDemo() {
+	s := "本店民國68年開幕，民國115年搬到現址"
+	out := rocDate.ReplaceAllStringFunc(s, func(m string) string {
+		y, err := strconv.Atoi(rocDate.FindStringSubmatch(m)[1])
+		if err != nil {
+			return m // 數字太大轉不過來時保留原文
+		}
+		return strconv.Itoa(y+1911) + "年"
+	})
+	fmt.Println(out)
+
+	price := regexp.QuoteMeta("NT$1.5") // 使用者輸入的文字裡有 $ 和 .，要當成一般字元
+	fmt.Println(price, regexp.MustCompile(price).MatchString("特價 NT$1.5 起"))
+}</code></pre>
+    <pre class="out" data-example="chapters/24-text#Example_replaceFuncDemo"><code>本店1979年開幕，2026年搬到現址
+NT\$1\.5 true</code></pre>
+    <ul class="notes">
+      <li>函式只拿到整段文字，要群組就在函式裡再呼叫一次 FindStringSubmatch。</li>
+      <li><code>regexp.QuoteMeta</code> 把 <code>$</code>、<code>.</code>、<code>(</code> 這些特殊字元加上反斜線。要搜尋使用者輸入的文字時，一定要先 QuoteMeta，不然「NT$1.5」裡的 . 會符合任何字元。</li>
+      <li>只是要換掉固定的文字，用 08 章的 strings.ReplaceAll 或 Replacer 就好，不需要 regexp。</li>
+    </ul>
+    <p>Go 的正規表示式語法叫做 <strong>RE2</strong>，和 Java、JavaScript、Python 的大致相同，但少了兩樣：lookahead／lookbehind（<code>(?=…)</code>）和 backreference（<code>\1</code>）。寫了不會悄悄失效，而是在編譯時就回傳錯誤：</p>
+    <pre class="code" data-src="chapters/24-text/replace.go#re2Demo"><code>func re2Demo() {
+	for _, expr := range []string{`\d+(?=元)`, `(\w)\1`, `[A-Z`} {
+		_, err := regexp.Compile(expr)
+		fmt.Println(err)
+	}
+}</code></pre>
+    <pre class="out" data-example="chapters/24-text#Example_re2Demo"><code>error parsing regexp: invalid or unsupported Perl syntax: `(?=`
+error parsing regexp: invalid escape sequence: `\1`
+error parsing regexp: missing closing ]: `[A-Z`</code></pre>
+
+    <section class="deep" aria-labelledby="linear">
+      <p class="tag">深入：第一次讀可以先跳過</p>
+      <h3 id="linear">為什麼 Go 不支援 lookahead？</h3>
+      <p>多數語言的正規表示式用「回溯」來比對：一條路走不通就退回去試下一條。遇到 <code>(a+)+$</code> 這種寫法和一個刻意構造的長字串，可能要試的路徑數量會隨著長度指數成長，一個請求就能讓伺服器的 CPU 卡住好幾秒，這種攻擊叫做 ReDoS。</p>
+      <p>RE2 不回溯，它保證比對的時間和輸入的長度成正比，不管正規表示式怎麼寫、輸入是什麼。代價就是放棄那些需要回溯才做得到的功能，lookahead 和 backreference 就是其中兩個。所以在 Go 裡，就算正規表示式或要比對的文字來自使用者，也不會因為回溯而被拖垮；正規表示式越長，比對越慢，但只是等比例變慢，不會指數成長。</p>
+      <p>真的需要那些功能時，通常換個寫法就好：<code>\d+(?=元)</code> 可以寫成 <code>(\d+)元</code> 再取群組；「兩個相同的字元」可以先比對再用程式檢查。</p>
+    </section>
+  </section>
+
+  <section aria-labelledby="template">
+    <h2 id="template">4. text/template</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 196" role="img" aria-label="範本加上資料，經過 Execute 寫到 io.Writer。範本裡的 {{.Shop}} 取欄位，{{range .Items}} 對每個品項重複，{{if .Paid}} 決定要不要印，{{.Total}} 呼叫方法">
+        <title>範本加資料等於文字</title>
+        <rect class="soft" x="16" y="16" width="190" height="122" rx="8"/>
+        <text class="sm" x="111" y="36" text-anchor="middle">範本</text>
+        <text class="sm mono" x="28" y="60">{{.Shop}}</text>
+        <text class="sm mono" x="28" y="82">{{range .Items}}</text>
+        <text class="sm mono" x="28" y="104">{{if .Paid}}</text>
+        <text class="sm mono" x="28" y="126">{{.Total}}</text>
+        <rect class="soft" x="16" y="150" width="190" height="34" rx="8"/>
+        <text class="sm" x="111" y="172" text-anchor="middle">資料：Receipt</text>
+        <path class="wire" d="M206 77 H236 V120"/>
+        <path class="wire" d="M206 167 H236 V132"/>
+        <path class="wire" d="M236 126 H254"/>
+        <path class="tip" d="M266 126 L254 120 L254 132 Z"/>
+        <rect class="acc" x="266" y="104" width="80" height="44" rx="8"/>
+        <text class="sm mono" x="306" y="131" text-anchor="middle">Execute</text>
+        <path class="wire" d="M346 126 H360"/>
+        <path class="tip" d="M372 126 L360 120 L360 132 Z"/>
+        <rect class="soft" x="372" y="84" width="92" height="84" rx="8"/>
+        <text class="sm" x="418" y="112" text-anchor="middle">收據</text>
+        <text class="sm" x="418" y="134" text-anchor="middle">寫到</text>
+        <text class="sm mono" x="418" y="156" text-anchor="middle">io.Writer</text>
+        <text class="sm" x="306" y="40" text-anchor="middle">{{ }} 以外的</text>
+        <text class="sm" x="306" y="62" text-anchor="middle">文字原樣輸出</text>
+      </svg>
+      <figcaption>範本是一段文字，裡面用 {{ }} 標出要填資料、要重複、要判斷的地方。資料可以是 struct、map 或任何值。</figcaption>
+    </figure>
+    <p>收據、通知信、設定檔、程式碼產生器，這類「格式固定、資料會變」的輸出用 <code>text/template</code>。範本裡的 <code>.</code>（dot）是目前的資料，<code>{{.Shop}}</code> 取欄位，沒有參數的方法也能直接寫成 <code>{{.Total}}</code>：</p>
+    <pre class="code" data-src="chapters/24-text/receipt.go#ReceiptItem,ReceiptItem.Subtotal,Receipt,Receipt.Total"><code>type ReceiptItem struct {
+	Name  string
+	Qty   int
+	Price int
+}
+
+func (it ReceiptItem) Subtotal() int { return it.Qty * it.Price }
+
+type Receipt struct {
+	Shop  string
+	Table int
+	Items []ReceiptItem
+	Paid  bool
+	Note  string
+}
+
+func (r Receipt) Total() int {
+	sum := 0
+	for _, it := range r.Items {
+		sum += it.Subtotal()
+	}
+	return sum
+}</code></pre>
+    <pre class="code" data-src="chapters/24-text/receipt.go#receiptText,receiptTmpl,receiptDemo"><code>const receiptText = `{{.Shop}} 第 {{.Table}} 桌
+{{range .Items -}}
+{{.Name}} x{{.Qty}} {{.Subtotal}} 元
+{{else -}}
+（沒有品項）
+{{end -}}
+合計 {{.Total}} 元{{if .Paid}}（已付款）{{end}}
+{{with .Note}}備註：{{.}}
+{{end -}}
+`
+
+var receiptTmpl = template.Must(template.New("receipt").Parse(receiptText))
+
+func receiptDemo() {
+	receipts := []Receipt{
+		{Shop: "阿嬤便當", Table: 7, Paid: true, Note: "統編 12345678",
+			Items: []ReceiptItem{{"排骨飯", 2, 90}, {"滷蛋", 3, 15}}},
+		{Shop: "阿嬤便當", Table: 3},
+	}
+	for _, r := range receipts {
+		if err := receiptTmpl.Execute(os.Stdout, r); err != nil {
+			fmt.Println(err)
+		}
+	}
+}</code></pre>
+    <pre class="out" data-example="chapters/24-text#Example_receiptDemo"><code>阿嬤便當 第 7 桌
+排骨飯 x2 180 元
+滷蛋 x3 45 元
+合計 225 元（已付款）
+備註：統編 12345678
+阿嬤便當 第 3 桌
+（沒有品項）
+合計 0 元</code></pre>
+    <ul class="notes">
+      <li><code>{{range .Items}}</code> 裡面的 dot 變成每一個品項；<code>{{else}}</code> 是 slice 為空時的內容。</li>
+      <li><code>{{if .Paid}}</code> 的條件是零值就不成立：false、0、""、nil、長度 0 的 slice 和 map。</li>
+      <li><code>{{with .Note}}</code> 不是空的才執行，而且裡面的 dot 換成 Note 本身，所以寫 <code>{{.}}</code>。</li>
+      <li><code>{{-</code> 和 <code>-}}</code> 吃掉那一側所有的空白和換行。範本可以照邏輯分行寫，輸出又不會多出空行。橫線的另一側一定要有空白：<code>{{- .Name}}</code> 才是去空白，<code>{{-3}}</code> 是數字 -3。</li>
+      <li>其他常用的：<code>{{printf "%05d" .Table}}</code>、<code>{{len .Items}}</code>、<code>{{index .Items 0}}</code>、<code>{{if eq .Table 7}}</code>，以及用 <code>|</code> 把前一個結果當成下一個函式的最後一個參數。</li>
+    </ul>
+    <p>範本在 Parse 時只檢查語法，欄位存不存在要到 Execute 才知道。map 少了 key 預設不算錯，印出 <code>&lt;no value&gt;</code>：</p>
+    <pre class="code" data-src="chapters/24-text/receipt.go#execErrorDemo"><code>func execErrorDemo() {
+	t := template.Must(template.New("typo").Parse("{{.Shp}}\n"))
+	fmt.Println(t.Execute(os.Stdout, Receipt{Shop: "阿嬤便當"}))
+
+	data := map[string]string{"shop": "阿嬤便當"}
+	loose := template.Must(template.New("loose").Parse("{{.shop}} {{.phone}}\n"))
+	if err := loose.Execute(os.Stdout, data); err != nil {
+		fmt.Println(err)
+	}
+	strict := template.Must(template.New("strict").Option("missingkey=error").Parse("{{.shop}} {{.phone}}\n"))
+	var b strings.Builder
+	err := strict.Execute(&amp;b, data)
+	fmt.Printf("寫出了 %q\n%v\n", b.String(), err)
+}</code></pre>
+    <pre class="out" data-example="chapters/24-text#Example_execErrorDemo"><code>template: typo:1:2: executing "typo" at &lt;.Shp&gt;: can't evaluate field Shp in type main.Receipt
+阿嬤便當 &lt;no value&gt;
+寫出了 "阿嬤便當 "
+template: strict:1:12: executing "strict" at &lt;.phone&gt;: map has no entry for key "phone"</code></pre>
+    <ul class="notes">
+      <li>錯誤訊息指出範本名稱、行號和位置（<code>typo:1:2</code>），以及是哪一個動作出錯。</li>
+      <li>資料是 map 時，加上 <code>Option("missingkey=error")</code>，少了 key 才會變成錯誤。</li>
+      <li>Execute 出錯時，錯誤之前的內容<strong>已經寫出去了</strong>（這裡的「阿嬤便當 」）。直接寫到檔案或 HTTP 回應，使用者會拿到半張收據、半個網頁。先寫到 bytes.Buffer，成功了再一次寫出去（練習 5）。</li>
+      <li>範本在套件層級用 <code>template.Must</code> 解析一次，和 regexp 的 MustCompile 一樣：寫錯了一啟動就知道，也不用每次都重新解析。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="compose">
+    <h2 id="compose">5. 函式與組合範本</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 190" role="img" aria-label="base 範本定義 notice，裡面用 block 留了一個 body 的位置，預設內容是今天正常營業。holiday 是 base 的複本，再定義新的 body，內容是公休。兩份範本執行 notice 得到兩種公告">
+        <title>block 留位置，Clone 之後換內容</title>
+        <rect class="soft" x="16" y="16" width="200" height="88" rx="8"/>
+        <text class="sm mono bold" x="116" y="38" text-anchor="middle">base</text>
+        <text class="sm mono" x="28" y="62">notice：</text>
+        <rect class="acc" x="40" y="70" width="164" height="26" rx="4"/>
+        <text class="sm" x="122" y="88" text-anchor="middle">body：正常營業</text>
+        <path class="wire" d="M216 60 H252"/>
+        <path class="tip" d="M264 60 L252 54 L252 66 Z"/>
+        <text class="sm mono" x="240" y="50" text-anchor="middle">Clone</text>
+        <rect class="soft" x="264" y="16" width="200" height="88" rx="8"/>
+        <text class="sm mono bold" x="364" y="38" text-anchor="middle">holiday</text>
+        <text class="sm mono" x="276" y="62">notice：</text>
+        <rect class="hot" x="288" y="70" width="164" height="26" rx="4"/>
+        <text class="sm" x="370" y="88" text-anchor="middle">body：公休一天</text>
+        <path class="wire" d="M116 104 V124"/>
+        <path class="tip" d="M116 136 L110 124 L122 124 Z"/>
+        <path class="wire" d="M364 104 V124"/>
+        <path class="tip" d="M364 136 L358 124 L370 124 Z"/>
+        <rect class="soft" x="16" y="136" width="200" height="40" rx="8"/>
+        <text class="sm" x="116" y="161" text-anchor="middle">【阿嬤便當】今天正常營業</text>
+        <rect class="soft" x="264" y="136" width="200" height="40" rx="8"/>
+        <text class="sm" x="364" y="161" text-anchor="middle">【阿嬤便當】公休一天</text>
+      </svg>
+      <figcaption>共用的部分寫一次，會變的部分用 block 留一個有預設內容的位置。要不同的版本時複製一份，只重新定義那一塊。</figcaption>
+    </figure>
+    <p>範本變多之後，有三個工具：<strong>FuncMap</strong> 讓範本可以呼叫你的函式；<strong>define、block、template</strong> 把範本拆成有名字的小塊；<strong>embed</strong> 把範本檔編進執行檔（<a href="20-files.html#fs">20 章</a>）。店門口的公告，一般的版本和公休的版本共用同一個樣子：</p>
+    <pre class="code" data-src="chapters/24-text/templates/notice.tmpl"><code>{{define "notice" -}}
+【{{.Shop}}】{{block "body" .}}今天正常營業。{{end}}
+營業時間 {{join .Hours "、"}}，外送滿 {{money .MinOrder}} 元免運。
+{{end}}</code></pre>
+    <pre class="code" data-src="chapters/24-text/templates/holiday.tmpl"><code>{{define "body"}}{{.Date}} 公休一天，造成不便請見諒。{{end}}</code></pre>
+    <pre class="code" data-src="chapters/24-text/notice.go"><code>package main
+
+import (
+	"embed"
+	"fmt"
+	"os"
+	"strconv"
+	"strings"
+	"text/template"
+)
+
+//go:embed templates/*.tmpl
+var templateFS embed.FS
+
+// money 把 1280 寫成 1,280：從個位數往前，每三位插一個逗號。
+func money(n int) string {
+	s := strconv.Itoa(n)
+	var b strings.Builder
+	for i, d := range s {
+		if i &gt; 0 &amp;&amp; (len(s)-i)%3 == 0 {
+			b.WriteByte(',')
+		}
+		b.WriteRune(d)
+	}
+	return b.String()
+}
+
+// funcs 是範本裡可以呼叫的函式，要在 Parse 之前用 Funcs 加進去。
+var funcs = template.FuncMap{
+	"money": money,
+	"join":  strings.Join,
+}
+
+// base 是一般的公告；holiday 複製一份 base，再把 body 換成公休的內容。
+var (
+	base    = template.Must(template.New("").Funcs(funcs).ParseFS(templateFS, "templates/notice.tmpl"))
+	holiday = template.Must(template.Must(base.Clone()).ParseFS(templateFS, "templates/holiday.tmpl"))
+)
+
+// Notice 是店門口的公告。
+type Notice struct {
+	Shop     string
+	Hours    []string
+	MinOrder int
+	Date     string
+}
+
+func noticeDemo() {
+	n := Notice{Shop: "阿嬤便當", Hours: []string{"10:30-14:00", "17:00-20:30"}, MinOrder: 1500, Date: "11/24（一）"}
+	for _, t := range []*template.Template{base, holiday} {
+		if err := t.ExecuteTemplate(os.Stdout, "notice", n); err != nil {
+			fmt.Println(err)
+		}
+	}
+}</code></pre>
+    <pre class="out" data-example="chapters/24-text#Example_noticeDemo"><code>【阿嬤便當】今天正常營業。
+營業時間 10:30-14:00、17:00-20:30，外送滿 1,500 元免運。
+【阿嬤便當】11/24（一） 公休一天，造成不便請見諒。
+營業時間 10:30-14:00、17:00-20:30，外送滿 1,500 元免運。</code></pre>
+    <ul class="notes">
+      <li><code>{{define "名稱"}}…{{end}}</code> 定義一塊有名字的範本，<code>{{template "名稱" .}}</code> 在別的地方用它。<code>{{block "body" .}}預設{{end}}</code> 等於「定義 body，並且在這裡用它」。</li>
+      <li>Funcs 要在 Parse 之前呼叫：解析時遇到 <code>money</code>，範本要已經知道它是什麼，不然是語法錯誤。函式可以回傳一個值，或一個值加一個 error；回傳 error 時 Execute 會停下來。</li>
+      <li>Clone 複製整組範本，複本裡重新定義 body 不會影響原本的。網站的「共用版型，每一頁填自己的內容」就是這個做法（練習 5）。</li>
+      <li>範本檔有好幾個時，ExecuteTemplate 用名稱指定要執行哪一個；ParseFS 解析的檔案，名稱是檔名（例如 notice.tmpl）。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="html">
+    <h2 id="html">6. html/template</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 214" role="img" aria-label="同一個使用者輸入，在 HTML 內容裡被跳脫成 &amp;lt;b&amp;gt;，在 href 屬性裡的 javascript: 網址被換成 #ZgotmplZ，在 onclick 的 JavaScript 裡被寫成有跳脫的 JavaScript 字串">
+        <title>同一個值，三種跳脫</title>
+        <rect class="hot" x="150" y="12" width="180" height="34" rx="8"/>
+        <text class="sm" x="240" y="34" text-anchor="middle">使用者輸入的值</text>
+        <path class="wire" d="M240 46 V58 H85 V70"/>
+        <path class="wire" d="M240 58 V70"/>
+        <path class="wire" d="M240 58 H395 V70"/>
+        <path class="tip" d="M85 82 L79 70 L91 70 Z"/>
+        <path class="tip" d="M240 82 L234 70 L246 70 Z"/>
+        <path class="tip" d="M395 82 L389 70 L401 70 Z"/>
+        <rect class="soft" x="16" y="82" width="138" height="48" rx="8"/>
+        <text class="sm" x="85" y="102" text-anchor="middle">HTML 內容</text>
+        <text class="sm mono" x="85" y="121" text-anchor="middle">&lt;p&gt;{{.}}&lt;/p&gt;</text>
+        <rect class="soft" x="171" y="82" width="138" height="48" rx="8"/>
+        <text class="sm" x="240" y="102" text-anchor="middle">屬性裡的網址</text>
+        <text class="sm mono" x="240" y="121" text-anchor="middle">href="{{.}}"</text>
+        <rect class="soft" x="326" y="82" width="138" height="48" rx="8"/>
+        <text class="sm" x="395" y="102" text-anchor="middle">JavaScript</text>
+        <text class="sm mono" x="395" y="121" text-anchor="middle">onclick="f({{.}})"</text>
+        <path class="wire" d="M85 130 V146"/>
+        <path class="wire" d="M240 130 V146"/>
+        <path class="wire" d="M395 130 V146"/>
+        <rect class="acc" x="16" y="146" width="138" height="48" rx="8"/>
+        <text class="sm mono" x="85" y="166" text-anchor="middle">&amp;lt;b&amp;gt;</text>
+        <text class="sm" x="85" y="185" text-anchor="middle">變成文字</text>
+        <rect class="acc" x="171" y="146" width="138" height="48" rx="8"/>
+        <text class="sm mono" x="240" y="166" text-anchor="middle">#ZgotmplZ</text>
+        <text class="sm" x="240" y="185" text-anchor="middle">危險的網址被換掉</text>
+        <rect class="acc" x="326" y="146" width="138" height="48" rx="8"/>
+        <text class="sm mono" x="395" y="166" text-anchor="middle">"&#92;u003cb…"</text>
+        <text class="sm" x="395" y="185" text-anchor="middle">變成 JS 字串</text>
+      </svg>
+      <figcaption>html/template 讀得懂 HTML，知道每個 {{ }} 落在內容、屬性、網址還是 JavaScript 裡，各自用對的方式跳脫。</figcaption>
+    </figure>
+    <p>產生 HTML 時，資料裡只要有使用者寫的字，就可能被塞進 <code>&lt;script&gt;</code>。這種攻擊叫做 XSS：別人的瀏覽器打開你的網頁，就會執行攻擊者寫的程式，偷走登入狀態。<code>html/template</code> 的 API 和 text/template 完全一樣，差別是它會依照位置自動跳脫。同一個範本、同一份惡意的評論，兩個套件各跑一次：</p>
+    <pre class="code" data-src="chapters/24-text/html.go#Review,reviewPage,escapeDemo"><code>type Review struct {
+	Name    string
+	Website string
+	Comment string
+}
+
+const reviewPage = `&lt;p&gt;&lt;a href="{{.Website}}"&gt;{{.Name}}&lt;/a&gt;：{{.Comment}}&lt;/p&gt;
+&lt;button onclick="reply({{.Name}})"&gt;回覆&lt;/button&gt;
+`
+
+func escapeDemo() {
+	r := Review{
+		Name:    `&lt;b&gt;阿明&lt;/b&gt;`,
+		Website: `javascript:alert(1)`,
+		Comment: `好吃&lt;script&gt;steal()&lt;/script&gt;`,
+	}
+
+	fmt.Println("text/template：")
+	t := template.Must(template.New("review").Parse(reviewPage))
+	if err := t.Execute(os.Stdout, r); err != nil {
+		fmt.Println(err)
+	}
+
+	fmt.Println("html/template：")
+	h := htmltemplate.Must(htmltemplate.New("review").Parse(reviewPage))
+	if err := h.Execute(os.Stdout, r); err != nil {
+		fmt.Println(err)
+	}
+}</code></pre>
+    <pre class="out" data-example="chapters/24-text#Example_escapeDemo"><code>text/template：
+&lt;p&gt;&lt;a href="javascript:alert(1)"&gt;&lt;b&gt;阿明&lt;/b&gt;&lt;/a&gt;：好吃&lt;script&gt;steal()&lt;/script&gt;&lt;/p&gt;
+&lt;button onclick="reply(&lt;b&gt;阿明&lt;/b&gt;)"&gt;回覆&lt;/button&gt;
+html/template：
+&lt;p&gt;&lt;a href="#ZgotmplZ"&gt;&amp;lt;b&amp;gt;阿明&amp;lt;/b&amp;gt;&lt;/a&gt;：好吃&amp;lt;script&amp;gt;steal()&amp;lt;/script&amp;gt;&lt;/p&gt;
+&lt;button onclick="reply(&amp;#34;\u003cb\u003e阿明\u003c/b\u003e&amp;#34;)"&gt;回覆&lt;/button&gt;</code></pre>
+    <ul class="notes">
+      <li>text/template 把輸入原封不動放進去：<code>&lt;script&gt;</code> 會被瀏覽器執行，連結點下去會執行 javascript: 網址。</li>
+      <li>html/template 在 HTML 內容裡把 <code>&lt;</code> 換成 <code>&amp;lt;</code>；在 href 裡發現 javascript: 這種不安全的網址，換成 <code>#ZgotmplZ</code>（看到這個字串就表示有值被擋下來了）；在 onclick 裡把值寫成跳脫過的 JavaScript 字串。</li>
+      <li>兩個套件的名稱都是 template，同一個檔案要同時用時，替其中一個取別名（這裡的 htmltemplate）。實際的程式裡，產生 HTML 一律用 html/template，就不會有這個問題。</li>
+    </ul>
+    <p>有時候程式自己產生了一段 HTML，確定是安全的，不想被跳脫。把它轉成 <code>template.HTML</code> 型別，html/template 就會原樣輸出：</p>
+    <pre class="code" data-src="chapters/24-text/html.go#trustedDemo"><code>func trustedDemo() {
+	h := htmltemplate.Must(htmltemplate.New("badge").Parse("&lt;p&gt;{{.}}&lt;/p&gt;\n"))
+	for _, v := range []any{"&lt;em&gt;招牌&lt;/em&gt;", htmltemplate.HTML("&lt;em&gt;招牌&lt;/em&gt;")} {
+		if err := h.Execute(os.Stdout, v); err != nil {
+			fmt.Println(err)
+		}
+	}
+}</code></pre>
+    <pre class="out" data-example="chapters/24-text#Example_trustedDemo"><code>&lt;p&gt;&amp;lt;em&amp;gt;招牌&amp;lt;/em&amp;gt;&lt;/p&gt;
+&lt;p&gt;&lt;em&gt;招牌&lt;/em&gt;&lt;/p&gt;</code></pre>
+    <p>template.HTML 等於關掉保護，只能用在完全由程式控制的內容。把使用者的輸入轉成 template.HTML，就是自己把 XSS 放了進來。同樣的型別還有 template.URL、template.JS、template.CSS。</p>
+  </section>
+
+  <section aria-labelledby="pitfalls">
+    <h2 id="pitfalls">常見錯誤</h2>
+    <h3 id="pit-anchor">1. 驗證輸入的正規表示式沒有 ^ 和 $</h3>
+    <p>MatchString 在字串裡找，只要有一段符合就回傳 true。九位數的號碼、前後夾著其他文字的輸入都會通過（第 2 節、練習 6）。</p>
+
+    <h3 id="pit-compile-loop">2. 每次呼叫都重新編譯正規表示式或範本</h3>
+    <p>編譯比比對慢得多，放在迴圈或每個請求裡，效能就浪費在重複的工作上。在套件層級用 MustCompile、template.Must 編譯一次（第 2、4 節）。</p>
+
+    <h3 id="pit-dollar">3. 取代字串的 $1 後面接著文字</h3>
+    <p>名稱會把後面的字母、數字、底線、中文字一起吃進去，結果是空字串。一律寫成 ${1}（第 3 節）。</p>
+
+    <h3 id="pit-regexp-overuse">4. 簡單的事也用正規表示式</h3>
+    <p>固定的前綴、分隔符號，用 HasPrefix、Cut、Fields 更快也更好讀。正規表示式留給真的有模式的格式（第 1 節）。</p>
+
+    <h3 id="pit-text-html">5. 用 text/template 產生 HTML</h3>
+    <p>它不會跳脫任何東西，使用者的輸入直接變成網頁的程式碼。產生 HTML 一律用 html/template（第 6 節、練習 2）。</p>
+
+    <h3 id="pit-trusted">6. 把使用者的輸入轉成 template.HTML</h3>
+    <p>等於告訴 html/template「這段不用檢查」。這個型別只給程式自己產生、確定安全的內容（第 6 節）。</p>
+
+    <h3 id="pit-partial">7. 範本直接寫到檔案或 HTTP 回應</h3>
+    <p>Execute 出錯時，前半段已經寫出去，收不回來。先寫到 bytes.Buffer，成功了再寫出去（第 4 節、練習 5）。</p>
+
+    <h3 id="pit-funcs-order">8. 在 Parse 之後才呼叫 Funcs</h3>
+    <p>Parse 遇到不認得的函式名稱就是語法錯誤。先 Funcs、再 Parse（第 5 節）。</p>
+  </section>
+
+  <section aria-labelledby="java">
+    <h2 id="java">從 Java 來的你</h2>
+    <div class="table-wrap">
+      <table class="vs">
+        <thead><tr><th scope="col">主題</th><th scope="col">Java</th><th scope="col">Go</th></tr></thead>
+        <tbody>
+          <tr><th scope="row">切字串</th><td class="java"><code>"a,b".split(",")</code>，參數是正規表示式</td><td><code>strings.Split</code>，參數是一般字串；要用正規表示式時寫 <code>re.Split</code></td></tr>
+          <tr><th scope="row">編譯</th><td class="java"><code>Pattern.compile</code></td><td><code>regexp.MustCompile</code>（寫錯 panic）、<code>regexp.Compile</code>（回傳錯誤）</td></tr>
+          <tr><th scope="row">取群組</th><td class="java"><code>Matcher.find()</code>、<code>group("name")</code></td><td><code>FindStringSubmatch</code> 加 <code>SubexpIndex("name")</code></td></tr>
+          <tr><th scope="row">語法</th><td class="java">支援 lookahead、backreference（回溯）</td><td>RE2：不支援，保證線性時間</td></tr>
+          <tr><th scope="row">取代</th><td class="java"><code>replaceAll(regex, "$1")</code></td><td><code>re.ReplaceAllString(s, "${1}")</code></td></tr>
+          <tr><th scope="row">轉數字</th><td class="java"><code>Integer.parseInt</code> 丟 <code>NumberFormatException</code></td><td><code>strconv.Atoi</code> 回傳 <code>*strconv.NumError</code></td></tr>
+          <tr><th scope="row">範本</th><td class="java">第三方的 Thymeleaf、FreeMarker</td><td>標準庫的 <code>text/template</code>、<code>html/template</code></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>Java 的 String.split 參數是正規表示式，<code>split(".")</code> 會切出空陣列；Go 的 strings.Split 就是字面上的字串，<code>Split(s, ".")</code> 就是用點切。兩邊搬程式碼的時候，這是最容易踩到的差別。</p>
+  </section>
+
+  <section aria-labelledby="exercises">
+    <h2 id="exercises">練習</h2>
+    <p>題目在 <code>exercises/24-text/exercises.go</code>。</p>
+    <pre class="shell"><code>go test ./exercises/24-text/                  <span class="c"># 跑全部練習</span>
+go test ./exercises/24-text/ -run TestMask    <span class="c"># 只跑一題</span>
+go test -tags solution ./exercises/24-text/   <span class="c"># 跑參考解答</span></code></pre>
+    <ol class="exercises">
+      <li>
+        <h3><span class="level l1">入門</span>練習 1：店家設定</h3>
+        <p>分號隔開的 key=value。</p>
+        <pre class="code" data-src="exercises/24-text/exercises.go#ParseKV"><code>func ParseKV(s string) (map[string]string, error) {
+	// TODO: 實作
+	return nil, nil
+}</code></pre>
+        <p>測試：<code>TestParseKV</code>。</p>
+        <details><summary>提示</summary><p><code>strings.SplitSeq(s, ";")</code> 一段一段給，<code>strings.Cut(part, "=")</code> 只在第一個 = 切開，第三個回傳值告訴你有沒有 =。先檢查 map 裡有沒有這個 key 再放進去。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l1">入門</span>練習 2：評論清單</h3>
+        <p>使用者寫的名字和評論，放進 HTML 之前要跳脫。</p>
+        <pre class="code" data-src="exercises/24-text/doc.go#Review"><code>type Review struct {
+	Name    string
+	Stars   int
+	Comment string
+}</code></pre>
+        <pre class="code" data-src="exercises/24-text/exercises.go#RenderReviews"><code>func RenderReviews(w io.Writer, reviews []Review) error {
+	// TODO: 實作
+	return nil
+}</code></pre>
+        <p>測試：<code>TestRenderReviews</code>。</p>
+        <details><summary>提示</summary><p>用 html/template，資料直接傳 slice。<code>{{if .}}…{{else}}…{{end}}</code> 處理沒有評論的情況，裡面再用 range。換行就寫在範本裡，注意不要多出空行。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l2">進階</span>練習 3：遮蔽個資</h3>
+        <p>客服紀錄裡的手機號碼和 email。</p>
+        <pre class="code" data-src="exercises/24-text/exercises.go#Mask"><code>func Mask(s string) string {
+	// TODO: 實作
+	return ""
+}</code></pre>
+        <p>測試：<code>TestMask</code>。</p>
+        <details><summary>提示</summary><p>手機號碼的寫法不只一種，輸出要統一，所以用 ReplaceAllStringFunc，在函式裡取出前 4 碼和後 3 碼的群組。<code>\b</code> 是英文字母、數字和其他字元的交界，前後加上它，連著其他英數字的就不會被當成手機號碼。email 用 ReplaceAllString 和 <code>${1}</code> 就夠了。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l2">進階</span>練習 4：從文字裡找發票</h3>
+        <p>格式有變化，還要統一日期的寫法。</p>
+        <pre class="code" data-src="exercises/24-text/doc.go#Invoice"><code>type Invoice struct {
+	Number string // 例如 AB-12345678
+	Date   string // 一律是 2006-01-02 的格式
+	Amount int    // 新台幣，單位是元
+}</code></pre>
+        <pre class="code" data-src="exercises/24-text/exercises.go#FindInvoices"><code>func FindInvoices(text string) []Invoice {
+	// TODO: 實作
+	return nil
+}</code></pre>
+        <p>測試：<code>TestFindInvoices</code>。</p>
+        <details><summary>提示</summary><p>年、月、日各用一個命名群組，分隔符號寫成 <code>[/-]</code>。<code>FindAllStringSubmatch(text, -1)</code> 一次找出全部，每一筆再用 SubexpIndex 取值。金額先用 strings.ReplaceAll 拿掉逗號再轉數字。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l3">挑戰</span>練習 5：網站的版型</h3>
+        <p>一個版型、很多頁面，每一頁有自己的內容。</p>
+        <pre class="code" data-src="exercises/24-text/exercises.go#Site,NewSite,Site.Render"><code>type Site struct {
+	// TODO: 加上需要的欄位
+}
+
+func NewSite(fsys fs.FS) (*Site, error) {
+	// TODO: 實作
+	return &amp;Site{}, nil
+}
+
+func (s *Site) Render(w io.Writer, name string, data any) error {
+	// TODO: 實作
+	return nil
+}</code></pre>
+        <p>測試：<code>TestSite</code>，用 <code>testing/fstest</code> 的 MapFS 當成檔案系統。</p>
+        <details><summary>提示</summary><p>照第 5 節的做法：先解析 layout.html，每個頁面 Clone 一份，再把那個頁面的檔案解析進去，存在 map 裡。如果把所有頁面解析進同一組範本，後面的 content 會蓋掉前面的。用 <code>fs.Glob(fsys, "pages/*.html")</code> 找頁面，<code>path.Base</code> 和 <code>strings.TrimSuffix</code> 取出名稱。Render 先寫到 bytes.Buffer（常見錯誤 7）。</p></details>
+      </li>
+      <li>
+        <h3><span class="level fix">找錯</span>練習 6：手機號碼的驗證</h3>
+        <p>格式不對的號碼也通過了。</p>
+        <pre class="code" data-src="exercises/24-text/exercises.go#phonePattern,ValidPhone"><code>var phonePattern = regexp.MustCompile(`09\d{2}-?\d{3}-?\d{3}`)
+
+func ValidPhone(s string) bool {
+	return phonePattern.MatchString(s)
+}</code></pre>
+        <p>測試：<code>TestValidPhone</code>。</p>
+        <details><summary>提示</summary><p>常見錯誤 1。</p></details>
+      </li>
+    </ol>
+    <p><a href="https://github.com/xinqilin/GO-Playground/blob/main/exercises/24-text/solution.go">參考解答</a>：先自己寫完再看。測試通過的寫法都是對的。</p>
+  </section>
+
+  <section aria-labelledby="recap">
+    <h2 id="recap">重點回顧</h2>
+    <ul class="recap">
+      <li>有固定分隔符號的格式，用 Lines、Fields、Cut 加 strconv 拆，錯誤帶上行號。</li>
+      <li>strconv 的錯誤是 *NumError，用 errors.Is 分辨 ErrSyntax 和 ErrRange。</li>
+      <li>正規表示式在套件層級 MustCompile 一次；驗證輸入要有 ^ 和 $。</li>
+      <li>命名群組加 SubexpIndex 取值；不符合時回傳 nil。</li>
+      <li>取代字串寫 ${1}；結果要計算時用 ReplaceAllStringFunc；使用者的文字先 QuoteMeta。</li>
+      <li>RE2 沒有 lookahead 和 backreference，換來不會被輸入拖垮的線性時間。</li>
+      <li>text/template：dot 是目前的資料，range、if、with 會改變 dot；{{- -}} 控制空白。</li>
+      <li>範本的錯誤在 Execute 才出現，先寫到 buffer 再送出。</li>
+      <li>FuncMap 在 Parse 之前加；block 留位置，Clone 之後重新定義。</li>
+      <li>HTML 一律用 html/template，template.HTML 只給程式自己產生的內容。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="further">
+    <h2 id="further">延伸閱讀</h2>
+    <ul class="notes">
+      <li>套件文件：<a href="https://pkg.go.dev/regexp">regexp</a>、<a href="https://pkg.go.dev/regexp/syntax">regexp/syntax</a>（完整的語法表）、<a href="https://pkg.go.dev/strconv">strconv</a>、<a href="https://pkg.go.dev/text/template">text/template</a>（所有動作和內建函式）、<a href="https://pkg.go.dev/html/template">html/template</a>（開頭的 Security Model 一段）。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="run">
+    <h2 id="run">動手跑</h2>
+    <p class="label">在 repo 根目錄</p>
+    <pre class="shell"><code>go run ./chapters/24-text                <span class="c"># 依序執行本章所有示範</span>
+go test ./chapters/24-text               <span class="c"># 驗證頁面上的每一段輸出</span>
+go test ./exercises/24-text/             <span class="c"># 做練習</span></code></pre>
+    <p><a href="https://github.com/xinqilin/GO-Playground/tree/main/chapters/24-text">在 GitHub 看本章完整程式碼</a>，或看<a href="https://github.com/xinqilin/GO-Playground/tree/main/exercises/24-text">練習題</a>。</p>
+  </section>
+</main>
+
+<nav class="pager" aria-label="章節導覽">
+  <a class="prev" href="23-json.html">← 23 JSON 與資料編碼</a>
+  <a class="home" href="index.html">目錄</a>
+  <a class="next" href="25-logging.html">25 日誌 →</a>
+</nav>
+</body>
+</html>

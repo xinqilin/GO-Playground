@@ -4,132 +4,689 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>泛型｜Go 圖解手冊</title>
-<meta name="description" content="Go 的泛型：型別參數、型別限制與 ~ 的意思、泛型型別，以及 Go 1.27 的 generic method。">
+<meta name="description" content="Go 的泛型：型別參數、型別限制、comparable 與 cmp.Ordered、型別集合與 ~、型別推論與部分實例化、泛型型別、Go 1.27 的 generic method，以及什麼時候該用、什麼時候不該用泛型，附可執行的練習題。">
 <link rel="stylesheet" href="assets/style.css">
 </head>
 <body>
 <header class="site">
   <a href="index.html">Go 圖解手冊</a>
-  <span class="count">12 / 24</span>
+  <span class="count">12 / 33</span>
 </header>
 
-<main class="page">
+<main class="page long">
   <header class="hero">
     <div class="num" aria-hidden="true">12</div>
     <p class="eyebrow">Part 2 · 型別系統 · 第 12 章</p>
     <h1>泛型</h1>
-    <p class="analogy">泛型是一個模具：形狀先刻好，要用時才決定倒進去的是 int 還是 string。</p>
+    <p class="analogy">泛型是一個模具：形狀先刻好，要用的時候再決定倒進去的是 int、string 還是你自己的型別。型別檢查仍然在編譯時完成。</p>
   </header>
 
-  <section aria-labelledby="look">
-    <h2 id="look">看圖</h2>
-    <div class="figs">
-      <figure class="fig">
-        <svg viewBox="0 0 480 230" role="img" aria-label="Stack[T] 這個模具，可以做出 Stack[int]、Stack[string]、Stack[Celsius]">
-          <title>泛型是模具</title>
-          <rect class="acc" x="150" y="20" width="180" height="70" rx="10"/>
-          <text class="mono bold" x="240" y="52" text-anchor="middle">Stack[T]</text>
-          <text class="small" x="240" y="76" text-anchor="middle">一份程式碼</text>
-          <path class="wire" d="M240 90 V116 M85 116 H395 M85 116 V138 M240 116 V138 M395 116 V138"/>
-          <path class="tip" d="M85 148 L78 135 L92 135 Z"/>
-          <path class="tip" d="M240 148 L233 135 L247 135 Z"/>
-          <path class="tip" d="M395 148 L388 135 L402 135 Z"/>
-          <rect class="soft" x="20" y="150" width="130" height="48" rx="8"/>
-          <rect class="soft" x="175" y="150" width="130" height="48" rx="8"/>
-          <rect class="soft" x="330" y="150" width="130" height="48" rx="8"/>
-          <text class="small mono" x="85" y="179" text-anchor="middle">Stack[int]</text>
-          <text class="small mono" x="240" y="179" text-anchor="middle">Stack[string]</text>
-          <text class="small mono" x="395" y="179" text-anchor="middle">Stack[Celsius]</text>
-          <text class="sm mono" x="85" y="220" text-anchor="middle">T = int</text>
-          <text class="sm mono" x="240" y="220" text-anchor="middle">T = string</text>
-          <text class="sm mono" x="395" y="220" text-anchor="middle">T = Celsius</text>
-        </svg>
-        <figcaption>泛型是一個模具：程式碼只寫一次，用的時候才決定 <code>T</code> 是什麼型別。</figcaption>
-      </figure>
+  <nav class="toc-inline" aria-labelledby="toc-title">
+    <p class="label" id="toc-title">本章內容</p>
+    <ol>
+      <li><a href="#goals">本章你會學到</a></li>
+      <li><a href="#why">為什麼需要泛型</a></li>
+      <li><a href="#params">型別參數與限制</a></li>
+      <li><a href="#typesets">型別集合與 ~</a></li>
+      <li><a href="#infer">型別推論</a></li>
+      <li><a href="#types">泛型型別</a></li>
+      <li><a href="#methods">generic method</a></li>
+      <li><a href="#when">什麼時候用泛型</a></li>
+      <li><a href="#pitfalls">常見錯誤</a></li>
+      <li><a href="#java">從 Java 來的你</a></li>
+      <li><a href="#exercises">練習</a></li>
+      <li><a href="#recap">重點回顧</a></li>
+      <li><a href="#further">延伸閱讀</a></li>
+    </ol>
+  </nav>
 
-      <figure class="fig">
-        <svg viewBox="0 0 480 236" role="img" aria-label="型別限制 Number 只讓底層是 int、int64、float64 的型別進來：int 和底層是 float64 的 Celsius 可以，string 不行">
-          <title>型別限制是入場條件</title>
-          <rect class="acc" x="110" y="20" width="260" height="80" rx="10"/>
-          <text class="mono bold" x="240" y="48" text-anchor="middle">Number</text>
-          <text class="small mono" x="240" y="78" text-anchor="middle">~int | ~int64 | ~float64</text>
-          <path class="wire acc-ln" d="M155 160 V114 M275 160 V114"/>
-          <path class="tip acc-tip" d="M155 104 L148 117 L162 117 Z"/>
-          <path class="tip acc-tip" d="M275 104 L268 117 L282 117 Z"/>
-          <path class="wire hot-ln dash" d="M410 160 V128"/>
-          <path class="wire hot-ln" d="M402 108 L418 124 M418 108 L402 124"/>
-          <rect class="acc" x="110" y="160" width="90" height="40" rx="6"/>
-          <rect class="acc" x="220" y="160" width="110" height="40" rx="6"/>
-          <rect class="hot" x="360" y="160" width="100" height="40" rx="6"/>
-          <text class="mono" x="155" y="186" text-anchor="middle">int</text>
-          <text class="mono" x="275" y="186" text-anchor="middle">Celsius</text>
-          <text class="mono t-hot" x="410" y="186" text-anchor="middle">string</text>
-          <text class="sm" x="275" y="222" text-anchor="middle">底層是 float64</text>
-          <text class="sm t-hot" x="410" y="222" text-anchor="middle">編譯時擋下</text>
-        </svg>
-        <figcaption>型別限制是入場條件：<code>Number</code> 只讓底層是 int、int64、float64 的型別進來，<code>string</code> 在編譯時就被擋下。</figcaption>
-      </figure>
-
-      <figure class="fig">
-        <svg viewBox="0 0 480 176" role="img" aria-label="Go 1.27 的 generic method：Stack[int] 的 Convert 方法把 1 和 3 轉成 #1 和 #3，得到 Stack[string]">
-          <title>generic method</title>
-          <rect class="acc" x="16" y="50" width="170" height="100" rx="10"/>
-          <text class="small mono" x="101" y="74" text-anchor="middle">Stack[int]</text>
-          <rect class="box" x="40" y="90" width="56" height="40" rx="4"/>
-          <rect class="box" x="106" y="90" width="56" height="40" rx="4"/>
-          <text class="mono" x="68" y="116" text-anchor="middle">1</text>
-          <text class="mono" x="134" y="116" text-anchor="middle">3</text>
-          <path class="wire" d="M190 100 H282"/>
-          <path class="tip" d="M294 100 L281 93 L281 107 Z"/>
-          <text class="small mono" x="240" y="86" text-anchor="middle">Convert[U]</text>
-          <text class="sm" x="240" y="124" text-anchor="middle">Go 1.27</text>
-          <rect class="acc" x="298" y="50" width="170" height="100" rx="10"/>
-          <text class="small mono" x="383" y="74" text-anchor="middle">Stack[string]</text>
-          <rect class="box" x="322" y="90" width="56" height="40" rx="4"/>
-          <rect class="box" x="388" y="90" width="56" height="40" rx="4"/>
-          <text class="small mono" x="350" y="115" text-anchor="middle">"#1"</text>
-          <text class="small mono" x="416" y="115" text-anchor="middle">"#3"</text>
-        </svg>
-        <figcaption>Go 1.27 起，方法可以有自己的型別參數：<code>Stack[int]</code> 的 <code>Convert</code> 方法可以產生 <code>Stack[string]</code>。</figcaption>
-      </figure>
-    </div>
+  <section aria-labelledby="goals">
+    <h2 id="goals">本章你會學到</h2>
+    <ul class="notes">
+      <li>泛型解決什麼問題，和「複製貼上」或「用 any」比起來好在哪裡。</li>
+      <li>寫泛型函式：型別參數、限制、<code>any</code>、<code>comparable</code>、<code>cmp.Ordered</code>。</li>
+      <li>用 interface 定義自己的限制，以及 <code>~</code> 的意思。</li>
+      <li>型別推論什麼時候成功、什麼時候要自己寫出型別。</li>
+      <li>寫泛型型別，以及 Go 1.27 起可以有自己型別參數的 generic method。</li>
+      <li>判斷什麼時候該用泛型，什麼時候用 interface 或普通的程式就好。</li>
+    </ul>
+    <p>先備：<a href="10-interfaces.html">10 interface</a>、<a href="09-structs-methods.html#types">09 章的自訂型別</a>、<a href="06-arrays-slices.html">06 slice</a>。</p>
   </section>
 
-  <section aria-labelledby="code">
-    <h2 id="code">最小範例</h2>
-    <pre class="code"><code>func Map[T, U any](s []T, f func(T) U) []U {
-	out := make([]U, 0, len(s))
+  <section aria-labelledby="why">
+    <h2 id="why">1. 為什麼需要泛型</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 214" role="img" aria-label="一個泛型函式 Sum[N] 是模具，用 int 呼叫時得到 Sum[int]，用 float64 呼叫時得到 Sum[float64]，兩者都在編譯時檢查型別">
+        <title>泛型是模具</title>
+        <rect class="acc" x="150" y="16" width="180" height="56" rx="10"/>
+        <text class="mono bold" x="240" y="42" text-anchor="middle">Sum[N]</text>
+        <text class="sm" x="240" y="62" text-anchor="middle">N 先空著</text>
+        <path class="wire" d="M200 72 V110 H110 V128"/>
+        <path class="tip" d="M110 138 L104 126 L116 126 Z"/>
+        <path class="wire" d="M280 72 V110 H370 V128"/>
+        <path class="tip" d="M370 138 L364 126 L376 126 Z"/>
+        <rect class="soft" x="30" y="140" width="160" height="48" rx="8"/>
+        <text class="mono" x="110" y="170" text-anchor="middle">Sum[int]</text>
+        <rect class="soft" x="290" y="140" width="160" height="48" rx="8"/>
+        <text class="mono" x="370" y="170" text-anchor="middle">Sum[float64]</text>
+        <text class="sm" x="150" y="106" text-anchor="end">傳 []int</text>
+        <text class="sm" x="330" y="106">傳 []float64</text>
+      </svg>
+      <figcaption>泛型函式的型別先空著，呼叫時才填進具體的型別。填好之後就像一個普通的函式，型別錯了照樣編譯不過。</figcaption>
+    </figure>
+    <p>Go 1.18 加入了泛型。在那之前，同一個演算法要套用到不同的型別，只有兩條路：</p>
+    <pre class="code" data-src="chapters/12-generics/why.go#sumInts,sumFloats,sumAny"><code>func sumInts(s []int) int {
+	total := 0
 	for _, v := range s {
-		out = append(out, f(v))
+		total += v
+	}
+	return total
+}
+
+func sumFloats(s []float64) float64 {
+	total := 0.0
+	for _, v := range s {
+		total += v
+	}
+	return total
+}
+
+func sumAny(s []any) float64 {
+	total := 0.0
+	for _, v := range s {
+		switch x := v.(type) {
+		case int:
+			total += float64(x)
+		case float64:
+			total += x
+		}
+	}
+	return total
+}</code></pre>
+    <ul class="notes">
+      <li><strong>每種型別各寫一次</strong>：sumInts 和 sumFloats 只差在型別，邏輯一模一樣。要改一個 bug 就得改好幾份。</li>
+      <li><strong>用 any 什麼都收</strong>：只寫一次，但型別檢查從編譯期延到了執行期。sumAny 收到一個字串，編譯器不會阻止，只能在執行時用 type switch 判斷，遇到不認得的型別就默默跳過（<a href="10-interfaces.html#switch">10 章</a>）。而且傳進來的 <code>[]int</code> 得先一個一個搬進 <code>[]any</code>。</li>
+    </ul>
+    <p>泛型是第三條路：</p>
+    <pre class="code" data-src="chapters/12-generics/why.go#Sum,whyDemo"><code>func Sum[N int | float64](s []N) N {
+	var total N
+	for _, v := range s {
+		total += v
+	}
+	return total
+}
+
+func whyDemo() {
+	fmt.Println(sumInts([]int{85, 95}), sumFloats([]float64{1.5, 2.25}))
+	fmt.Println(sumAny([]any{85, 2.5, "排骨飯"}))
+	fmt.Println(Sum([]int{85, 95}), Sum([]float64{1.5, 2.25}))
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/12-generics#Example_whyDemo"><code>180 3.75
+87.5
+180 3.75</code></pre>
+    <p>函式名稱後面的中括號 <code>[N int | float64]</code> 宣告了一個<strong>型別參數</strong>（type parameter）N，它代表「呼叫時才決定的某個型別」，<code>int | float64</code> 是它的<strong>限制</strong>（constraint）：N 只能是 int 或 float64。函式本體裡，N 就像一個普通的型別，<code>var total N</code> 宣告一個 N 型別的零值。只寫一次，傳 []int 回傳 int，傳 []float64 回傳 float64，傳 []string 則是編譯錯誤。sumAny 那種「把字串偷偷略過」的情況不會發生。</p>
+  </section>
+
+  <section aria-labelledby="params">
+    <h2 id="params">2. 型別參數與限制</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 214" role="img" aria-label="Clamp 的限制是 cmp.Ordered，像一道門：int、float64、string 可以通過，Bento struct 不能通過，因為它不能用小於比較">
+        <title>限制是一道門</title>
+        <rect class="box" x="16" y="20" width="110" height="34" rx="6"/>
+        <text class="sm mono" x="71" y="42" text-anchor="middle">int</text>
+        <rect class="box" x="16" y="66" width="110" height="34" rx="6"/>
+        <text class="sm mono" x="71" y="88" text-anchor="middle">float64</text>
+        <rect class="box" x="16" y="112" width="110" height="34" rx="6"/>
+        <text class="sm mono" x="71" y="134" text-anchor="middle">string</text>
+        <rect class="hot" x="16" y="158" width="110" height="34" rx="6"/>
+        <text class="sm mono" x="71" y="180" text-anchor="middle">Bento</text>
+        <path class="wire acc-ln" d="M126 37 H190 M126 83 H190 M126 129 H190"/>
+        <path class="wire hot-ln dash" d="M126 175 H180"/>
+        <text class="t-hot" x="186" y="181">×</text>
+        <rect class="acc" x="200" y="16" width="20" height="180" rx="4"/>
+        <text class="sm mono" x="240" y="108">cmp.Ordered</text>
+        <path class="wire acc-ln" d="M220 37 H330 V83 M220 83 H330 M220 129 H330 V83 H350"/>
+        <path class="tip acc-tip" d="M360 83 L348 77 L348 89 Z"/>
+        <rect class="soft" x="362" y="60" width="102" height="46" rx="8"/>
+        <text class="sm mono" x="413" y="88" text-anchor="middle">Clamp[T]</text>
+        <text class="sm" x="413" y="140" text-anchor="middle">能用 &lt; 比較的</text>
+        <text class="sm" x="413" y="160" text-anchor="middle">型別才能進來</text>
+      </svg>
+      <figcaption>限制決定哪些型別可以填進 T，也決定函式裡可以對 T 做哪些運算。</figcaption>
+    </figure>
+    <pre class="code" data-src="chapters/12-generics/params.go#Clamp,CountOf,paramsDemo"><code>func Clamp[T cmp.Ordered](v, lo, hi T) T {
+	if v &lt; lo {
+		return lo
+	}
+	if v &gt; hi {
+		return hi
+	}
+	return v
+}
+
+func CountOf[T comparable](s []T, v T) int {
+	n := 0
+	for _, x := range s {
+		if x == v {
+			n++
+		}
+	}
+	return n
+}
+
+func paramsDemo() {
+	fmt.Println(Clamp(20, 1, 12))
+	fmt.Println(Clamp(0.35, 0.0, 0.3))
+	fmt.Println(Clamp("Z", "A", "M"))
+	fmt.Println(Clamp[float64](5, 1, 12.5))
+	fmt.Println(CountOf([]string{"排骨飯", "雞腿飯", "排骨飯"}, "排骨飯"))
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/12-generics#Example_paramsDemo"><code>12
+0.3
+M
+5
+2</code></pre>
+    <p>限制本身是一個 interface，標準庫已經準備好最常用的三個：</p>
+    <ul class="notes">
+      <li><code>any</code>：什麼型別都可以。但正因為什麼都可以，函式裡只能做「所有型別都能做」的事：指定、傳遞、轉成 any，不能用 <code>+</code>、<code>&lt;</code>，也不能呼叫方法。</li>
+      <li><code>comparable</code>：可以用 <code>==</code> 和 <code>!=</code> 比較的型別，也就是能當 map key 的型別（<a href="07-maps.html#keys">07 章</a>）。CountOf 只需要 ==，所以用它。</li>
+      <li><code>cmp.Ordered</code>：可以用 <code>&lt;</code>、<code>&gt;</code> 比大小的型別，包括所有整數、浮點數和字串。Clamp 要比大小，所以用它；字串比的是 byte 順序，<code>"Z"</code> 比 <code>"M"</code> 大，結果是 M。</li>
+    </ul>
+    <p>呼叫時可以把型別寫在中括號裡：<code>Clamp[float64](5, 1, 12.5)</code>，這叫<strong>實例化</strong>（instantiation），把 T 換成 float64，得到一個普通的函式，5 和 1 這兩個常數就會被當成 float64。大多數時候不用寫，Go 會從參數推論出來（第 4 節）。另外，Go 1.21 起有內建的 <code>min</code> 和 <code>max</code>，Clamp 也可以寫成 <code>min(max(v, lo), hi)</code>。</p>
+    <p>限制也是一份承諾：在函式裡用了限制不允許的運算，編譯器會擋下來，所以你不可能寫出「對某些型別會壞掉」的泛型函式：</p>
+    <pre class="code bad" data-compile-error><code>package main
+
+import "fmt"
+
+func Largest[T any](s []T) T {
+	best := s[0]
+	for _, v := range s[1:] {
+		if v > best {
+			best = v
+		}
+	}
+	return best
+}
+
+func main() {
+	fmt.Println(Largest([]int{85, 95, 30}))
+}</code></pre>
+    <p class="label">編譯錯誤</p>
+    <pre class="out err"><code>./main.go:8:6: invalid operation: v > best (type parameter T cannot use operator >)</code></pre>
+    <p>T 是 any，any 裡有不能比大小的型別，所以不能用 &gt;。把限制改成 cmp.Ordered 就好了。反過來，傳一個不滿足限制的型別進去，錯誤訊息會把限制允許的型別全部列出來，cmp.Ordered 的完整內容就藏在這裡：</p>
+    <pre class="code bad" data-compile-error><code>package main
+
+import (
+	"cmp"
+	"fmt"
+)
+
+type Bento struct {
+	Name  string
+	Price int
+}
+
+func Clamp[T cmp.Ordered](v, lo, hi T) T {
+	return min(max(v, lo), hi)
+}
+
+func main() {
+	a := Bento{Name: "排骨飯", Price: 85}
+	b := Bento{Name: "雞腿飯", Price: 95}
+	fmt.Println(Clamp(a, a, b))
+}</code></pre>
+    <p class="label">編譯錯誤</p>
+    <pre class="out err"><code>./main.go:20:19: Bento does not satisfy cmp.Ordered (Bento missing in ~int | ~int8 | ~int16 | ~int32 | ~int64 | ~uint | ~uint8 | ~uint16 | ~uint32 | ~uint64 | ~uintptr | ~float32 | ~float64 | ~string)</code></pre>
+  </section>
+
+  <section aria-labelledby="typesets">
+    <h2 id="typesets">3. 型別集合與 ~</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 214" role="img" aria-label="左邊的限制 int 只包含 int 本身；右邊的限制 ~int 包含所有底層型別是 int 的型別：int、NTD、Points">
+        <title>int 和 ~int</title>
+        <ellipse class="soft" cx="120" cy="100" rx="96" ry="66"/>
+        <text class="mono bold" x="120" y="24" text-anchor="middle">int</text>
+        <rect class="box" x="80" y="84" width="80" height="32" rx="6"/>
+        <text class="sm mono" x="120" y="105" text-anchor="middle">int</text>
+        <text class="sm t-hot" x="120" y="196" text-anchor="middle">NTD 不在裡面</text>
+        <ellipse class="acc" cx="360" cy="100" rx="110" ry="80"/>
+        <text class="mono bold" x="360" y="14" text-anchor="middle">~int</text>
+        <rect class="box" x="320" y="44" width="80" height="32" rx="6"/>
+        <text class="sm mono" x="360" y="65" text-anchor="middle">int</text>
+        <rect class="box" x="320" y="86" width="80" height="32" rx="6"/>
+        <text class="sm mono" x="360" y="107" text-anchor="middle">NTD</text>
+        <rect class="box" x="320" y="128" width="80" height="32" rx="6"/>
+        <text class="sm mono" x="360" y="149" text-anchor="middle">Points</text>
+        <text class="sm" x="360" y="204" text-anchor="middle">底層型別是 int 的都算</text>
+      </svg>
+      <figcaption>限制裡寫 <code>int</code>，就只有 int 本身；寫 <code>~int</code>，所有底層型別是 int 的自訂型別也都算。</figcaption>
+    </figure>
+    <p>限制是 interface，而 interface 除了列方法，還可以列出<strong>型別</strong>：用 <code>|</code> 隔開的型別就是這個限制的<strong>型別集合</strong>（type set），T 必須是集合裡的某一個。第 1 節的 <code>int | float64</code> 就是直接寫在中括號裡的型別集合。常用的集合可以取個名字：</p>
+    <pre class="code" data-src="chapters/12-generics/typeset.go#NTD,NTD.String,Number,Total,typeSetDemo"><code>type NTD int
+
+func (n NTD) String() string {
+	return fmt.Sprintf("NT$%d", int(n))
+}
+
+type Number interface {
+	~int | ~int64 | ~float64
+}
+
+func Total[N Number](s []N) N {
+	var total N
+	for _, v := range s {
+		total += v
+	}
+	return total
+}
+
+func typeSetDemo() {
+	prices := []NTD{85, 95, 30}
+	fmt.Println(Total(prices))
+	fmt.Printf("%T\n", Total(prices))
+	fmt.Println(Total([]int64{1, 2}))
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/12-generics#Example_typeSetDemo"><code>NT$210
+main.NTD
+3</code></pre>
+    <p>NTD 是 <a href="09-structs-methods.html#types">09 章</a>那種自訂型別，底層型別是 int，但它<strong>不是</strong> int。第 1 節的 Sum 限制寫的是 <code>int | float64</code>，NTD 就進不去：</p>
+    <pre class="code bad" data-compile-error><code>package main
+
+import "fmt"
+
+type NTD int
+
+func Sum[N int | float64](s []N) N {
+	var total N
+	for _, v := range s {
+		total += v
+	}
+	return total
+}
+
+func main() {
+	prices := []NTD{85, 95, 30}
+	fmt.Println(Sum(prices))
+}</code></pre>
+    <p class="label">編譯錯誤</p>
+    <pre class="out err"><code>./main.go:17:17: NTD does not satisfy int | float64 (possibly missing ~ for int in int | float64)</code></pre>
+    <p>編譯器連解法都提示了：少了 <code>~</code>。<code>~int</code> 的意思是「底層型別是 int 的所有型別」，所以 Number 寫成 <code>~int | ~int64 | ~float64</code>，NTD 就能用。剛才錯誤訊息裡的 cmp.Ordered，每一個型別前面也都有 ~。<strong>自己寫限制時，幾乎都應該加上 ~</strong>，不然使用的人自訂的型別都會被擋在外面。</p>
+    <p>Total 回傳的型別就是傳進去的 NTD，所以印出來時 String 方法還在，顯示 <code>NT$210</code>，<code>%T</code> 也是 <code>main.NTD</code>。這是泛型和 any 的另一個差別：型別資訊一路都保留著，不需要 type assertion 取回來。</p>
+    <p>含有型別集合的 interface 只能當限制，不能拿來宣告一般的變數，因為「NTD 或 int64 或 float64 其中之一」的變數沒有辦法運算（常見錯誤 2）。</p>
+
+    <section class="deep" aria-labelledby="comparable">
+      <p class="tag">深入：第一次讀可以先跳過</p>
+      <h3 id="comparable">3.1 限制裡也可以有方法</h3>
+      <p>限制是 interface，所以也可以列方法，例如 <code>interface{ ~int; String() string }</code> 的意思是「底層型別是 int，而且有 String 方法」，NTD 符合。第 7 節的 joinLabels 直接拿 <code>fmt.Stringer</code> 當限制，也是一樣的道理：一般的 interface 都能當限制用。</p>
+      <p>comparable 有一個細節：interface 型別也算 comparable（Go 1.20 起），但像 <a href="10-interfaces.html#compare">10 章</a>看過的，interface 裡裝著 slice 時，<code>==</code> 會在執行期 panic。所以 <code>Set[any]</code> 編譯得過，放進一個 slice 卻會 panic。用 comparable 的泛型型別時，元素型別盡量用具體的型別。</p>
+    </section>
+  </section>
+
+  <section aria-labelledby="infer">
+    <h2 id="infer">4. 型別推論</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 196" role="img" aria-label="Convert[float64](prices)：To 寫在中括號裡是 float64，From 從參數 prices 的型別 []NTD 推論出來是 NTD">
+        <title>寫出來的和推論出來的</title>
+        <text class="mono" x="240" y="40" text-anchor="middle">Convert[float64](prices)</text>
+        <path class="wire acc-ln" d="M196 50 V80 H120 V100"/>
+        <path class="tip acc-tip" d="M120 110 L114 98 L126 98 Z"/>
+        <path class="wire" d="M300 50 V80 H360 V100"/>
+        <path class="tip" d="M360 110 L354 98 L366 98 Z"/>
+        <rect class="acc" x="40" y="112" width="160" height="48" rx="8"/>
+        <text class="mono" x="120" y="142" text-anchor="middle">To = float64</text>
+        <rect class="soft" x="280" y="112" width="160" height="48" rx="8"/>
+        <text class="mono" x="360" y="142" text-anchor="middle">From = NTD</text>
+        <text class="sm" x="120" y="182" text-anchor="middle">自己寫出來</text>
+        <text class="sm" x="360" y="182" text-anchor="middle">從 []NTD 推論</text>
+      </svg>
+      <figcaption>推論只看參數。只出現在回傳值的型別參數推論不出來，要自己寫；寫的時候從左邊開始，後面推論得出來的可以省略。</figcaption>
+    </figure>
+    <p>呼叫 <code>Clamp(20, 1, 12)</code> 時不用寫 <code>[int]</code>，因為 Go 會比對參數的型別，推論出 T 是什麼，這叫<strong>型別推論</strong>（type inference）。但推論只能從參數得到資訊：</p>
+    <pre class="code" data-src="chapters/12-generics/infer.go#Convert,inferDemo"><code>func Convert[To, From Number](s []From) []To {
+	out := make([]To, len(s))
+	for i, v := range s {
+		out[i] = To(v)
 	}
 	return out
 }
 
-type Stack[T any] struct{ items []T }
+func inferDemo() {
+	prices := []NTD{85, 95}
 
-func (s *Stack[T]) Push(v T) { s.items = append(s.items, v) }
+	fs := Convert[float64](prices)
+	fmt.Printf("%T %v\n", fs, fs)
 
-func main() {
-	fmt.Println(Map([]int{1, 2, 3}, strconv.Itoa))
-	var s Stack[string]
-	s.Push("Go")
-	fmt.Println(s.items, max(3, 7)) <span class="c">// max 是 Go 1.21 起的內建函式</span>
+	all := Convert[float64, NTD](prices)
+	fmt.Println(all)
+
+	var sumPrices func([]NTD) NTD = Total
+	fmt.Println(sumPrices(prices))
 }</code></pre>
     <p class="label">輸出</p>
-    <pre class="out"><code>[1 2 3]
-[Go] 7</code></pre>
+    <pre class="out" data-example="chapters/12-generics#Example_inferDemo"><code>[]float64 [85 95]
+[85 95]
+NT$180</code></pre>
+    <ul class="notes">
+      <li>Convert 有兩個型別參數。From 出現在參數 <code>s []From</code> 裡，傳進 []NTD 就知道 From 是 NTD；To 只出現在回傳值，沒有任何線索。</li>
+      <li><code>Convert[float64](prices)</code> 只寫了第一個型別參數，剩下的交給推論，這叫<strong>部分實例化</strong>。所以設計泛型函式時，推論不出來的型別參數要排在前面，使用的人才能只寫一個。</li>
+      <li>兩個都寫出來 <code>Convert[float64, NTD](prices)</code> 也可以，只是囉嗦。</li>
+      <li>把泛型函式指定給一個型別已經確定的函式變數，也能推論：<code>var sumPrices func([]NTD) NTD = Total</code>，Go 從變數的型別知道 N 是 NTD。</li>
+    </ul>
+    <p>什麼都不寫，推論就失敗了：</p>
+    <pre class="code bad" data-compile-error><code>package main
+
+import "fmt"
+
+type Number interface {
+	~int | ~int64 | ~float64
+}
+
+func Convert[To, From Number](s []From) []To {
+	out := make([]To, len(s))
+	for i, v := range s {
+		out[i] = To(v)
+	}
+	return out
+}
+
+func main() {
+	prices := []int{85, 95}
+	fmt.Println(Convert(prices))
+}</code></pre>
+    <p class="label">編譯錯誤</p>
+    <pre class="out err"><code>./main.go:19:21: in call to Convert, cannot infer To (declared at ./main.go:9:14)</code></pre>
   </section>
 
-  <section aria-labelledby="notes">
-    <h2 id="notes">工程師筆記</h2>
+  <section aria-labelledby="types">
+    <h2 id="types">5. 泛型型別</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 204" role="img" aria-label="Set[T] 是一個型別的模具，Set[int] 裡放桌號 3 和 5，Set[string] 裡放排骨飯；兩者是不同的型別">
+        <title>Set[T]：一份定義，很多種型別</title>
+        <rect class="acc" x="160" y="16" width="160" height="48" rx="10"/>
+        <text class="mono bold" x="240" y="46" text-anchor="middle">Set[T]</text>
+        <path class="wire" d="M200 64 V96 H110 V112"/>
+        <path class="tip" d="M110 122 L104 110 L116 110 Z"/>
+        <path class="wire" d="M280 64 V96 H370 V112"/>
+        <path class="tip" d="M370 122 L364 110 L376 110 Z"/>
+        <rect class="soft" x="30" y="124" width="160" height="64" rx="8"/>
+        <text class="small mono" x="110" y="146" text-anchor="middle">Set[int]</text>
+        <text class="mono" x="110" y="174" text-anchor="middle">3  5</text>
+        <rect class="soft" x="290" y="124" width="160" height="64" rx="8"/>
+        <text class="small mono" x="370" y="146" text-anchor="middle">Set[string]</text>
+        <text x="370" y="174" text-anchor="middle">排骨飯</text>
+      </svg>
+      <figcaption>泛型型別也是模具。<code>Set[int]</code> 和 <code>Set[string]</code> 是兩個不同的型別，各自只收自己的元素型別。</figcaption>
+    </figure>
+    <p>型別也可以有型別參數。<a href="07-maps.html#set">07 章</a>用 <code>map[string]bool</code> 當集合，每換一種元素型別就得重寫一次輔助函式；寫成泛型型別，只要一份：</p>
+    <pre class="code" data-src="chapters/12-generics/set.go#Set,Set.Add,Set.Has,Set.Len,setDemo"><code>type Set[T comparable] struct {
+	m map[T]struct{}
+}
+
+func (s *Set[T]) Add(v T) {
+	if s.m == nil {
+		s.m = map[T]struct{}{}
+	}
+	s.m[v] = struct{}{}
+}
+
+func (s *Set[T]) Has(v T) bool {
+	_, ok := s.m[v]
+	return ok
+}
+
+func (s *Set[T]) Len() int {
+	return len(s.m)
+}
+
+func setDemo() {
+	var tables Set[int]
+	tables.Add(3)
+	tables.Add(5)
+	tables.Add(3)
+	fmt.Println(tables.Len(), tables.Has(5), tables.Has(7))
+
+	var dishes Set[string]
+	dishes.Add("排骨飯")
+	fmt.Println(dishes.Has("排骨飯"), dishes.Len())
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/12-generics#Example_setDemo"><code>2 true false
+true 1</code></pre>
     <ul class="notes">
-      <li>先寫具體型別，同樣的邏輯出現第二、三次再改成泛型。如果只是「呼叫某個方法」，interface 通常更簡單。</li>
-      <li>常用限制：<code>any</code>、<code>comparable</code>（可以用 <code>==</code>，能當 map key）、<code>cmp.Ordered</code>（可以用 <code>&lt;</code>）。</li>
-      <li><code>~T</code> 代表「底層型別是 T」。加了 <code>~</code>，自訂型別（像 <code>type Celsius float64</code>）才能用。</li>
-      <li>大多數時候型別參數會自動推斷，不用寫成 <code>Sum[int](…)</code>。</li>
-      <li>先找標準庫：Go 1.21 起有內建的 <code>min</code>、<code>max</code>、<code>clear</code>，<code>slices</code>、<code>maps</code> 套件也提供大量泛型函式。</li>
-      <li>Go 1.27 起方法可以有自己的型別參數；但介面的方法不能有型別參數，generic method 也不能拿來實作介面。</li>
+      <li>型別參數寫在型別名稱後面：<code>type Set[T comparable] struct</code>。map 的 key 必須可以比較，所以 T 的限制是 comparable。</li>
+      <li>方法的 receiver 要把型別參數一起寫出來：<code>func (s *Set[T]) Add(v T)</code>。這裡的 T 只是重新取個名字，限制沿用型別宣告上的，不用再寫一次。</li>
+      <li>使用時一定要寫出型別：<code>var tables Set[int]</code>。這裡沒有參數可以推論，而且 <code>Set</code> 本身不是一個完整的型別，<code>Set[int]</code> 才是。</li>
+      <li>零值就能用：Add 第一次被呼叫時才建立 map，和 <a href="09-structs-methods.html#ctor">09 章的 Tally</a> 一樣的技巧。</li>
+      <li><code>struct{}</code> 不佔任何記憶體，拿來當「只在乎有沒有」的 map 值很常見。</li>
     </ul>
+    <p>標準庫裡也有泛型型別，例如 <code>atomic.Pointer[T]</code>（<a href="17-sync.html">17 sync</a>）。至於像 <code>Set</code> 這樣的容器，標準庫目前沒有提供，需要時自己寫幾行就好，或者直接用 map。</p>
+  </section>
+
+  <section aria-labelledby="methods">
+    <h2 id="methods">6. generic method</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 190" role="img" aria-label="Page[Order] 呼叫 Map 方法，Map 自己的型別參數 U 是 string，結果是 Page[string]，Next 保留為 19">
+        <title>方法自己的型別參數</title>
+        <rect class="soft" x="16" y="40" width="170" height="104" rx="10"/>
+        <text class="small mono" x="101" y="64" text-anchor="middle">Page[Order]</text>
+        <text class="sm mono" x="101" y="92" text-anchor="middle">{17 排骨飯}</text>
+        <text class="sm mono" x="101" y="114" text-anchor="middle">{18 雞腿飯}</text>
+        <text class="sm mono" x="101" y="134" text-anchor="middle">Next 19</text>
+        <path class="wire acc-ln" d="M186 92 H282"/>
+        <path class="tip acc-tip" d="M292 92 L280 86 L280 98 Z"/>
+        <text class="sm mono t-acc" x="240" y="78" text-anchor="middle">.Map[U]</text>
+        <text class="sm" x="240" y="118" text-anchor="middle">U = string</text>
+        <rect class="acc" x="294" y="40" width="170" height="104" rx="10"/>
+        <text class="small mono" x="379" y="64" text-anchor="middle">Page[string]</text>
+        <text class="sm" x="379" y="92" text-anchor="middle">17 號 排骨飯</text>
+        <text class="sm" x="379" y="114" text-anchor="middle">18 號 雞腿飯</text>
+        <text class="sm mono" x="379" y="134" text-anchor="middle">Next 19</text>
+        <text class="sm" x="240" y="176" text-anchor="middle">T 來自 receiver，U 是方法自己的</text>
+      </svg>
+      <figcaption>Go 1.27 起，方法也可以宣告自己的型別參數。Page[Order] 的 Map 方法可以產生一個 Page[string]。</figcaption>
+    </figure>
+    <pre class="code" data-src="chapters/12-generics/method.go#Page,Page.Map,Order,methodDemo"><code>type Page[T any] struct {
+	Items []T
+	Next  int
+}
+
+func (p Page[T]) Map[U any](f func(T) U) Page[U] {
+	out := Page[U]{Items: make([]U, len(p.Items)), Next: p.Next}
+	for i, v := range p.Items {
+		out.Items[i] = f(v)
+	}
+	return out
+}
+
+type Order struct {
+	No   int
+	Item string
+}
+
+func methodDemo() {
+	p := Page[Order]{Items: []Order{{17, "排骨飯"}, {18, "雞腿飯"}}, Next: 19}
+	labels := p.Map(func(o Order) string {
+		return fmt.Sprintf("%d 號 %s", o.No, o.Item)
+	})
+	fmt.Printf("%T\n", labels)
+	fmt.Println(labels.Items, labels.Next)
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/12-generics#Example_methodDemo"><code>main.Page[string]
+[17 號 排骨飯 18 號 雞腿飯] 19</code></pre>
+    <p>Page 的方法本來就能用 receiver 帶來的 T。Map 要把每一筆資料換成另一種型別，需要第二個型別參數 U，而 U 只跟這一次呼叫有關，跟 Page 本身無關。Go 1.27 起，方法名稱後面可以再寫一組中括號 <code>Map[U any]</code>，這就是 <strong>generic method</strong>。呼叫時 U 一樣由參數推論：傳進去的函式回傳 string，U 就是 string。</p>
+    <p>在 Go 1.27 以前，這只能寫成一個普通的泛型函式 <code>MapPage[T, U any](p Page[T], f func(T) U) Page[U]</code>，呼叫時寫 <code>MapPage(p, f)</code>，不能用 <code>p.Map(f)</code> 一路串下去。舊的程式碼和文章裡會看到這種寫法。</p>
+    <p>generic method 有一個重要的限制：<strong>它不能用來滿足 interface</strong>。interface 的方法不能有型別參數，而 generic method 在實例化之前不是一個具體的方法，所以就算簽名看起來對得上也不算：</p>
+    <pre class="code bad" data-compile-error><code>package main
+
+import "fmt"
+
+type Page[T any] struct {
+	Items []T
+}
+
+func (p Page[T]) Map[U any](f func(T) U) Page[U] {
+	out := Page[U]{Items: make([]U, len(p.Items))}
+	for i, v := range p.Items {
+		out.Items[i] = f(v)
+	}
+	return out
+}
+
+type Labeler interface {
+	Map(f func(int) string) Page[string]
+}
+
+func main() {
+	var l Labeler = Page[int]{Items: []int{17, 18}}
+	fmt.Println(l)
+}</code></pre>
+    <p class="label">編譯錯誤</p>
+    <pre class="out err"><code>./main.go:22:18: cannot use Page[int]{…} (value of struct type Page[int]) as Labeler value in variable declaration: Page[int] does not implement Labeler (wrong type for method Map)
+		have Map[U any](func(int) U) Page[U]
+		want Map(func(int) string) Page[string]</code></pre>
+    <p>需要滿足 interface 的方法，就寫成普通的方法。</p>
+  </section>
+
+  <section aria-labelledby="when">
+    <h2 id="when">7. 什麼時候用泛型</h2>
+    <p>泛型很好用，但不是每個地方都需要。先看一個非用不可的例子：</p>
+    <pre class="code" data-src="chapters/12-generics/when.go#joinLabels,whenDemo"><code>func joinLabels[T fmt.Stringer](s []T) string {
+	parts := make([]string, len(s))
+	for i, v := range s {
+		parts[i] = v.String()
+	}
+	return strings.Join(parts, "、")
+}
+
+func whenDemo() {
+	prices := []NTD{85, 95}
+	fmt.Println(joinLabels(prices))
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/12-generics#Example_whenDemo"><code>NT$85、NT$95</code></pre>
+    <p>NTD 有 String 方法，所以 NTD 是 fmt.Stringer。可是 <code>[]NTD</code> 不是 <code>[]fmt.Stringer</code>：兩者在記憶體裡的樣子完全不同（一個存數字，一個存 interface 值的兩格），Go 不會自動轉換：</p>
+    <pre class="code bad" data-compile-error><code>package main
+
+import (
+	"fmt"
+	"strings"
+)
+
+type NTD int
+
+func (n NTD) String() string {
+	return fmt.Sprintf("NT$%d", int(n))
+}
+
+func joinAll(s []fmt.Stringer) string {
+	parts := make([]string, len(s))
+	for i, v := range s {
+		parts[i] = v.String()
+	}
+	return strings.Join(parts, "、")
+}
+
+func main() {
+	prices := []NTD{85, 95}
+	fmt.Println(joinAll(prices))
+}</code></pre>
+    <p class="label">編譯錯誤</p>
+    <pre class="out err"><code>./main.go:24:22: cannot use prices (variable of type []NTD) as []fmt.Stringer value in argument to joinAll</code></pre>
+    <p>沒有泛型時，只能先建一個 []fmt.Stringer、一個一個搬過去。joinLabels 用 <code>[T fmt.Stringer]</code> 當限制，直接收 []NTD，什麼都不用搬。</p>
+    <h3>適合用泛型的地方</h3>
+    <ul class="notes">
+      <li><strong>對 slice、map、channel 的通用操作</strong>，而且不在乎元素是什麼型別：過濾、分組、找最大值、去重複。標準庫的 <code>slices</code>、<code>maps</code> 套件就是這樣寫的，先找找看有沒有現成的（<a href="06-arrays-slices.html#pkg">06 章</a>）。</li>
+      <li><strong>容器型別</strong>：集合、快取、分頁結果、樹，裡面放什麼型別都一樣的資料結構。</li>
+      <li><strong>要保留呼叫者的具體型別</strong>：Total 傳 NTD 回傳 NTD；換成 interface 參數，回傳的就只剩 interface。</li>
+      <li><strong>同一段程式已經複製了第二、第三份</strong>，而且只差在型別。</li>
+    </ul>
+    <h3>不需要泛型的地方</h3>
+    <ul class="notes">
+      <li><strong>只是要呼叫方法</strong>：<code>func notify[N Notifier](n N)</code> 和 <code>func notify(n Notifier)</code> 做的事一樣，後者簡單得多。只要參數本身就是那個值（不是 slice 或 map 裡的元素），用 interface 就好（<a href="10-interfaces.html">10 章</a>）。</li>
+      <li><strong>只會用到一種型別</strong>：先寫普通的程式，等真的出現第二種型別再改成泛型。</li>
+      <li><strong>不同型別的實作根本不一樣</strong>：如果泛型函式裡要用 type switch 對每個型別各做一套，那其實是好幾個函式，或者該用 interface 讓每個型別自己實作方法。</li>
+    </ul>
+    <p>還有一點：泛型的值在執行期仍然知道自己的型別，<code>%T</code> 印得出 <code>main.NTD</code>、<code>main.Page[string]</code>。但在泛型函式裡，不能直接對 T 型別的值做 type switch，要先轉成 any（常見錯誤 5）：</p>
+    <pre class="code" data-src="chapters/12-generics/when.go#kindOf,kindDemo"><code>func kindOf[T any](v T) string {
+	switch x := any(v).(type) {
+	case int:
+		return fmt.Sprint("整數 ", x)
+	case string:
+		return "字串 " + x
+	default:
+		return fmt.Sprintf("其他 %T", x)
+	}
+}
+
+func kindDemo() {
+	fmt.Println(kindOf(85), kindOf("排骨飯"), kindOf(NTD(30)))
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/12-generics#Example_kindDemo"><code>整數 85 字串 排骨飯 其他 main.NTD</code></pre>
+    <p>NTD(30) 的底層型別是 int，卻沒有落進 <code>case int</code>：type switch 比的是確切的型別，不是底層型別。會需要這樣寫，通常表示這裡不該用泛型。</p>
+  </section>
+
+  <section aria-labelledby="pitfalls">
+    <h2 id="pitfalls">常見錯誤</h2>
+    <h3 id="pit-tilde">1. 限制少了 ~</h3>
+    <p>寫 <code>int | float64</code>，自訂的 NTD 就進不去；寫 <code>~int | ~float64</code> 才包含底層型別相同的型別（第 3 節）。編譯器的訊息會提示 “possibly missing ~”。</p>
+
+    <h3 id="pit-constraint-var">2. 把限制當成一般的型別</h3>
+    <pre class="code bad" data-compile-error><code>package main
+
+import "fmt"
+
+type Number interface {
+	~int | ~int64 | ~float64
+}
+
+func main() {
+	var n Number = 85
+	fmt.Println(n)
+}</code></pre>
+    <p class="label">編譯錯誤</p>
+    <pre class="out err"><code>./main.go:10:8: cannot use type Number outside a type constraint: interface contains type constraints</code></pre>
+    <p>含有型別集合的 interface 只能寫在中括號裡當限制。只列方法的 interface（例如 fmt.Stringer）則兩種用法都可以。</p>
+
+    <h3 id="pit-infer">3. 型別參數只出現在回傳值</h3>
+    <p>推論不出來，呼叫的人每次都得寫 <code>[float64]</code>（第 4 節）。設計時把推論不出來的型別參數放在最前面，讓部分實例化可以只寫一個。</p>
+
+    <h3 id="pit-any-op">4. 限制是 any，卻用了 &lt; 或 +</h3>
+    <p>編譯錯誤 “type parameter T cannot use operator &gt;”（第 2 節）。要比大小用 cmp.Ordered，要 == 用 comparable，要加減就自己定義一個列出數字型別的限制。</p>
+
+    <h3 id="pit-typeswitch">5. 直接對型別參數的值做 type switch</h3>
+    <pre class="code bad" data-compile-error><code>package main
+
+import "fmt"
+
+func describe[T any](v T) string {
+	switch x := v.(type) {
+	case int:
+		return fmt.Sprint("整數 ", x)
+	default:
+		return "其他"
+	}
+}
+
+func main() {
+	fmt.Println(describe(85))
+}</code></pre>
+    <p class="label">編譯錯誤</p>
+    <pre class="out err"><code>./main.go:6:14: cannot use type switch on type parameter value v (variable of type T constrained by any)</code></pre>
+    <p>type switch 只能用在 interface 型別的值上，要先轉換：<code>switch x := any(v).(type)</code>（第 7 節的 kindOf）。但先想想是不是該用 interface 而不是泛型。</p>
+
+    <h3 id="pit-slice-iface">6. 以為 []NTD 可以當成 []fmt.Stringer</h3>
+    <p>元素型別滿足 interface，不代表 slice 也能轉換（第 7 節）。用 <code>[T fmt.Stringer](s []T)</code> 這種泛型函式，或自己一個一個轉。</p>
+
+    <h3 id="pit-method-iface">7. 期待 generic method 滿足 interface</h3>
+    <p>interface 的方法不能有型別參數，generic method 也不會被當成符合 interface 的方法（第 6 節）。</p>
+
+    <h3 id="pit-overuse">8. 為了泛型而泛型</h3>
+    <p>只呼叫方法的參數寫成 <code>[N Notifier](n N)</code>、只會用到一種型別的函式加上型別參數，都只是讓程式更難讀。先寫具體的程式，等重複出現了再抽成泛型。</p>
   </section>
 
   <section aria-labelledby="java">
@@ -139,21 +696,155 @@ func main() {
         <thead><tr><th scope="col">主題</th><th scope="col">Java</th><th scope="col">Go</th></tr></thead>
         <tbody>
           <tr><th scope="row">語法</th><td class="java"><code>List&lt;T&gt;</code>、<code>&lt;T extends Comparable&lt;T&gt;&gt;</code></td><td><code>[T any]</code>、<code>[T cmp.Ordered]</code></td></tr>
-          <tr><th scope="row">執行期</th><td class="java">型別擦除，執行期不知道 T</td><td>沒有擦除，執行期仍知道 T 是什麼</td></tr>
-          <tr><th scope="row">基本型別</th><td class="java">不能用 <code>int</code>，要用 <code>Integer</code></td><td><code>Stack[int]</code> 直接用，不用裝箱</td></tr>
-          <tr><th scope="row">限制</th><td class="java">上界 <code>extends</code></td><td>用 interface 當限制，可以列出型別集合</td></tr>
-          <tr><th scope="row">泛型方法</th><td class="java">一直都有</td><td>Go 1.27 起才有，而且不能拿來實作介面</td></tr>
+          <tr><th scope="row">執行期</th><td class="java">型別擦除，執行期不知道 T</td><td>沒有擦除，<code>%T</code> 印得出 <code>main.Page[string]</code></td></tr>
+          <tr><th scope="row">基本型別</th><td class="java">不能用 <code>int</code>，要用 <code>Integer</code></td><td><code>Set[int]</code> 直接用，不用裝箱</td></tr>
+          <tr><th scope="row">限制</th><td class="java">上界 <code>extends</code></td><td>用 interface 當限制，可以列方法，也可以列出型別集合</td></tr>
+          <tr><th scope="row">運算子</th><td class="java">泛型裡不能用 <code>+</code>、<code>&lt;</code></td><td>限制的型別集合都支援的運算子就能用</td></tr>
+          <tr><th scope="row">變異性</th><td class="java"><code>List&lt;Integer&gt;</code> 不是 <code>List&lt;Number&gt;</code>，要用 <code>? extends</code></td><td><code>[]NTD</code> 不是 <code>[]fmt.Stringer</code>；沒有萬用字元，改用型別參數</td></tr>
+          <tr><th scope="row">推論</th><td class="java"><code>new ArrayList&lt;&gt;()</code></td><td>從參數推論；推論不出的從左邊寫起</td></tr>
+          <tr><th scope="row">泛型方法</th><td class="java">一直都有</td><td>Go 1.27 起才有，而且不能拿來滿足 interface</td></tr>
         </tbody>
       </table>
     </div>
   </section>
 
+  <section aria-labelledby="exercises">
+    <h2 id="exercises">練習</h2>
+    <p>題目在 <code>exercises/12-generics/exercises.go</code>，用到的型別定義在 <code>doc.go</code>。</p>
+    <pre class="shell"><code>go test ./exercises/12-generics/                   <span class="c"># 跑全部練習</span>
+go test ./exercises/12-generics/ -run TestFilter   <span class="c"># 只跑一題</span>
+go test -tags solution ./exercises/12-generics/    <span class="c"># 跑參考解答</span></code></pre>
+    <ol class="exercises">
+      <li>
+        <h3><span class="level l1">入門</span>練習 1：過濾</h3>
+        <p>留下符合條件的元素，任何型別的 slice 都要能用。</p>
+        <pre class="code" data-src="exercises/12-generics/exercises.go#Filter"><code>func Filter[T any](s []T, keep func(T) bool) []T {
+	// TODO: 實作
+	return nil
+}</code></pre>
+        <p><code>Filter([]int{85, 120, 95, 150}, func(n int) bool { return n &gt;= 100 })</code> 是 <code>[120 150]</code>。測試：<code>TestFilter</code>。</p>
+        <details><summary>提示</summary><p><code>var out []T</code>，符合的就 append 進去。不要用 <code>s[:0]</code> 重用 s 的底層陣列，那會改到呼叫者的資料（<a href="06-arrays-slices.html#shared">06 章</a>）。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l1">入門</span>練習 2：平均</h3>
+        <p>算任何數字型別的平均，包括底層型別是數字的自訂型別。</p>
+        <pre class="code" data-src="exercises/12-generics/doc.go#Number"><code>type Number interface {
+	~int | ~int64 | ~float64
+}</code></pre>
+        <pre class="code" data-src="exercises/12-generics/exercises.go#Average"><code>func Average[N Number](s []N) (float64, bool) {
+	// TODO: 實作
+	return 0, false
+}</code></pre>
+        <p>測試會用一個自訂的 <code>type ntd int</code>。測試：<code>TestAverage</code>。</p>
+        <details><summary>提示</summary><p>N 的型別集合裡都是數字，所以 <code>float64(v)</code> 可以轉換。先處理空的 slice，避免除以 0。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l2">進階</span>練習 3：分組</h3>
+        <p>依照 key 函式算出的值分組，例如把訂單依客人分開。</p>
+        <pre class="code" data-src="exercises/12-generics/exercises.go#GroupBy"><code>func GroupBy[T any, K comparable](s []T, key func(T) K) map[K][]T {
+	// TODO: 實作
+	return nil
+}</code></pre>
+        <p>測試：<code>TestGroupBy</code>。</p>
+        <details><summary>提示</summary><p>K 會當 map 的 key，所以限制是 comparable。<code>out[k] = append(out[k], v)</code>：對 nil slice append 沒問題，所以不必先檢查 key 在不在。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l2">進階</span>練習 4：排行榜</h3>
+        <p>泛型型別 Tally 計算每個 key 出現幾次，並列出前幾名。</p>
+        <pre class="code" data-src="exercises/12-generics/doc.go#Tally"><code>type Tally[K cmp.Ordered] struct {
+	counts map[K]int
+}</code></pre>
+        <pre class="code" data-src="exercises/12-generics/exercises.go#Tally.Add,Tally.Count,Tally.Top"><code>func (t *Tally[K]) Add(k K) {
+	// TODO: 實作
+}
+
+func (t *Tally[K]) Count(k K) int {
+	// TODO: 實作
+	return 0
+}
+
+func (t *Tally[K]) Top(n int) []K {
+	// TODO: 實作
+	return nil
+}</code></pre>
+        <p>測試：<code>TestTally</code>。</p>
+        <details><summary>提示</summary><p>Add 和第 5 節的 Set 一樣先檢查 map 是不是 nil。Top 先把所有 key 放進一個 slice，再用 <code>slices.SortFunc</code> 排序：比較函式先用 <code>cmp.Compare(t.counts[b], t.counts[a])</code> 讓次數多的在前，相等時再比 key。最後取 <code>min(n, len(keys))</code> 個。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l3">挑戰</span>練習 5：一步接一步</h3>
+        <p>用 generic method 把好幾個可能失敗的步驟串起來：前面失敗了，後面就不做。</p>
+        <pre class="code" data-src="exercises/12-generics/doc.go#Result"><code>type Result[T any] struct {
+	Val T
+	Err error
+}</code></pre>
+        <pre class="code" data-src="exercises/12-generics/exercises.go#Result.Then"><code>func (r Result[T]) Then[U any](f func(T) (U, error)) Result[U] {
+	// TODO: 實作
+	return Result[U]{}
+}</code></pre>
+        <p><code>Result[string]{Val: "4"}.Then(strconv.Atoi).Then(checkRange)</code>：字串先轉成 int，再檢查範圍，每一步的型別都可以不同。測試：<code>TestResultThen</code>。</p>
+        <details><summary>提示</summary><p>r.Err 不是 nil 就回傳 <code>Result[U]{Err: r.Err}</code>；否則 <code>v, err := f(r.Val)</code>，包成 <code>Result[U]{Val: v, Err: err}</code>。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l3">挑戰</span>練習 6：記住算過的結果</h3>
+        <p>把任何「同樣的輸入一定得到同樣結果」的函式包起來，算過的就不再算。</p>
+        <pre class="code" data-src="exercises/12-generics/exercises.go#Memo"><code>func Memo[K comparable, V any](f func(K) V) func(K) V {
+	// TODO: 實作
+	return f
+}</code></pre>
+        <p>測試傳進去的函式會記錄自己被呼叫了幾次。測試：<code>TestMemo</code>。</p>
+        <details><summary>提示</summary><p>在 Memo 裡建立一個 <code>map[K]V</code>，回傳一個 closure 抓住它（<a href="04-functions.html#closures">04 章</a>）。closure 裡先查 map，有就直接回傳；沒有才呼叫 f，存進 map 再回傳。</p></details>
+      </li>
+      <li>
+        <h3><span class="level fix">找錯</span>練習 7：最大值是 0？</h3>
+        <p>全部都是負數時，Max 回傳 0。</p>
+        <pre class="code" data-src="exercises/12-generics/exercises.go#Max"><code>func Max[T cmp.Ordered](s []T) (T, bool) {
+	var best T
+	for _, v := range s {
+		if v &gt; best {
+			best = v
+		}
+	}
+	return best, len(s) &gt; 0
+}</code></pre>
+        <p>測試：<code>TestMax</code>。</p>
+        <details><summary>提示</summary><p>T 的零值是 0（或空字串），不一定在 slice 裡。從 <code>s[0]</code> 開始比。</p></details>
+      </li>
+    </ol>
+    <p><a href="https://github.com/xinqilin/GO-Playground/blob/main/exercises/12-generics/solution.go">參考解答</a>：先自己寫完再看。測試通過的寫法都是對的。</p>
+  </section>
+
+  <section aria-labelledby="recap">
+    <h2 id="recap">重點回顧</h2>
+    <ul class="recap">
+      <li>泛型讓同一段程式套用到很多型別，型別檢查仍然在編譯時完成。</li>
+      <li>型別參數寫在中括號裡：<code>func F[T 限制](…)</code>、<code>type S[T 限制] …</code>。</li>
+      <li>限制是 interface：any 什麼都收，comparable 能用 ==，cmp.Ordered 能比大小。</li>
+      <li>限制可以列出型別集合 <code>~int | ~float64</code>；<code>~</code> 包含底層型別相同的自訂型別，自己寫限制時幾乎都要加。</li>
+      <li>限制決定函式裡能用哪些運算；含型別集合的 interface 只能當限制。</li>
+      <li>型別推論只看參數；推論不出來的型別參數排在前面，用部分實例化只寫它。</li>
+      <li>泛型型別使用時要寫出型別：<code>Set[int]</code>；方法的 receiver 寫 <code>(s *Set[T])</code>。</li>
+      <li>Go 1.27 起方法可以有自己的型別參數，但 generic method 不能滿足 interface。</li>
+      <li>只呼叫方法就用 interface；對 slice、map 做通用操作、寫容器、要保留具體型別時才用泛型。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="further">
+    <h2 id="further">延伸閱讀</h2>
+    <ul class="notes">
+      <li>Go 語言規格：<a href="https://go.dev/ref/spec#Type_parameter_declarations">Type parameter declarations</a>、<a href="https://go.dev/ref/spec#Type_constraints">Type constraints</a>、<a href="https://go.dev/ref/spec#General_interfaces">General interfaces</a>（型別集合）、<a href="https://go.dev/ref/spec#Satisfying_a_type_constraint">Satisfying a type constraint</a>、<a href="https://go.dev/ref/spec#Instantiations">Instantiations</a>、<a href="https://go.dev/ref/spec#Type_inference">Type inference</a>、<a href="https://go.dev/ref/spec#Method_declarations">Method declarations</a>（generic method）。</li>
+      <li>套件文件：<a href="https://pkg.go.dev/cmp">cmp</a>、<a href="https://pkg.go.dev/slices">slices</a>、<a href="https://pkg.go.dev/maps">maps</a>。</li>
+      <li><a href="https://go.dev/doc/tutorial/generics">官方教學：Getting started with generics</a>。</li>
+      <li>Go blog：<a href="https://go.dev/blog/intro-generics">An Introduction To Generics</a>、<a href="https://go.dev/blog/when-generics">When To Use Generics</a>。</li>
+    </ul>
+  </section>
+
   <section aria-labelledby="run">
     <h2 id="run">動手跑</h2>
     <p class="label">在 repo 根目錄</p>
-    <pre class="shell"><code>go run ./chapters/12-generics
-go test ./chapters/12-generics</code></pre>
-    <p><a href="https://github.com/xinqilin/GO-Playground/tree/main/chapters/12-generics">在 GitHub 看完整程式碼</a></p>
+    <pre class="shell"><code>go run ./chapters/12-generics                 <span class="c"># 執行本章所有示範</span>
+go test ./chapters/12-generics                <span class="c"># 驗證頁面上的每一段輸出</span>
+go test ./exercises/12-generics/              <span class="c"># 做練習</span></code></pre>
+    <p><a href="https://github.com/xinqilin/GO-Playground/tree/main/chapters/12-generics">在 GitHub 看本章完整程式碼</a>，或看<a href="https://github.com/xinqilin/GO-Playground/tree/main/exercises/12-generics">練習題</a>。</p>
   </section>
 </main>
 

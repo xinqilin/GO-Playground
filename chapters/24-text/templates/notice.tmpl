@@ -1,0 +1,4 @@
+{{define "notice" -}}
+【{{.Shop}}】{{block "body" .}}今天正常營業。{{end}}
+營業時間 {{join .Hours "、"}}，外送滿 {{money .MinOrder}} 元免運。
+{{end}}

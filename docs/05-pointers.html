@@ -4,162 +4,527 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>指標｜Go 圖解手冊</title>
-<meta name="description" content="Go 指標圖解：&amp; 取地址、* 取值、傳值與傳指標的差別，以及 nil 與 new。">
+<meta name="description" content="Go 的指標：& 取位址、* 解參考、傳值與傳指標、struct 的淺複製、new 與 &T{}、Go 1.26 的 new(值)、nil 指標與可有可無的欄位、逃逸分析，以及什麼時候該用指標，附可執行的練習題。">
 <link rel="stylesheet" href="assets/style.css">
 </head>
 <body>
 <header class="site">
   <a href="index.html">Go 圖解手冊</a>
-  <span class="count">05 / 24</span>
+  <span class="count">05 / 33</span>
 </header>
 
-<main class="page">
+<main class="page long">
   <header class="hero">
     <div class="num" aria-hidden="true">05</div>
     <p class="eyebrow">Part 1 · 基礎 · 第 05 章</p>
     <h1>指標</h1>
-    <p class="analogy">一張寫著門牌的紙條：拿著它，就能找到並改動原本的變數。</p>
+    <p class="analogy">變數是一間房子，指標是一張寫著門牌的紙條。把紙條交給別人，對方就能找到你家，也能動你家裡的東西。</p>
   </header>
 
-  <section aria-labelledby="look">
-    <h2 id="look">看圖</h2>
-    <div class="figs">
-      <figure class="fig">
-        <svg viewBox="0 0 480 266" role="img" aria-label="記憶體像一排有門牌的房子；x 住在門牌 0xc020，紙條 p 上寫著 0xc020，指向 x">
-          <title>變數是房子，指標是寫著門牌的紙條</title>
-          <path class="soft" d="M22 74 L72 44 L122 74 V154 H22 Z"/>
-          <path class="soft" d="M134 74 L184 44 L234 74 V154 H134 Z"/>
-          <path class="acc" d="M246 74 L296 44 L346 74 V154 H246 Z"/>
-          <path class="soft" d="M358 74 L408 44 L458 74 V154 H358 Z"/>
-          <text class="bold t-acc" x="296" y="34" text-anchor="middle">x</text>
-          <text class="lg" x="296" y="122" text-anchor="middle">5</text>
-          <text class="sm mono" x="72" y="144" text-anchor="middle">0xc010</text>
-          <text class="sm mono" x="184" y="144" text-anchor="middle">0xc018</text>
-          <text class="sm mono" x="296" y="144" text-anchor="middle">0xc020</text>
-          <text class="sm mono" x="408" y="144" text-anchor="middle">0xc028</text>
-          <text class="bold t-hot" x="22" y="188">p</text>
-          <rect class="hot" x="22" y="196" width="170" height="58" rx="4"/>
-          <text class="mono" x="107" y="232" text-anchor="middle">0xc020</text>
-          <path class="wire hot-ln" d="M192 225 H296 V172"/>
-          <path class="tip hot-tip" d="M296 160 L289 173 L303 173 Z"/>
-          <text class="sm" x="244" y="214" text-anchor="middle">指向 x</text>
-        </svg>
-        <figcaption>x 是一間房子，裡面住著 5。p 是一張紙條，上面寫著 x 的門牌。</figcaption>
-      </figure>
+  <nav class="toc-inline" aria-labelledby="toc-title">
+    <p class="label" id="toc-title">本章內容</p>
+    <ol>
+      <li><a href="#goals">本章你會學到</a></li>
+      <li><a href="#address">位址與指標</a></li>
+      <li><a href="#passing">傳值與傳指標</a></li>
+      <li><a href="#struct-ptr">指向 struct 的指標</a></li>
+      <li><a href="#nil">nil 指標</a></li>
+      <li><a href="#escape">回傳區域變數的指標</a></li>
+      <li><a href="#when">什麼時候該用指標</a></li>
+      <li><a href="#pitfalls">常見錯誤</a></li>
+      <li><a href="#java">從 Java 來的你</a></li>
+      <li><a href="#exercises">練習</a></li>
+      <li><a href="#recap">重點回顧</a></li>
+      <li><a href="#further">延伸閱讀</a></li>
+    </ol>
+  </nav>
 
-      <figure class="fig">
-        <svg viewBox="0 0 480 296" role="img" aria-label="&amp;x 取得 x 的門牌 0xc020；*p 照著紙條上的門牌找到 x，拿到裡面的 5">
-          <title>&amp; 問門牌，* 照門牌去找</title>
-          <text class="lg mono" x="12" y="110">&amp;x</text>
-          <path class="acc" d="M84 66 L129 36 L174 66 V136 H84 Z"/>
-          <text class="bold t-acc" x="129" y="28" text-anchor="middle">x</text>
-          <text class="lg" x="129" y="114" text-anchor="middle">5</text>
-          <path class="wire" d="M182 101 H282"/>
-          <path class="tip" d="M294 101 L281 94 L281 108 Z"/>
-          <text class="sm" x="232" y="89" text-anchor="middle">問門牌</text>
-          <rect class="hot" x="298" y="74" width="164" height="54" rx="4"/>
-          <text class="mono" x="380" y="108" text-anchor="middle">0xc020</text>
-
-          <text class="lg mono" x="12" y="260">*p</text>
-          <text class="bold t-hot" x="84" y="214">p</text>
-          <rect class="hot" x="84" y="222" width="164" height="54" rx="4"/>
-          <text class="mono" x="166" y="256" text-anchor="middle">0xc020</text>
-          <path class="wire hot-ln" d="M256 249 H340"/>
-          <path class="tip hot-tip" d="M352 249 L339 242 L339 256 Z"/>
-          <text class="sm" x="298" y="237" text-anchor="middle">照門牌找</text>
-          <path class="acc" d="M362 216 L407 186 L452 216 V286 H362 Z"/>
-          <text class="bold t-acc" x="407" y="178" text-anchor="middle">x</text>
-          <text class="lg" x="407" y="264" text-anchor="middle">5</text>
-        </svg>
-        <figcaption><code>&amp;x</code> 問 x 的門牌。<code>*p</code> 照紙條上的門牌，找到房子裡的值。</figcaption>
-      </figure>
-
-      <figure class="fig">
-        <svg viewBox="0 0 480 334" role="img" aria-label="傳值時函式拿到 a 的影印本，改了不影響 a；傳指標時函式拿到 b 的門牌，照門牌改到原本的 b">
-          <title>傳值與傳指標</title>
-          <path class="wire faint" d="M240 12 V326"/>
-
-          <text class="bold" x="117" y="26" text-anchor="middle">傳值</text>
-          <text class="sm mono" x="117" y="48" text-anchor="middle">addOneValue(a)</text>
-          <path class="acc" d="M72 100 L117 70 L162 100 V160 H72 Z"/>
-          <text class="bold t-acc" x="60" y="136" text-anchor="end">a</text>
-          <text class="lg" x="117" y="144" text-anchor="middle">1</text>
-          <path class="wire" d="M117 166 V208"/>
-          <path class="tip" d="M117 220 L110 207 L124 207 Z"/>
-          <text class="sm" x="126" y="196">複製一份</text>
-          <rect class="wire dash" x="52" y="226" width="130" height="100" rx="10"/>
-          <path class="soft" d="M82 264 L117 240 L152 264 V316 H82 Z"/>
-          <text class="bold" x="74" y="296" text-anchor="end">n</text>
-          <text class="lg" x="117" y="304" text-anchor="middle">2</text>
-
-          <text class="bold" x="363" y="26" text-anchor="middle">傳指標</text>
-          <text class="sm mono" x="363" y="48" text-anchor="middle">addOnePointer(&amp;b)</text>
-          <path class="acc" d="M318 100 L363 70 L408 100 V160 H318 Z"/>
-          <text class="bold t-acc" x="306" y="136" text-anchor="end">b</text>
-          <text class="lg t-hot" x="363" y="144" text-anchor="middle">2</text>
-          <path class="wire" d="M343 166 V212"/>
-          <path class="tip" d="M343 224 L336 211 L350 211 Z"/>
-          <text class="sm" x="334" y="198" text-anchor="end">給門牌</text>
-          <rect class="wire dash" x="298" y="226" width="130" height="100" rx="10"/>
-          <rect class="hot" x="318" y="250" width="90" height="44" rx="4"/>
-          <text class="mono" x="363" y="279" text-anchor="middle">0xc018</text>
-          <text class="bold t-hot" x="310" y="279" text-anchor="end">n</text>
-          <path class="wire hot-ln" d="M383 250 V178"/>
-          <path class="tip hot-tip" d="M383 166 L376 179 L390 179 Z"/>
-          <text class="sm t-hot" x="392" y="214">照門牌改</text>
-        </svg>
-        <figcaption>傳值：函式拿到影印本，改的是影印本，a 還是 1。傳指標：函式拿到門牌，照門牌改到原本的 b。</figcaption>
-      </figure>
-
-      <figure class="fig">
-        <svg viewBox="0 0 480 196" role="img" aria-label="nil 指標是一張空白紙條，照著它去找會 panic；使用前先檢查 p 不是 nil">
-          <title>nil 是一張空白紙條</title>
-          <text class="bold t-hot" x="40" y="64">p</text>
-          <rect class="hot" x="40" y="72" width="150" height="58" rx="4"/>
-          <text class="mono mute" x="115" y="108" text-anchor="middle">nil</text>
-          <path class="wire hot-ln dash" d="M198 101 H306"/>
-          <path class="tip hot-tip" d="M318 101 L305 94 L305 108 Z"/>
-          <text class="mono" x="252" y="89" text-anchor="middle">*p</text>
-          <path class="hot" d="M426 81 L398 53 L358 53 L330 81 L330 121 L358 149 L398 149 L426 121 Z"/>
-          <text class="bold t-hot" x="378" y="108" text-anchor="middle">panic</text>
-          <text x="240" y="182" text-anchor="middle">用之前先檢查 <tspan class="mono t-acc">p != nil</tspan></text>
-        </svg>
-        <figcaption>空白紙條（nil）照著去找，找不到房子，程式就 panic。</figcaption>
-      </figure>
-    </div>
+  <section aria-labelledby="goals">
+    <h2 id="goals">本章你會學到</h2>
+    <ul class="notes">
+      <li>用 <code>&amp;</code> 取得變數的位址、用 <code>*</code> 讀寫指標指向的值，以及 <code>*int</code> 這種型別的意思。</li>
+      <li>傳值和傳指標在語意上的差別，以及複製 struct 時指標欄位會被共用。</li>
+      <li><code>new(T)</code>、<code>&amp;T{…}</code>，以及 Go 1.26 起的 <code>new(值)</code>。</li>
+      <li>nil 指標為什麼會 panic，以及用指標表示「可以沒有值」。</li>
+      <li>回傳區域變數的指標為什麼安全，用 <code>-gcflags=-m</code> 看逃逸分析。</li>
+      <li>什麼時候該用指標，什麼時候不用。</li>
+    </ul>
+    <p>先備：<a href="04-functions.html">04 函式</a>（參數傳值、defer 與 recover）。範例用到 struct，這裡只要知道它是「幾個欄位綁在一起的值」，完整介紹在第 <a href="09-structs-methods.html">09 章</a>。</p>
   </section>
 
-  <section aria-labelledby="code">
-    <h2 id="code">最小範例</h2>
-    <pre class="code"><code>func addOneValue(n int)    { n++ }  <span class="c">// 拿到影印本</span>
-func addOnePointer(n *int) { *n++ } <span class="c">// 拿到門牌</span>
+  <section aria-labelledby="address">
+    <h2 id="address">1. 位址與指標</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 266" role="img" aria-label="記憶體像一排有門牌的房子；x 住在門牌 0xc020，紙條 p 上寫著 0xc020，指向 x">
+        <title>變數是房子，指標是寫著門牌的紙條</title>
+        <path class="soft" d="M22 74 L72 44 L122 74 V154 H22 Z"/>
+        <path class="soft" d="M134 74 L184 44 L234 74 V154 H134 Z"/>
+        <path class="acc" d="M246 74 L296 44 L346 74 V154 H246 Z"/>
+        <path class="soft" d="M358 74 L408 44 L458 74 V154 H358 Z"/>
+        <text class="bold t-acc" x="296" y="34" text-anchor="middle">x</text>
+        <text class="lg" x="296" y="122" text-anchor="middle">5</text>
+        <text class="sm mono" x="72" y="144" text-anchor="middle">0xc010</text>
+        <text class="sm mono" x="184" y="144" text-anchor="middle">0xc018</text>
+        <text class="sm mono" x="296" y="144" text-anchor="middle">0xc020</text>
+        <text class="sm mono" x="408" y="144" text-anchor="middle">0xc028</text>
+        <text class="bold t-hot" x="22" y="188">p</text>
+        <rect class="hot" x="22" y="196" width="170" height="58" rx="4"/>
+        <text class="mono" x="107" y="232" text-anchor="middle">0xc020</text>
+        <path class="wire hot-ln" d="M192 225 H296 V172"/>
+        <path class="tip hot-tip" d="M296 160 L289 173 L303 173 Z"/>
+        <text class="sm" x="244" y="214" text-anchor="middle">指向 x</text>
+      </svg>
+      <figcaption>記憶體像一排有門牌的房子。x 住在其中一間，裡面放著 5；p 是一張紙條，上面寫著 x 的門牌（門牌號碼只是示意）。</figcaption>
+    </figure>
+    <p>每個變數都住在記憶體的某個位置，這個位置叫做<strong>位址</strong>（address）。<strong>指標</strong>（pointer）就是一個存放位址的變數。Go 用兩個符號操作指標：</p>
+    <ul class="notes">
+      <li><code>&amp;x</code>：取得 x 的位址，結果是一個指向 x 的指標。</li>
+      <li><code>*p</code>：照著 p 的位址找到那個變數，可以讀，也可以寫。這叫做<strong>解參考</strong>（dereference）。</li>
+    </ul>
+    <pre class="code" data-src="chapters/05-pointers/address.go#addressAndDeref"><code>func addressAndDeref() {
+	stock := 5
+	p := &amp;stock // p 的型別是 *int：「指向 int 的指標」
+	fmt.Println("stock =", stock)
+	fmt.Println("*p =", *p)
+	fmt.Println("p == &amp;stock:", p == &amp;stock)
+	fmt.Printf("%T\n", p)
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/05-pointers#Example_addressAndDeref"><code>stock = 5
+*p = 5
+p == &amp;stock: true
+*int</code></pre>
+    <p><code>p</code> 的型別是 <code>*int</code>，讀作「指向 int 的指標」。型別前面的 <code>*</code> 是型別的一部分，運算式前面的 <code>*</code> 是解參考，兩者長得一樣但意思不同。指標本身也有型別：<code>*int</code> 只能指向 int，不能指向 string。</p>
+    <p>直接印出指標會得到 <code>0xc000012345</code> 這種十六進位的位址，但每次執行都不一樣，所以本書的範例只比較位址，不印出來。</p>
 
-func main() {
-	x := 5
-	p := &amp;x <span class="c">// p 的型別是 *int</span>
-	*p = 10 <span class="c">// 照門牌改：x 變成 10</span>
-	fmt.Println(x, *p, p == &amp;x)
+    <figure class="fig">
+      <svg viewBox="0 0 480 296" role="img" aria-label="&amp;x 取得 x 的門牌 0xc020；*p 照著紙條上的門牌找到 x，拿到裡面的 5">
+        <title>&amp; 問門牌，* 照門牌去找</title>
+        <text class="lg mono" x="12" y="110">&amp;x</text>
+        <path class="acc" d="M84 66 L129 36 L174 66 V136 H84 Z"/>
+        <text class="bold t-acc" x="129" y="28" text-anchor="middle">x</text>
+        <text class="lg" x="129" y="114" text-anchor="middle">5</text>
+        <path class="wire" d="M182 101 H282"/>
+        <path class="tip" d="M294 101 L281 94 L281 108 Z"/>
+        <text class="sm" x="232" y="89" text-anchor="middle">問門牌</text>
+        <rect class="hot" x="298" y="74" width="164" height="54" rx="4"/>
+        <text class="mono" x="380" y="108" text-anchor="middle">0xc020</text>
+        <text class="lg mono" x="12" y="260">*p</text>
+        <text class="bold t-hot" x="84" y="214">p</text>
+        <rect class="hot" x="84" y="222" width="164" height="54" rx="4"/>
+        <text class="mono" x="166" y="256" text-anchor="middle">0xc020</text>
+        <path class="wire hot-ln" d="M256 249 H340"/>
+        <path class="tip hot-tip" d="M352 249 L339 242 L339 256 Z"/>
+        <text class="sm" x="298" y="237" text-anchor="middle">照門牌找</text>
+        <path class="acc" d="M362 216 L407 186 L452 216 V286 H362 Z"/>
+        <text class="bold t-acc" x="407" y="178" text-anchor="middle">x</text>
+        <text class="lg" x="407" y="264" text-anchor="middle">5</text>
+      </svg>
+      <figcaption><code>&amp;x</code> 問 x 的門牌。<code>*p</code> 照紙條上的門牌找到房子，可以看裡面的值，也可以換掉它。</figcaption>
+    </figure>
+    <h3>透過指標修改</h3>
+    <pre class="code" data-src="chapters/05-pointers/address.go#modifyThroughPointer"><code>func modifyThroughPointer() {
+	stock := 5
+	p := &amp;stock
+	*p = 10 // 改的是 p 指向的那一格，也就是 stock
+	*p += 3
+	fmt.Println("stock =", stock)
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/05-pointers#Example_modifyThroughPointer"><code>stock = 13</code></pre>
+    <p><code>*p = 10</code> 不是改 p，而是改「p 指向的那個變數」，也就是 stock。<code>*p += 3</code> 也一樣。從頭到尾 p 裡面的位址都沒變過。</p>
 
+    <h3>兩張紙條，同一間房子</h3>
+    <pre class="code" data-src="chapters/05-pointers/address.go#aliasing"><code>func aliasing() {
+	stock := 5
+	a := &amp;stock
+	b := &amp;stock
+	*a = 8
+	fmt.Println(*b, a == b)
+
+	other := 8
+	c := &amp;other
+	fmt.Println(*a == *c, a == c) // 值相等，但指向不同的變數
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/05-pointers#Example_aliasing"><code>8 true
+true false</code></pre>
+    <p>a 和 b 指向同一個變數，從 a 改，從 b 讀得到新值。比較兩個指標 <code>a == b</code>，比的是「是不是同一個位址」，不是值；要比值就要先解參考：<code>*a == *c</code>。好幾個指標指向同一個變數，在程式裡很常見，也是 bug 的來源：改了一個地方，遠處的另一段程式跟著變了。</p>
+    <aside class="callout">
+      <span class="title">沒有指標運算</span>
+      <p>C 語言可以對指標加減，走到隔壁的記憶體。Go 不允許，<code>p++</code> 對指標是編譯錯誤（常見錯誤 5）。指標只能取位址、解參考、比較、指定。這讓 Go 的指標安全得多：一個指標要嘛是 nil，要嘛指向一個真正存在的變數。</p>
+    </aside>
+  </section>
+
+  <section aria-labelledby="passing">
+    <h2 id="passing">2. 傳值與傳指標</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 334" role="img" aria-label="傳值時函式拿到 a 的影印本，改了不影響 a；傳指標時函式拿到 b 的門牌，照門牌改到原本的 b">
+        <title>傳值與傳指標</title>
+        <path class="wire faint" d="M240 12 V326"/>
+        <text class="bold" x="117" y="26" text-anchor="middle">傳值</text>
+        <text class="sm mono" x="117" y="48" text-anchor="middle">addOneValue(a)</text>
+        <path class="acc" d="M72 100 L117 70 L162 100 V160 H72 Z"/>
+        <text class="bold t-acc" x="60" y="136" text-anchor="end">a</text>
+        <text class="lg" x="117" y="144" text-anchor="middle">1</text>
+        <path class="wire" d="M117 166 V208"/>
+        <path class="tip" d="M117 220 L110 207 L124 207 Z"/>
+        <text class="sm" x="126" y="196">複製一份</text>
+        <rect class="wire dash" x="52" y="226" width="130" height="100" rx="10"/>
+        <path class="soft" d="M82 264 L117 240 L152 264 V316 H82 Z"/>
+        <text class="bold" x="74" y="296" text-anchor="end">n</text>
+        <text class="lg" x="117" y="304" text-anchor="middle">2</text>
+        <text class="bold" x="363" y="26" text-anchor="middle">傳指標</text>
+        <text class="sm mono" x="363" y="48" text-anchor="middle">addOnePointer(&amp;b)</text>
+        <path class="acc" d="M318 100 L363 70 L408 100 V160 H318 Z"/>
+        <text class="bold t-acc" x="306" y="136" text-anchor="end">b</text>
+        <text class="lg t-hot" x="363" y="144" text-anchor="middle">2</text>
+        <path class="wire" d="M343 166 V212"/>
+        <path class="tip" d="M343 224 L336 211 L350 211 Z"/>
+        <text class="sm" x="334" y="198" text-anchor="end">給門牌</text>
+        <rect class="wire dash" x="298" y="226" width="130" height="100" rx="10"/>
+        <rect class="hot" x="318" y="250" width="90" height="44" rx="4"/>
+        <text class="mono" x="363" y="279" text-anchor="middle">0xc018</text>
+        <text class="bold t-hot" x="310" y="279" text-anchor="end">n</text>
+        <path class="wire hot-ln" d="M383 250 V178"/>
+        <path class="tip hot-tip" d="M383 166 L376 179 L390 179 Z"/>
+        <text class="sm t-hot" x="392" y="214">照門牌改</text>
+      </svg>
+      <figcaption>傳值：函式拿到影印本，改的是影印本，a 還是 1。傳指標：函式拿到門牌，照門牌改到原本的 b。</figcaption>
+    </figure>
+    <p>第 <a href="04-functions.html#basics">04 章</a>說過，Go 的參數一律傳值。傳指標其實也是傳值，只是複製的是「位址」：函式拿到一張抄了同樣門牌的紙條，照著它就能改到呼叫端的變數。</p>
+    <pre class="code" data-src="chapters/05-pointers/pass.go#addOneValue,addOnePointer,passValueVsPointer"><code>func addOneValue(n int) { n++ }
+
+func addOnePointer(n *int) { *n++ }
+
+func passValueVsPointer() {
 	a, b := 1, 1
 	addOneValue(a)
 	addOnePointer(&amp;b)
-	fmt.Println(a, b)
+	fmt.Println("a =", a, "b =", b)
 }</code></pre>
     <p class="label">輸出</p>
-    <pre class="out"><code>10 10 true
-1 2</code></pre>
+    <pre class="out" data-example="chapters/05-pointers#Example_passValueVsPointer"><code>a = 1 b = 2</code></pre>
+    <p>呼叫時寫 <code>&amp;b</code>，呼叫端一看就知道「這個函式可能會改 b」。這是 Go 刻意的設計：會不會被修改，從呼叫的地方就看得出來。</p>
+
+    <h3>struct 也是值</h3>
+    <pre class="code" data-src="chapters/05-pointers/pass.go#bento,raiseCopy,raisePointer,structCopy"><code>type bento struct {
+	name  string
+	price int
+}
+
+func raiseCopy(b bento) { b.price += 5 }
+
+func raisePointer(b *bento) { b.price += 5 }
+
+func structCopy() {
+	pork := bento{"排骨", 85}
+	copied := pork
+	copied.price = 999
+	fmt.Println(pork.price, copied.price)
+
+	raiseCopy(pork)
+	fmt.Println(pork.price)
+	raisePointer(&amp;pork)
+	fmt.Println(pork.price)
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/05-pointers#Example_structCopy"><code>85 999
+85
+90</code></pre>
+    <p>和 Java 的物件不同，Go 的 struct 是值：<code>copied := pork</code> 會把每個欄位都複製一份，改 copied 不影響 pork。傳給函式也一樣，<code>raiseCopy</code> 漲價的是複本，只有傳指標的 <code>raisePointer</code> 才改到原本的便當。第 <a href="09-structs-methods.html">09 章</a>的方法也會遇到同樣的選擇：receiver 用值還是用指標。</p>
+
+    <h3>指標欄位會被共用</h3>
+    <figure class="fig">
+      <svg viewBox="0 0 480 206" role="img" aria-label="first 和 second 兩個 struct 的 note 欄位存著同一個位址，指向同一個字串「加辣」">
+        <title>複製 struct 只複製位址</title>
+        <rect class="soft" x="16" y="20" width="190" height="74" rx="8"/>
+        <text class="small mono bold" x="28" y="48">first</text>
+        <text class="small mono" x="110" y="48">id: 1</text>
+        <text class="small mono" x="28" y="78">note</text>
+        <circle class="tip" cx="100" cy="73" r="5"/>
+        <path class="wire" d="M106 73 H250 V100 H288"/>
+        <path class="tip" d="M300 100 L287 93 L287 107 Z"/>
+        <rect class="soft" x="16" y="120" width="190" height="74" rx="8"/>
+        <text class="small mono bold" x="28" y="148">second</text>
+        <text class="small mono" x="110" y="148">id: 2</text>
+        <text class="small mono" x="28" y="178">note</text>
+        <circle class="tip" cx="100" cy="173" r="5"/>
+        <path class="wire" d="M106 173 H250 V116 H288"/>
+        <path class="tip" d="M300 116 L287 109 L287 123 Z"/>
+        <text class="sm" x="382" y="70" text-anchor="middle">同一個字串</text>
+        <rect class="hot" x="302" y="80" width="160" height="56" rx="8"/>
+        <text class="bold t-hot" x="382" y="115" text-anchor="middle">加辣</text>
+      </svg>
+      <figcaption><code>second := first</code> 複製了每個欄位，但 note 欄位存的是位址，複製後兩邊指向同一個字串。</figcaption>
+    </figure>
+    <pre class="code" data-src="chapters/05-pointers/pass.go#order,shallowCopy"><code>type order struct {
+	id   int
+	note *string
+}
+
+func shallowCopy() {
+	note := "不要香菜"
+	first := order{id: 1, note: &amp;note}
+	second := first
+	second.id = 2
+	*second.note = "加辣"
+	fmt.Println(first.id, *first.note)
+	fmt.Println(second.id, *second.note)
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/05-pointers#Example_shallowCopy"><code>1 加辣
+2 加辣</code></pre>
+    <p>複製 struct 時，指標欄位被複製的是「門牌」，不是房子。所以 second 改了備註，first 的備註也變了，id 則各自獨立。這叫做<strong>淺複製</strong>（shallow copy）。slice 和 map 欄位也是同樣的情況（第 <a href="06-arrays-slices.html">06 章</a>、第 <a href="07-maps.html">07 章</a>）。需要完全獨立的複本時，要替指標欄位另外配置新的變數，練習 7 就是這個題目。</p>
   </section>
 
-  <section aria-labelledby="notes">
-    <h2 id="notes">工程師筆記</h2>
-    <ul class="notes">
-      <li>Go 一律傳值。slice、map、channel 本身是一個小小的描述子，裡面記著底層資料的位置；複製描述子不會複製底層資料，所以函式裡改元素，呼叫端看得到（細節在第 06、07 章）。</li>
-      <li>回傳區域變數的地址是安全的。編譯器會做 escape analysis，變數離開函式後還會被用到，就放到 heap；<code>go run -gcflags=-m</code> 會印出 <code>moved to heap: c</code>。</li>
-      <li>沒有指標運算，<code>p++</code> 編譯不過。</li>
-      <li>對 nil 解參考會 panic：<code>invalid memory address or nil pointer dereference</code>。</li>
-      <li>什麼時候用指標：函式要改到呼叫端的值、struct 很大不想複製、要用 nil 表示「沒有值」。小的值直接傳，通常比較簡單。</li>
-      <li>Go 1.26 起 <code>new</code> 可以直接給初始值：<code>new(7)</code> 得到一個指向 7 的 <code>*int</code>，填 JSON 的選填欄位很方便。</li>
-    </ul>
+  <section aria-labelledby="struct-ptr">
+    <h2 id="struct-ptr">3. 指向 struct 的指標</h2>
+    <p>實務上最常見的指標，是指向 struct 的指標。存取欄位時不用先解參考，Go 會自動處理：</p>
+    <pre class="code" data-src="chapters/05-pointers/structs.go#structPointer"><code>func structPointer() {
+	b := bento{"雞腿", 90}
+	p := &amp;b
+	p.price = 95 // 等於 (*p).price = 95
+	fmt.Println(b.price, (*p).price)
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/05-pointers#Example_structPointer"><code>95 95</code></pre>
+    <p><code>p.price</code> 和 <code>(*p).price</code> 完全一樣，前者只是簡寫。所以在 Go 裡，手上是 struct 還是指向 struct 的指標，用起來幾乎沒有差別，<code>-&gt;</code> 這種 C 的符號也不需要。</p>
+
+    <h3>new 和 &amp;T{}</h3>
+    <pre class="code" data-src="chapters/05-pointers/structs.go#newVsLiteral"><code>func newVsLiteral() {
+	p := new(bento) // 配置一個零值的 bento，回傳它的位址
+	p.name = "素食"
+	q := &amp;bento{name: "素食"} // 複合字面值加上 &amp;，可以順便填欄位
+	fmt.Println(*p == *q, p == q)
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/05-pointers#Example_newVsLiteral"><code>true false</code></pre>
+    <p>兩種寫法都會建立一個新的變數，回傳指向它的指標。<code>new(T)</code> 得到零值的 T；<code>&amp;T{…}</code> 可以同時填欄位，所以 struct 幾乎都用後者。兩個指標指向不同的變數（<code>p == q</code> 是 false），只是內容剛好一樣（<code>*p == *q</code> 是 true）。</p>
+    <p>注意 <code>&amp;</code> 只能用在「有位置的東西」上：變數、struct 的欄位、slice 的元素、複合字面值。數字常數沒有位置，<code>&amp;85</code> 是編譯錯誤：</p>
+    <pre class="code bad" data-compile-error><code>package main
+
+import "fmt"
+
+func main() {
+	discount := &amp;85
+	fmt.Println(*discount)
+}</code></pre>
+    <p class="label">編譯錯誤</p>
+    <pre class="out err"><code>./main.go:6:15: invalid operation: cannot take address of 85 (untyped int constant)</code></pre>
+
+    <h3>new(值)：Go 1.26 起</h3>
+    <pre class="code" data-src="chapters/05-pointers/structs.go#newWithValue"><code>func newWithValue() {
+	discount := new(15)
+	fmt.Println(*discount)
+	o := order{id: 3, note: new("少飯")}
+	fmt.Println(*o.note)
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/05-pointers#Example_newWithValue"><code>15
+少飯</code></pre>
+    <p>Go 1.26 起，<code>new</code> 的參數可以是一個值，建立一個以它為初始值的新變數。以前要寫兩行：先宣告 <code>d := 15</code>，再取 <code>&amp;d</code>；現在 <code>new(15)</code> 一個運算式就完成。這在填「用指標表示可有可無」的欄位時特別方便，第 4 節會看到。如果你的 Go 比 1.26 舊，這兩行會編譯失敗，改回先宣告變數再取位址的寫法即可。</p>
+  </section>
+
+  <section aria-labelledby="nil">
+    <h2 id="nil">4. nil 指標</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 196" role="img" aria-label="nil 指標是一張空白紙條，照著它去找會 panic；使用前先檢查 p 不是 nil">
+        <title>nil 是一張空白紙條</title>
+        <text class="bold t-hot" x="40" y="64">p</text>
+        <rect class="hot" x="40" y="72" width="150" height="58" rx="4"/>
+        <text class="mono mute" x="115" y="108" text-anchor="middle">nil</text>
+        <path class="wire hot-ln dash" d="M198 101 H306"/>
+        <path class="tip hot-tip" d="M318 101 L305 94 L305 108 Z"/>
+        <text class="mono" x="252" y="89" text-anchor="middle">*p</text>
+        <path class="hot" d="M426 81 L398 53 L358 53 L330 81 L330 121 L358 149 L398 149 L426 121 Z"/>
+        <text class="bold t-hot" x="378" y="108" text-anchor="middle">panic</text>
+        <text x="240" y="182" text-anchor="middle">用之前先檢查 <tspan class="mono t-acc">p != nil</tspan></text>
+      </svg>
+      <figcaption>空白紙條（nil）照著去找，找不到房子，程式就 panic。</figcaption>
+    </figure>
+    <p>指標的零值是 <code>nil</code>：一張還沒寫門牌的紙條。對 nil 解參考會在執行時 panic：</p>
+    <pre class="code" data-src="chapters/05-pointers/nil.go#nilPointer"><code>func nilPointer() {
+	var p *int
+	fmt.Println(p == nil)
+	defer func() {
+		fmt.Println("panic:", recover())
+	}()
+	fmt.Println(*p)
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/05-pointers#Example_nilPointer"><code>true
+panic: runtime error: invalid memory address or nil pointer dereference</code></pre>
+    <p>這就是 Go 版的 NullPointerException，是 Go 程式最常見的 panic。對策很直接：指標可能是 nil 的地方，使用前先檢查 <code>if p != nil</code>；函式的文件寫清楚參數能不能是 nil、回傳值會不會是 nil。透過 nil 的 struct 指標讀欄位（<code>p.price</code>）也一樣會 panic，因為它本質上就是 <code>(*p).price</code>。</p>
+
+    <h3>用指標表示「可以沒有值」</h3>
+    <p>nil 也有正面的用途。int 的零值是 0，但有時候「0」和「沒有填」是兩回事：折扣 0% 是明確的設定，沒有設定折扣則可能要套用預設規則。用 <code>*int</code> 就分得出來：</p>
+    <pre class="code" data-src="chapters/05-pointers/nil.go#priceAfter,optionalField"><code>func priceAfter(price int, discount *int) string {
+	if discount == nil {
+		return fmt.Sprintf("%d 元（沒有設定折扣）", price)
+	}
+	return fmt.Sprintf("%d 元（折扣 %d%%）", price*(100-*discount)/100, *discount)
+}
+
+func optionalField() {
+	zero := 0
+	fmt.Println(priceAfter(100, nil))
+	fmt.Println(priceAfter(100, &amp;zero))
+	fmt.Println(priceAfter(100, new(20)))
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/05-pointers#Example_optionalField"><code>100 元（沒有設定折扣）
+100 元（折扣 0%）
+80 元（折扣 20%）</code></pre>
+    <p>這個模式在之後的 JSON（欄位可能不存在）和資料庫（欄位可能是 NULL）都很常見。<code>new(20)</code> 讓呼叫的地方保持簡潔。練習 3 用同樣的想法做「部分更新」：只有非 nil 的欄位才更新。</p>
+  </section>
+
+  <section aria-labelledby="escape">
+    <h2 id="escape">5. 回傳區域變數的指標</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 228" role="img" aria-label="stack 上放著函式的區域變數，函式結束就收回；newCounter 的 c 因為位址被回傳，被放到 heap 上，呼叫端的指標 a 指向它">
+        <title>stack 與 heap</title>
+        <text class="sm" x="116" y="24" text-anchor="middle">stack：函式結束就收回</text>
+        <text class="sm" x="364" y="24" text-anchor="middle">heap：沒人用了才由 GC 回收</text>
+        <rect class="soft dash" x="16" y="36" width="200" height="164" rx="10"/>
+        <rect class="soft dash" x="264" y="36" width="200" height="164" rx="10"/>
+        <rect class="acc" x="32" y="52" width="168" height="40" rx="6"/>
+        <text class="small" x="116" y="77" text-anchor="middle">localOnly 的 c</text>
+        <rect class="wire dash" x="32" y="102" width="168" height="40" rx="6"/>
+        <text class="sm" x="116" y="127" text-anchor="middle">newCounter 已經結束</text>
+        <rect class="soft" x="32" y="152" width="168" height="40" rx="6"/>
+        <text class="small" x="116" y="177" text-anchor="middle">呼叫端的 a（指標）</text>
+        <path class="wire acc-ln" d="M200 172 H240 V120 H268"/>
+        <path class="tip acc-tip" d="M280 120 L267 113 L267 127 Z"/>
+        <rect class="acc" x="282" y="100" width="166" height="40" rx="6"/>
+        <text class="small mono" x="365" y="125" text-anchor="middle">counter{n: 1}</text>
+        <text class="sm" x="240" y="222" text-anchor="middle">放在哪裡由編譯器決定，不是由 new 或 &amp; 決定</text>
+      </svg>
+      <figcaption>只在函式裡用的變數放在 stack，函式結束就收回；位址會被帶出函式的變數，編譯器會改放到 heap。</figcaption>
+    </figure>
+    <p>在 C 語言裡，回傳區域變數的位址是嚴重的錯誤：函式結束後那塊記憶體就被收回了。在 Go 裡這樣寫完全安全：</p>
+    <pre class="code" data-src="chapters/05-pointers/escape.go#counter,newCounter,returnLocalPointer"><code>type counter struct{ n int }
+
+func newCounter() *counter {
+	c := counter{n: 1}
+	return &amp;c
+}
+
+func returnLocalPointer() {
+	a := newCounter()
+	b := newCounter()
+	a.n++
+	fmt.Println(a.n, b.n, a == b)
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/05-pointers#Example_returnLocalPointer"><code>2 1 false</code></pre>
+    <p>每次呼叫 newCounter 都會得到一個新的變數，所以 a 和 b 各自獨立。Go 的編譯器會做<strong>逃逸分析</strong>（escape analysis）：如果一個變數的位址在函式結束後還可能被用到，就把它放到 <strong>heap</strong>（由垃圾回收器 GC 管理，沒有人用了才回收）；否則放在 <strong>stack</strong>（函式結束就自動收回，非常便宜）。放哪裡由編譯器決定，和你寫 <code>new</code>、<code>&amp;</code> 還是一般的宣告無關。</p>
+
+    <section class="deep" aria-labelledby="gcflags">
+      <p class="tag">深入：第一次讀可以先跳過</p>
+      <h3 id="gcflags">5.1 用 -gcflags=-m 看編譯器的決定</h3>
+      <p><code>chapters/05-pointers/escape</code> 是一支專門給逃逸分析看的小程式：</p>
+      <pre class="code" data-src="chapters/05-pointers/escape/main.go"><code>// escape 是給逃逸分析看的小程式。用下面的指令看編譯器把哪些變數放到 heap：
+//
+//	go build -gcflags=-m ./chapters/05-pointers/escape
+package main
+
+import "os"
+
+type counter struct{ n int }
+
+func newCounter() *counter {
+	c := counter{n: 1} // 位址被回傳出去，離開函式後還會被用到：放到 heap
+	return &amp;c
+}
+
+func localOnly() int {
+	c := counter{n: 1} // 位址只在函式裡用：留在 stack
+	p := &amp;c
+	p.n++
+	return c.n
+}
+
+func main() {
+	c := newCounter()
+	c.n += localOnly()
+	os.Exit(c.n - 3) // 結果是 3，所以結束碼是 0
+}</code></pre>
+      <pre class="shell"><code>go build -gcflags=-m ./chapters/05-pointers/escape</code></pre>
+      <p class="label">輸出（不同的 Go 版本可能略有不同）</p>
+      <pre class="out"><code># github.com/xinqilin/GO-Playground/chapters/05-pointers/escape
+chapters/05-pointers/escape/main.go:10:6: can inline newCounter
+chapters/05-pointers/escape/main.go:15:6: can inline localOnly
+chapters/05-pointers/escape/main.go:23:17: inlining call to newCounter
+chapters/05-pointers/escape/main.go:24:18: inlining call to localOnly
+chapters/05-pointers/escape/main.go:11:2: moved to heap: c</code></pre>
+      <p><code>-gcflags=-m</code> 讓編譯器說出它做的最佳化決定。<code>moved to heap: c</code> 指的是 newCounter 裡的 c（第 11 行），因為它的位址被回傳了。localOnly 裡的 c 也被取了位址，但位址沒有離開函式，所以留在 stack 上，沒有出現在報告裡。<code>can inline</code> 和 <code>inlining call</code> 是另一種最佳化：編譯器把小函式的內容直接嵌進呼叫的地方，省掉呼叫的成本。</p>
+      <p>heap 配置比 stack 貴，因為要由 GC 追蹤和回收。但不要因此刻意避免指標：先寫出清楚的程式，等效能量測（之後的「效能與 profiling」那一章）顯示配置是瓶頸，再用 <code>-gcflags=-m</code> 找原因。</p>
+    </section>
+  </section>
+
+  <section aria-labelledby="when">
+    <h2 id="when">6. 什麼時候該用指標</h2>
+    <p>指標不是越多越好。每多一個指標，就多一個可能是 nil 的地方、多一條「遠處的程式可能改到這裡」的路徑。下面是實務上的判斷方式：</p>
+    <div class="table-wrap">
+      <table class="vs">
+        <thead><tr><th scope="col">情況</th><th scope="col">用指標？</th><th scope="col">原因</th></tr></thead>
+        <tbody>
+          <tr><th scope="row">函式要修改呼叫端的變數</th><td>要</td><td>傳值只會改到複本</td></tr>
+          <tr><th scope="row">需要分辨「沒有值」和「零值」</th><td>要</td><td>nil 代表沒有值（第 4 節）</td></tr>
+          <tr><th scope="row">struct 裡有不能複製的東西，例如 <code>sync.Mutex</code></th><td>要</td><td>複製會讓鎖失效，<code>go vet</code> 會警告（第 <a href="17-sync.html">17 章</a>）</td></tr>
+          <tr><th scope="row">很大的 struct，而且會頻繁傳遞</th><td>看量測</td><td>複製有成本，但小 struct 複製通常比 heap 配置便宜</td></tr>
+          <tr><th scope="row">int、bool、小 struct 這類小值</th><td>不用</td><td>直接傳值更簡單，也不會是 nil</td></tr>
+          <tr><th scope="row">slice、map、channel、函式、string</th><td>幾乎不用</td><td>它們本身就是指向底層資料的小結構，傳值就能共用資料</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>slice 的情況稍微特殊：函式改 slice 的元素，呼叫端看得到；但函式用 <code>append</code> 讓 slice 變長，呼叫端看不到。Go 的慣例不是傳 <code>*[]int</code>，而是讓函式回傳新的 slice，像 <code>s = append(s, x)</code> 一樣，第 <a href="06-arrays-slices.html">06 章</a>會解釋原因。</p>
+    <p>同一個型別最好統一：如果它有一些方法需要指標，就讓所有方法都用指標，傳遞時也一律傳指標。第 <a href="09-structs-methods.html">09 章</a>會把這件事和方法一起講清楚。</p>
+  </section>
+
+  <section aria-labelledby="pitfalls">
+    <h2 id="pitfalls">常見錯誤</h2>
+    <h3 id="pit-nil">1. 對 nil 指標解參考</h3>
+    <p>錯誤訊息是 <code>invalid memory address or nil pointer dereference</code>（第 4 節）。常見的來源：宣告了 <code>var p *T</code> 卻忘了給值、函式在錯誤時回傳 nil 而呼叫端沒檢查 err、struct 裡的指標欄位沒有初始化。看到這個 panic，往回找是哪個指標在那一行是 nil。</p>
+
+    <h3 id="pit-range">2. 取到 range 複本的位址</h3>
+    <p><code>for _, it := range items { … &amp;it … }</code> 取到的是複本的位址，透過它改不到 items 裡的資料。要指向 slice 裡的元素，用索引：<code>&amp;items[i]</code>。練習 4 就是這個 bug，原理見第 <a href="03-control-flow.html#range">03 章 range 的複本</a>。</p>
+
+    <h3 id="pit-shallow">3. 以為複製 struct 就是完整的複本</h3>
+    <p>struct 裡的指標、slice、map 欄位，複製後兩邊共用同一份資料（第 2 節）。需要獨立的複本，就要自己替這些欄位建立新的資料。</p>
+
+    <h3 id="pit-map-addr">4. 取 map 元素的位址</h3>
+    <pre class="code bad" data-compile-error><code>package main
+
+import "fmt"
+
+func main() {
+	stock := map[string]int{"排骨": 10}
+	p := &amp;stock["排骨"]
+	fmt.Println(*p)
+}</code></pre>
+    <p class="label">編譯錯誤</p>
+    <pre class="out err"><code>./main.go:7:8: invalid operation: cannot take address of stock["排骨"] (map index expression of type int)</code></pre>
+    <p>map 長大時會把元素搬到新的位置，舊的位址就失效了，所以 Go 不讓你取 map 元素的位址。要修改就直接寫 <code>stock["排骨"] = 9</code>；需要共用的話，讓 map 的值本身是指標，例如 <code>map[string]*Item</code>（第 <a href="07-maps.html">07 章</a>）。</p>
+
+    <h3 id="pit-arith">5. 對指標做運算</h3>
+    <pre class="code bad" data-compile-error><code>package main
+
+import "fmt"
+
+func main() {
+	prices := [3]int{85, 90, 15}
+	p := &amp;prices[0]
+	p++
+	fmt.Println(*p)
+}</code></pre>
+    <p class="label">編譯錯誤</p>
+    <pre class="out err"><code>./main.go:8:2: invalid operation: p++ (non-numeric type *int)</code></pre>
+    <p>Go 沒有指標運算。要走過陣列或 slice，用索引或 <code>for range</code>。</p>
+
+    <h3 id="pit-too-many">6. 到處都用指標</h3>
+    <p>「用指標比較快」是常見的誤解。小的值複製很便宜，指標反而可能讓變數逃逸到 heap、增加 GC 的負擔，還多了 nil 檢查。預設傳值，有明確的理由才用指標（第 6 節的表格）。</p>
   </section>
 
   <section aria-labelledby="java">
@@ -168,23 +533,156 @@ func main() {
       <table class="vs">
         <thead><tr><th scope="col">主題</th><th scope="col">Java</th><th scope="col">Go</th></tr></thead>
         <tbody>
-          <tr><th scope="row">參考</th><td class="java">物件變數就是 reference，但拿不到地址</td><td>指標是明確的型別 <code>*T</code>，<code>&amp;</code> 取地址、<code>*</code> 取值</td></tr>
+          <tr><th scope="row">參考</th><td class="java">物件變數就是 reference，但拿不到位址</td><td>指標是明確的型別 <code>*T</code>，<code>&amp;</code> 取位址、<code>*</code> 取值</td></tr>
+          <tr><th scope="row">物件和 struct</th><td class="java">物件一律透過 reference 使用，指定只複製 reference</td><td>struct 是值，指定會複製整個 struct；要共用就用指標</td></tr>
           <tr><th scope="row">傳參數</th><td class="java">一律傳值；物件傳的是 reference 的複本</td><td>一律傳值；想改到呼叫端就傳 <code>*T</code></td></tr>
-          <tr><th scope="row">指向基本型別</th><td class="java">做不到；要共享 int 只能包進物件</td><td>可以：<code>*int</code>、<code>*bool</code></td></tr>
+          <tr><th scope="row">指向基本型別</th><td class="java">做不到，要共用 int 只能包進物件</td><td>可以：<code>*int</code>、<code>*bool</code></td></tr>
+          <tr><th scope="row">可有可無的值</th><td class="java"><code>Integer</code>（可以是 null）或 <code>Optional&lt;T&gt;</code></td><td><code>*int</code>，nil 代表沒有值</td></tr>
           <tr><th scope="row">空值</th><td class="java"><code>NullPointerException</code></td><td><code>nil pointer dereference</code> panic</td></tr>
-          <tr><th scope="row">配置位置</th><td class="java"><code>new</code> 出來的物件在 heap</td><td>stack 或 heap 由編譯器決定，<code>new</code> 出來的也可能在 stack</td></tr>
+          <tr><th scope="row">配置位置</th><td class="java"><code>new</code> 出來的物件一般在 heap（JIT 可能最佳化）</td><td>stack 或 heap 由編譯器的逃逸分析決定</td></tr>
+          <tr><th scope="row">記憶體回收</th><td class="java">GC</td><td>GC；stack 上的變數不需要 GC 處理</td></tr>
         </tbody>
       </table>
     </div>
   </section>
 
+  <section aria-labelledby="exercises">
+    <h2 id="exercises">練習</h2>
+    <p>題目在 <code>exercises/05-pointers/exercises.go</code>，用到的型別定義在 <code>doc.go</code>。</p>
+    <pre class="shell"><code>go test ./exercises/05-pointers/                  <span class="c"># 跑全部練習</span>
+go test ./exercises/05-pointers/ -run TestSwap    <span class="c"># 只跑一題</span>
+go test -tags solution ./exercises/05-pointers/   <span class="c"># 跑參考解答</span></code></pre>
+    <ol class="exercises">
+      <li>
+        <h3><span class="level l1">入門</span>練習 1：交換</h3>
+        <p>交換 a 和 b 指向的兩個值。</p>
+        <pre class="code" data-src="exercises/05-pointers/exercises.go#Swap"><code>func Swap(a, b *int) {
+	// TODO: 實作
+}</code></pre>
+        <p>呼叫 <code>Swap(&amp;x, &amp;y)</code> 之後，x 和 y 的值互換。測試：<code>TestSwap</code>。</p>
+        <details><summary>提示</summary><p>第 01 章交換兩個變數的寫法，換成兩邊都解參考：<code>*a, *b = *b, *a</code>。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l1">入門</span>練習 2：限制範圍</h3>
+        <p>把 p 指向的值限制在 lo 到 hi 之間。p 是 nil 時什麼都不做，不能 panic。</p>
+        <pre class="code" data-src="exercises/05-pointers/exercises.go#Clamp"><code>func Clamp(p *int, lo, hi int) {
+	// TODO: 實作
+}</code></pre>
+        <p>例如值是 15、範圍 0 到 10，呼叫後變成 10。測試：<code>TestClamp</code>。</p>
+        <details><summary>提示</summary><p>先檢查 <code>p == nil</code> 就 return。限制範圍可以用內建的 <code>min</code>、<code>max</code>：<code>max(lo, min(*p, hi))</code>。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l2">進階</span>練習 3：部分更新</h3>
+        <p><code>ProfilePatch</code> 的每個欄位都是指標：nil 表示不更新，非 nil 表示改成它指向的值。依照 patch 更新會員資料。</p>
+        <pre class="code" data-src="exercises/05-pointers/doc.go#Profile,ProfilePatch"><code>type Profile struct {
+	Name   string
+	Phone  string
+	Points int
+}
+
+type ProfilePatch struct {
+	Name   *string
+	Phone  *string
+	Points *int
+}</code></pre>
+        <pre class="code" data-src="exercises/05-pointers/exercises.go#ApplyPatch"><code>func ApplyPatch(p *Profile, patch ProfilePatch) {
+	// TODO: 實作
+}</code></pre>
+        <p>測試會把點數更新成 0，確認你分得出「改成 0」和「不更新」。測試：<code>TestApplyPatch</code>。</p>
+        <details><summary>提示</summary><p>每個欄位各寫一個 <code>if patch.Name != nil { p.Name = *patch.Name }</code>。要複製的是指標指向的值，不是指標本身。</p></details>
+      </li>
+      <li>
+        <h3><span class="level fix">找錯</span>練習 4：最便宜的那一項</h3>
+        <p>回傳的指標應該指向 items 裡最便宜的那一項，讓呼叫端可以直接改它的庫存。但透過回傳的指標改庫存，items 卻沒有變。</p>
+        <pre class="code" data-src="exercises/05-pointers/exercises.go#Cheapest"><code>func Cheapest(items []Item) *Item {
+	var best *Item
+	for _, it := range items {
+		if best == nil || it.Price &lt; best.Price {
+			best = &amp;it
+		}
+	}
+	return best
+}</code></pre>
+        <p>測試：<code>TestCheapest</code>。</p>
+        <details><summary>提示</summary><p><code>it</code> 是誰？它和 <code>items[i]</code> 是同一個變數嗎？見常見錯誤 2。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l2">進階</span>練習 5：排隊名單</h3>
+        <p>用 <code>Node</code> 串成一條隊伍：每個人的 <code>Next</code> 指向排在他後面的人，最後一個人的 Next 是 nil。寫兩個函式：把人排到最後面，以及依序列出所有名字。</p>
+        <pre class="code" data-src="exercises/05-pointers/doc.go#Node"><code>type Node struct {
+	Name string
+	Next *Node
+}</code></pre>
+        <pre class="code" data-src="exercises/05-pointers/exercises.go#PushBack,Names"><code>func PushBack(head *Node, name string) *Node {
+	// TODO: 實作
+	return head
+}
+
+func Names(head *Node) []string {
+	// TODO: 實作
+	return nil
+}</code></pre>
+        <p>從空的隊伍（nil）開始，PushBack 三次 A01、A02、A03，Names 要回傳 <code>[A01 A02 A03]</code>。測試：<code>TestPushBack</code>、<code>TestNames</code>。</p>
+        <details><summary>提示</summary><p>走訪整條隊伍的寫法：<code>for n := head; n != nil; n = n.Next { … }</code>。PushBack 要先處理 head 是 nil 的情況（新的人就是第一個）；否則一路走到 <code>Next</code> 是 nil 的那個人，把新的人接在他後面。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l3">挑戰</span>練習 6：離開隊伍</h3>
+        <p>把隊伍裡第一個叫 name 的人移出隊伍，回傳新的第一個人。找不到時隊伍不變。</p>
+        <pre class="code" data-src="exercises/05-pointers/exercises.go#Remove"><code>func Remove(head *Node, name string) *Node {
+	// TODO: 實作
+	return head
+}</code></pre>
+        <p>測試會移除第一個、中間、最後一個人，以及不存在的人和空隊伍。測試：<code>TestRemove</code>。</p>
+        <details><summary>提示</summary><p>移除第一個人時，新的第一個人是 <code>head.Next</code>。其他情況要找到「要移除的人的前一個人」prev，然後讓 <code>prev.Next = prev.Next.Next</code>，被跳過的那個人就離開隊伍了。</p></details>
+      </li>
+      <li>
+        <h3><span class="level fix">找錯</span>練習 7：複製訂單</h3>
+        <p>複製出來的訂單要和原本的完全獨立，但改了複本的備註，原本那張也跟著變了。</p>
+        <pre class="code" data-src="exercises/05-pointers/exercises.go#Duplicate"><code>func Duplicate(o Order, newID int) Order {
+	dup := o
+	dup.ID = newID
+	return dup
+}</code></pre>
+        <p>沒有備註（Note 是 nil）的訂單，複本的 Note 也要是 nil。測試：<code>TestDuplicate</code>。</p>
+        <details><summary>提示</summary><p>第 2 節的淺複製。Note 不是 nil 時，替複本配置一個內容相同的新字串：<code>new(*o.Note)</code>（Go 1.26 起），或者先 <code>n := *o.Note</code> 再取 <code>&amp;n</code>。</p></details>
+      </li>
+    </ol>
+    <p><a href="https://github.com/xinqilin/GO-Playground/blob/main/exercises/05-pointers/solution.go">參考解答</a>：先自己寫完再看。測試通過的寫法都是對的。</p>
+  </section>
+
+  <section aria-labelledby="recap">
+    <h2 id="recap">重點回顧</h2>
+    <ul class="recap">
+      <li><code>&amp;x</code> 取位址，<code>*p</code> 解參考；<code>*int</code> 是「指向 int 的指標」這個型別。</li>
+      <li>指標比較的是位址；Go 沒有指標運算。</li>
+      <li>參數一律傳值，傳指標是複製位址，所以函式能改到呼叫端的變數。</li>
+      <li>struct 是值，指定和傳參數都會整個複製；指標欄位只複製位址，兩邊共用資料。</li>
+      <li>指向 struct 的指標可以直接用 <code>p.field</code>。</li>
+      <li>struct 用 <code>&amp;T{…}</code> 建立；Go 1.26 起 <code>new(值)</code> 能直接建立有初始值的變數。</li>
+      <li>指標的零值是 nil，解參考會 panic；可能是 nil 的地方先檢查。</li>
+      <li>用 <code>*T</code> 表示「可以沒有值」，分辨「沒有填」和「零值」。</li>
+      <li>回傳區域變數的指標是安全的；變數放 stack 還是 heap 由逃逸分析決定，用 <code>-gcflags=-m</code> 看。</li>
+      <li>預設傳值；要修改、要表示沒有值、或不能複製時才用指標。slice、map 不需要再包一層指標。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="further">
+    <h2 id="further">延伸閱讀</h2>
+    <ul class="notes">
+      <li>Go 語言規格：<a href="https://go.dev/ref/spec#Pointer_types">Pointer types</a>、<a href="https://go.dev/ref/spec#Address_operators">Address operators</a>、<a href="https://go.dev/ref/spec#Selectors">Selectors</a>（<code>p.f</code> 自動解參考的規則）、<a href="https://go.dev/ref/spec#Composite_literals">Composite literals</a>、<a href="https://go.dev/ref/spec#Allocation">Allocation</a>（<code>new</code>）。</li>
+      <li><code>new(值)</code>：<a href="https://go.dev/doc/go1.26#language">Go 1.26 版本說明</a>。</li>
+      <li>官方 FAQ：<a href="https://go.dev/doc/faq#pass_by_value">When are function parameters passed by value?</a>、<a href="https://go.dev/doc/faq#stack_or_heap">How do I know whether a variable is allocated on the heap or the stack?</a></li>
+    </ul>
+  </section>
+
   <section aria-labelledby="run">
     <h2 id="run">動手跑</h2>
     <p class="label">在 repo 根目錄</p>
-    <pre class="shell"><code>go run ./chapters/05-pointers
-go test ./chapters/05-pointers
-go run -gcflags=-m ./chapters/05-pointers   <span class="c"># 看哪些變數被放到 heap</span></code></pre>
-    <p><a href="https://github.com/xinqilin/GO-Playground/tree/main/chapters/05-pointers">在 GitHub 看完整程式碼</a></p>
+    <pre class="shell"><code>go run ./chapters/05-pointers                               <span class="c"># 執行本章所有示範</span>
+go test ./chapters/05-pointers/...                          <span class="c"># 驗證頁面上的每一段輸出</span>
+go build -gcflags=-m ./chapters/05-pointers/escape          <span class="c"># 看逃逸分析</span>
+go test ./exercises/05-pointers/                            <span class="c"># 做練習</span></code></pre>
+    <p><a href="https://github.com/xinqilin/GO-Playground/tree/main/chapters/05-pointers">在 GitHub 看本章完整程式碼</a>，或看<a href="https://github.com/xinqilin/GO-Playground/tree/main/exercises/05-pointers">練習題</a>。</p>
   </section>
 </main>
 

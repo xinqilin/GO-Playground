@@ -13,12 +13,17 @@
 ```sh
 git clone https://github.com/xinqilin/GO-Playground.git
 cd GO-Playground
-go run ./chapters/00-hello   # 執行某一章
-go test ./...                # 跑全部測試
-go test -race ./...          # 加上 race detector
+go run ./chapters/00-hello                  # 執行某一章
+go test ./chapters/... ./projects/...       # 跑章節和專題的測試
+go test ./exercises/03-control-flow/        # 做某一章的練習（寫完之前會失敗）
+go test -race -tags solution ./...          # 全部測試，練習題改用參考解答
 ```
 
 每一章都是獨立的程式：`chapters/NN-主題/` 放程式碼和測試，`docs/NN-主題.html` 是對應的圖解頁。測試會比對每一章印出來的內容，所以頁面上的輸出和程式碼不會脫節。
+
+`exercises/NN-主題/` 是練習題：`exercises.go` 是題目，`solution.go` 是參考解答（加上 `-tags solution` 才會編譯）。題目還沒寫完時測試本來就會失敗，所以直接在根目錄跑 `go test ./...` 會看到練習題的紅燈。
+
+頁面上的程式碼和輸出由 `go run ./tools/docsync` 從 repo 裡的程式同步過去，CI 會用 `-check` 確認兩邊一致。
 
 ## 目錄
 
@@ -62,15 +67,27 @@ go test -race ./...          # 加上 race detector
 | 18 | context | [看圖](https://bill-lin.dev/GO-Playground/18-context.html) | [chapters/18-context](chapters/18-context) |
 | 19 | 並行模式 | [看圖](https://bill-lin.dev/GO-Playground/19-concurrency-patterns.html) | [chapters/19-concurrency-patterns](chapters/19-concurrency-patterns) |
 
-### Part 4 工程實務
+### Part 4 標準庫實戰
 
 | 章 | 主題 | 圖解 | 程式碼 |
 |---|---|---|---|
-| 20 | package 與 module | [看圖](https://bill-lin.dev/GO-Playground/20-packages-modules.html) | [chapters/20-packages-modules](chapters/20-packages-modules) |
-| 21 | 測試 | [看圖](https://bill-lin.dev/GO-Playground/21-testing.html) | [chapters/21-testing](chapters/21-testing) |
-| 22 | 標準庫精選 | [看圖](https://bill-lin.dev/GO-Playground/22-stdlib.html) | [chapters/22-stdlib](chapters/22-stdlib) |
-| 23 | HTTP 服務 | [看圖](https://bill-lin.dev/GO-Playground/23-http.html) | [chapters/23-http](chapters/23-http) |
-| 24 | 工具鏈 | [看圖](https://bill-lin.dev/GO-Playground/24-toolchain.html) | [chapters/24-toolchain](chapters/24-toolchain) |
+| 20 | 檔案與 I/O | [看圖](https://bill-lin.dev/GO-Playground/20-files.html) | [chapters/20-files](chapters/20-files) |
+| 21 | 命令列工具 | [看圖](https://bill-lin.dev/GO-Playground/21-cli.html) | [chapters/21-cli](chapters/21-cli) |
+| 22 | 時間 | [看圖](https://bill-lin.dev/GO-Playground/22-time.html) | [chapters/22-time](chapters/22-time) |
+| 23 | JSON 與資料編碼 | [看圖](https://bill-lin.dev/GO-Playground/23-json.html) | [chapters/23-json](chapters/23-json) |
+| 24 | 文字處理 | [看圖](https://bill-lin.dev/GO-Playground/24-text.html) | [chapters/24-text](chapters/24-text) |
+| 25 | 日誌 | [看圖](https://bill-lin.dev/GO-Playground/25-logging.html) | [chapters/25-logging](chapters/25-logging) |
+| 26 | HTTP 服務 | [看圖](https://bill-lin.dev/GO-Playground/26-http.html) | [chapters/26-http](chapters/26-http) |
+| 27 | HTTP 用戶端 | [看圖](https://bill-lin.dev/GO-Playground/27-http-client.html) | [chapters/27-http-client](chapters/27-http-client) |
+| 28 | 資料庫 | [看圖](https://bill-lin.dev/GO-Playground/28-database.html) | [chapters/28-database](chapters/28-database) |
+
+### Part 5 工程實務
+
+| 章 | 主題 | 圖解 | 程式碼 |
+|---|---|---|---|
+| 29 | package 與 module | [看圖](https://bill-lin.dev/GO-Playground/29-packages-modules.html) | [chapters/29-packages-modules](chapters/29-packages-modules) |
+| 30 | 測試 | [看圖](https://bill-lin.dev/GO-Playground/30-testing.html) | [chapters/30-testing](chapters/30-testing) |
+| 32 | 工具鏈 | [看圖](https://bill-lin.dev/GO-Playground/32-toolchain.html) | [chapters/32-toolchain](chapters/32-toolchain) |
 
 ### 專題
 

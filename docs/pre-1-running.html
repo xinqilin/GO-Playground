@@ -1,0 +1,491 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>程式怎麼跑起來｜Go 圖解手冊</title>
+<meta name="description" content="給從來沒寫過程式的人：程式是什麼、終端機的基本操作、安裝 Go 和編輯器、從原始碼到執行、程式一行一行照順序執行、讀懂錯誤訊息、三種錯誤，以及 Go Playground，附可執行的練習題。">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<header class="site">
+  <a href="index.html">Go 圖解手冊</a>
+  <span class="count">先修 1 / 4</span>
+</header>
+
+<main class="page long">
+  <header class="hero">
+    <div class="num" aria-hidden="true">P1</div>
+    <p class="eyebrow">先修 · 第 1 章</p>
+    <h1>程式怎麼跑起來</h1>
+    <p class="analogy">程式是一份寫給電腦的食譜。電腦非常聽話，但完全不會變通：它從第一行開始，一行一行照著做，寫錯一個字就做不下去。</p>
+  </header>
+
+  <nav class="toc-inline" aria-labelledby="toc-title">
+    <p class="label" id="toc-title">本章內容</p>
+    <ol>
+      <li><a href="#goals">本章你會學到</a></li>
+      <li><a href="#what">程式是什麼</a></li>
+      <li><a href="#terminal">終端機</a></li>
+      <li><a href="#install">安裝 Go 和編輯器</a></li>
+      <li><a href="#build">從原始碼到執行</a></li>
+      <li><a href="#order">一行一行照順序</a></li>
+      <li><a href="#messages">讀懂錯誤訊息</a></li>
+      <li><a href="#kinds">三種錯誤</a></li>
+      <li><a href="#playground">在瀏覽器裡試：Go Playground</a></li>
+      <li><a href="#pitfalls">常見錯誤</a></li>
+      <li><a href="#exercises">練習</a></li>
+      <li><a href="#recap">重點回顧</a></li>
+      <li><a href="#further">延伸閱讀</a></li>
+    </ol>
+  </nav>
+
+  <section aria-labelledby="goals">
+    <h2 id="goals">本章你會學到</h2>
+    <p>先修系列寫給從來沒寫過程式的人。如果你已經會任何一種程式語言，可以直接跳到 <a href="00-hello.html">00 第一支程式</a>。</p>
+    <ul class="notes">
+      <li>程式是什麼，電腦怎麼「照著程式做事」。</li>
+      <li>打開終端機，用 <code>cd</code>、<code>ls</code>、<code>pwd</code> 在資料夾之間移動。</li>
+      <li>安裝 Go 和編輯器，確認安裝成功。</li>
+      <li>原始碼、編譯、執行檔是什麼，<code>go run</code> 和 <code>go build</code> 做了哪些事。</li>
+      <li>程式為什麼一定照順序執行，以及順序錯了會怎樣。</li>
+      <li>讀懂錯誤訊息，分辨三種錯誤：跑不起來、跑到一半當掉、跑完但答案錯。</li>
+    </ul>
+    <p>先備：會打字、會用瀏覽器就夠了。</p>
+  </section>
+
+  <section aria-labelledby="what">
+    <h2 id="what">1. 程式是什麼</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 214" role="img" aria-label="左邊是煮飯的食譜，有三個步驟；右邊是程式，有三行指令。兩者都從上往下一步一步做">
+        <title>食譜和程式</title>
+        <text class="small bold" x="110" y="26" text-anchor="middle">食譜</text>
+        <rect class="soft" x="20" y="40" width="180" height="150" rx="10"/>
+        <text class="small" x="40" y="80">1. 量米</text>
+        <text class="small" x="40" y="118">2. 洗米</text>
+        <text class="small" x="40" y="156">3. 按下煮飯鍵</text>
+        <text class="small bold" x="350" y="26" text-anchor="middle">程式</text>
+        <rect class="acc" x="240" y="40" width="220" height="150" rx="10"/>
+        <text class="sm mono" x="256" y="80">fmt.Println("1. 量米")</text>
+        <text class="sm mono" x="256" y="118">fmt.Println("2. 洗米")</text>
+        <text class="sm mono" x="256" y="156">fmt.Println("3. …")</text>
+        <path class="wire" d="M214 70 V170"/>
+        <path class="tip" d="M214 182 L207 169 L221 169 Z"/>
+        <text class="sm" x="240" y="208" text-anchor="middle">都是從上往下，一步一步做</text>
+      </svg>
+      <figcaption>食譜寫給人看，程式寫給電腦看。兩者都是「依序做哪些事」的清單。</figcaption>
+    </figure>
+    <p>電腦能做的事其實很單純：算數學、比大小、把資料搬來搬去、照條件決定下一步。它厲害的地方是做得非常快，而且不會累。<strong>程式</strong>（program）就是一串指令，告訴電腦依序要做哪些事。寫程式，就是把你想完成的事情，拆成電腦聽得懂的小步驟。</p>
+    <p>電腦聽不懂中文，所以要用<strong>程式語言</strong>來寫。程式語言是一種規則很嚴格的文字：每個符號、每個括號都有固定的意思。Go 是其中一種，它的規則少、錯誤訊息清楚，很適合當第一個學的語言。下面就是一段 Go 程式：</p>
+    <pre class="code" data-src="chapters/pre-1-running/main.go#hello"><code>func hello() {
+	fmt.Println("你好，Go")
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/pre-1-running#Example_hello"><code>你好，Go</code></pre>
+    <p>現在先不用懂每個字的意思，只要知道：<code>fmt.Println(…)</code> 是「把括號裡的東西印在螢幕上」，雙引號 <code>"…"</code> 裡的文字會原樣印出來。<code>func hello() { … }</code> 把大括號裡的幾行包成一組，取名叫 hello，之後的章節會一直用這種寫法來分開每個示範。</p>
+  </section>
+
+  <section aria-labelledby="terminal">
+    <h2 id="terminal">2. 終端機</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 240" role="img" aria-label="資料夾像一棵樹：家目錄裡有 GO-Playground，裡面有 chapters，再裡面有 pre-1-running。cd 往裡面走，cd .. 回上一層">
+        <title>資料夾是一棵樹</title>
+        <rect class="soft" x="16" y="20" width="150" height="36" rx="6"/>
+        <rect class="soft" x="56" y="78" width="170" height="36" rx="6"/>
+        <rect class="soft" x="96" y="136" width="130" height="36" rx="6"/>
+        <rect class="acc" x="136" y="194" width="170" height="36" rx="6"/>
+        <text class="small" x="91" y="44" text-anchor="middle">家目錄（~）</text>
+        <text class="small mono" x="141" y="102" text-anchor="middle">GO-Playground</text>
+        <text class="small mono" x="161" y="160" text-anchor="middle">chapters</text>
+        <text class="small mono bold" x="221" y="218" text-anchor="middle">pre-1-running</text>
+        <path class="wire" d="M36 56 V96 H56 M76 114 V154 H96 M116 172 V212 H136"/>
+        <text class="sm mono" x="250" y="74">cd GO-Playground</text>
+        <path class="wire acc-ln" d="M242 66 V88"/>
+        <path class="tip acc-tip" d="M242 98 L235 85 L249 85 Z"/>
+        <text class="sm mono" x="252" y="150">cd chapters/pre-1-running</text>
+        <path class="wire acc-ln" d="M242 142 V180"/>
+        <path class="tip acc-tip" d="M242 190 L235 177 L249 177 Z"/>
+        <text class="sm mono" x="330" y="216">cd ..</text>
+        <text class="sm" x="378" y="216">回上一層</text>
+        <path class="wire hot-ln" d="M320 222 V200"/>
+        <path class="tip hot-tip" d="M320 190 L313 203 L327 203 Z"/>
+      </svg>
+      <figcaption>資料夾一層包一層，像一棵倒過來的樹。終端機裡隨時都「站在」某一個資料夾，<code>cd</code> 用來換位置。</figcaption>
+    </figure>
+    <p>寫 Go 時，大部分的操作都在<strong>終端機</strong>（terminal）裡進行：一個只能打字的視窗，你輸入一行指令、按 Enter，電腦執行完再把結果印出來。macOS 打開「終端機」（Terminal）這個 App；Windows 打開「PowerShell」；Linux 打開 Terminal。</p>
+    <p>終端機隨時都「站在」某一個資料夾裡，這叫<strong>目前的目錄</strong>（current directory）。剛打開時通常站在你的<strong>家目錄</strong>，也就是存放你個人檔案的那一層，用 <code>~</code> 表示。最常用的三個指令，在 macOS、Linux 和 Windows PowerShell 裡都能用：</p>
+    <div class="table-wrap">
+      <table class="vs">
+        <thead><tr><th scope="col">指令</th><th scope="col">意思</th><th scope="col">例子</th></tr></thead>
+        <tbody>
+          <tr><th scope="row"><code>pwd</code></th><td>我現在站在哪裡（print working directory）</td><td><code>pwd</code></td></tr>
+          <tr><th scope="row"><code>ls</code></th><td>列出這裡有哪些檔案和資料夾（list）</td><td><code>ls</code>、<code>ls chapters</code></td></tr>
+          <tr><th scope="row"><code>cd</code></th><td>換到另一個資料夾（change directory）</td><td><code>cd GO-Playground</code>、<code>cd ..</code>、<code>cd ~</code></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>資料夾的位置用<strong>路徑</strong>（path）表示，各層之間用 <code>/</code> 分開（Windows 也接受 <code>/</code>，顯示時用 <code>\</code>）。<code>chapters/pre-1-running</code> 的意思是「目前位置底下的 chapters，再底下的 pre-1-running」，這種從目前位置出發的寫法叫<strong>相對路徑</strong>。兩個點 <code>..</code> 代表上一層，一個點 <code>.</code> 代表目前這一層；所以後面會常看到 <code>./chapters/…</code> 這種寫法。</p>
+    <p>例如在本手冊的資料夾裡執行 <code>ls chapters/pre-1-running</code>，會列出 <code>crash</code>、<code>main.go</code>、<code>main_test.go</code> 三項，就是這一章的程式。</p>
+    <aside class="callout">
+      <span class="title">三個好用的按鍵</span>
+      <p><strong>Tab</strong>：資料夾或檔案名稱打幾個字就按 Tab，終端機會自動補完，不用打完整，也不會打錯。<strong>上方向鍵</strong>：叫出上一個指令，改一改再執行。<strong>Ctrl-C</strong>：停止正在執行的程式，程式卡住或跑不停的時候用（先修 3 會遇到）。</p>
+    </aside>
+  </section>
+
+  <section aria-labelledby="install">
+    <h2 id="install">3. 安裝 Go 和編輯器</h2>
+    <p>到官方網站的 <a href="https://go.dev/doc/install">安裝頁面</a> 下載你的系統對應的安裝檔，照著畫面一路按「下一步」即可。裝好之後<strong>重新打開</strong>終端機（已經開著的視窗不會知道你剛裝了新東西），輸入：</p>
+    <pre class="shell"><code>go version</code></pre>
+    <p class="label">輸出（版本號和系統依你的電腦而不同）</p>
+    <pre class="out"><code>go version go1.27.4 darwin/arm64</code></pre>
+    <p>看到 <code>go version go1.</code> 開頭的一行，就代表安裝成功。如果看到「找不到指令」（<code>command not found</code> 或 <code>is not recognized</code>），通常是終端機沒有重新打開，或安裝沒有完成。</p>
+    <p>程式碼是純文字，但不要用 Word 這類文書軟體來寫：它們會偷偷加上格式，或把直的引號換成彎的引號，Go 就看不懂了。請用寫程式專用的<strong>編輯器</strong>，例如免費的 VS Code，再裝上 Go 的擴充功能。<a href="https://go.dev/doc/editors">官方的編輯器說明</a>列出了各種選擇。好的編輯器會幫你上色、在打錯字時畫紅線、存檔時自動排版。</p>
+    <p>最後，把這本手冊的程式碼下載到電腦上。<a href="00-hello.html#howto">00 章的「這本手冊怎麼用」</a>有完整的步驟；之後所有指令都假設終端機站在手冊的資料夾（GO-Playground）裡。</p>
+  </section>
+
+  <section aria-labelledby="build">
+    <h2 id="build">4. 從原始碼到執行</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 204" role="img" aria-label="main.go 是人看得懂的原始碼；go build 把它編譯成電腦看得懂的執行檔；執行檔執行後印出結果。go run 一次做完編譯和執行">
+        <title>編譯：把原始碼翻譯成執行檔</title>
+        <rect class="soft" x="16" y="48" width="120" height="72" rx="8"/>
+        <text class="small mono bold" x="76" y="78" text-anchor="middle">main.go</text>
+        <text class="sm" x="76" y="104" text-anchor="middle">人看得懂</text>
+        <path class="wire" d="M136 84 H164"/>
+        <path class="tip" d="M176 84 L163 77 L163 91 Z"/>
+        <rect class="acc" x="180" y="48" width="120" height="72" rx="8"/>
+        <text class="small mono bold" x="240" y="78" text-anchor="middle">go build</text>
+        <text class="sm" x="240" y="104" text-anchor="middle">編譯（翻譯）</text>
+        <path class="wire" d="M300 84 H328"/>
+        <path class="tip" d="M340 84 L327 77 L327 91 Z"/>
+        <rect class="soft" x="344" y="48" width="120" height="72" rx="8"/>
+        <text class="small mono bold" x="404" y="78" text-anchor="middle">hello</text>
+        <text class="sm" x="404" y="104" text-anchor="middle">電腦看得懂</text>
+        <path class="wire hot-ln" d="M16 150 H458"/>
+        <path class="tip hot-tip" d="M470 150 L457 143 L457 157 Z"/>
+        <text class="small mono t-hot" x="240" y="178" text-anchor="middle">go run：編譯完馬上執行，不留下執行檔</text>
+        <text class="sm" x="76" y="34" text-anchor="middle">原始碼</text>
+        <text class="sm" x="404" y="34" text-anchor="middle">執行檔</text>
+      </svg>
+      <figcaption>原始碼是給人寫、給人讀的文字；編譯器把它翻譯成電腦能直接執行的執行檔。</figcaption>
+    </figure>
+    <p>你寫的 <code>.go</code> 檔案叫<strong>原始碼</strong>（source code）。電腦的處理器其實看不懂原始碼，只看得懂一連串的機器指令。把原始碼翻譯成機器指令的工具叫<strong>編譯器</strong>（compiler），翻譯的過程叫<strong>編譯</strong>，翻譯出來的檔案叫<strong>執行檔</strong>。Go 的編譯器就是你剛裝好的 <code>go</code> 指令。</p>
+    <p>練習時最常用的是 <code>go run</code>：它編譯完馬上執行，不會留下執行檔：</p>
+    <pre class="shell"><code>go run ./chapters/pre-1-running</code></pre>
+    <p>這一章的程式會依序執行五個示範，第一行印出「你好，Go」。<code>go build</code> 則只編譯，產生一個執行檔，之後可以直接執行它，不需要原始碼，也不需要再裝 Go：</p>
+    <pre class="shell"><code>go build -o hello ./chapters/pre-1-running   <span class="c"># 產生執行檔 hello（Windows 上請用 hello.exe）</span>
+./hello                                      <span class="c"># 執行它</span></code></pre>
+    <p>寫好的程式要交給別人用時，給的就是執行檔。這也是 Go 受歡迎的原因之一：編譯出來的一個檔案就能在對方的電腦上跑。</p>
+  </section>
+
+  <section aria-labelledby="order">
+    <h2 id="order">5. 一行一行照順序</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 196" role="img" aria-label="程式的三行依序執行，每執行一行，螢幕上就多一行輸出，順序完全相同">
+        <title>由上往下執行</title>
+        <rect class="soft" x="16" y="24" width="250" height="150" rx="8"/>
+        <text class="sm mono" x="44" y="62">fmt.Println("1. 量米")</text>
+        <text class="sm mono" x="44" y="104">fmt.Println("2. 洗米")</text>
+        <text class="sm mono" x="44" y="146">fmt.Println("3. …")</text>
+        <path class="wire acc-ln" d="M30 56 V150"/>
+        <path class="tip acc-tip" d="M30 162 L23 149 L37 149 Z"/>
+        <rect class="acc" x="300" y="24" width="164" height="150" rx="8"/>
+        <text class="small" x="318" y="62">1. 量米</text>
+        <text class="small" x="318" y="104">2. 洗米</text>
+        <text class="small" x="318" y="146">3. 按下煮飯鍵</text>
+        <text class="sm" x="382" y="190" text-anchor="middle">螢幕</text>
+        <text class="sm" x="141" y="190" text-anchor="middle">程式</text>
+      </svg>
+      <figcaption>電腦從第一行做到最後一行，做完一行才做下一行。輸出的順序就是程式寫的順序。</figcaption>
+    </figure>
+    <pre class="code" data-src="chapters/pre-1-running/main.go#cookRice"><code>func cookRice() {
+	fmt.Println("1. 量米")
+	fmt.Println("2. 洗米")
+	fmt.Println("3. 按下煮飯鍵")
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/pre-1-running#Example_cookRice"><code>1. 量米
+2. 洗米
+3. 按下煮飯鍵</code></pre>
+    <p>這聽起來理所當然，卻是寫程式最重要的觀念之一：<strong>電腦不會自己調整順序</strong>。如果把「按下煮飯鍵」寫在「量米」前面，電腦就會先按鍵，鍋子裡什麼都沒有，它也不會覺得奇怪。<a href="pre-2-values.html#trace">先修 2 的「追蹤表」</a>就是一行一行模擬電腦的做法，用來找出這類問題。練習 5 是一個順序寫錯的泡茶程式。</p>
+
+    <h3>讓電腦算數學</h3>
+    <pre class="code" data-src="chapters/pre-1-running/main.go#calculate"><code>func calculate() {
+	fmt.Println(85 * 3)
+	fmt.Println("85 * 3")
+	fmt.Println("三個排骨便當：", 85*3, "元")
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/pre-1-running#Example_calculate"><code>255
+85 * 3
+三個排骨便當： 255 元</code></pre>
+    <p>第一行沒有雙引號，<code>85 * 3</code> 是一個算式，電腦先算出 255 再印。第二行有雙引號，是一段文字，原樣印出 <code>85 * 3</code>。第三行用逗號分開好幾個東西，Println 會依序印出來，中間自動加一個空白。程式裡的乘號是 <code>*</code>，除號是 <code>/</code>，和數學課一樣先乘除後加減。</p>
+  </section>
+
+  <section aria-labelledby="messages">
+    <h2 id="messages">6. 讀懂錯誤訊息</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 176" role="img" aria-label="錯誤訊息 ./main.go:6:6: undefined: fmt.Prinln 分成四段：檔案 main.go、第 6 行、第 6 個字、錯誤的說明">
+        <title>錯誤訊息的四個部分</title>
+        <text class="mono" x="40" y="44">./main.go:6:6: undefined: fmt.Prinln</text>
+        <path class="wire acc-ln" d="M40 56 V62 H136 V56"/>
+        <path class="wire acc-ln" d="M148 56 V62 H158 V56"/>
+        <path class="wire acc-ln" d="M170 56 V62 H180 V56"/>
+        <path class="wire hot-ln" d="M202 56 V62 H438 V56"/>
+        <text class="sm t-acc" x="88" y="90" text-anchor="middle">檔案</text>
+        <path class="wire faint" d="M153 64 V106"/>
+        <text class="sm t-acc" x="153" y="122" text-anchor="middle">第幾行</text>
+        <path class="wire faint" d="M175 64 V76 H220 V134"/>
+        <text class="sm t-acc" x="220" y="150" text-anchor="middle">第幾個字</text>
+        <text class="sm t-hot" x="315" y="90" text-anchor="middle">錯誤的說明</text>
+      </svg>
+      <figcaption>每一則編譯錯誤都是同一個格式：哪個檔案、第幾行、第幾個字，然後是說明。</figcaption>
+    </figure>
+    <p>寫程式一定會遇到錯誤訊息，就連寫了幾十年的人也一樣。錯誤訊息不是在罵你，而是電腦盡力告訴你它卡在哪裡。下面這支程式把 <code>Println</code> 少打了一個 t：</p>
+    <pre class="code bad" data-compile-error><code>package main
+
+import "fmt"
+
+func main() {
+	fmt.Prinln("你好")
+}</code></pre>
+    <p class="label">編譯錯誤</p>
+    <pre class="out err"><code>./main.go:6:6: undefined: fmt.Prinln</code></pre>
+    <p>讀法：在 <code>main.go</code> 的第 6 行、第 6 個字的位置，<code>fmt.Prinln</code> 是 undefined（沒有定義，也就是「不認識這個名字」）。照著行號回到程式，就會看到打錯的字。錯誤訊息是英文，但常見的就那幾種，多看幾次就熟了：</p>
+    <div class="table-wrap">
+      <table class="vs">
+        <thead><tr><th scope="col">訊息</th><th scope="col">意思</th><th scope="col">常見原因</th></tr></thead>
+        <tbody>
+          <tr><th scope="row"><code>undefined: …</code></th><td>不認識這個名字</td><td>打錯字、大小寫錯、忘了 import</td></tr>
+          <tr><th scope="row"><code>syntax error: …</code></th><td>文法錯誤，看不懂這一行</td><td>少了括號、引號、逗號</td></tr>
+          <tr><th scope="row"><code>declared and not used: …</code></th><td>宣告了卻沒用到</td><td>寫到一半的程式（<a href="pre-2-values.html#variables">先修 2</a>）</td></tr>
+          <tr><th scope="row"><code>newline in string</code></th><td>字串還沒結束就換行了</td><td>少了結尾的雙引號</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>有時候一個錯誤會引發好幾則訊息，<strong>先看第一則</strong>，改好之後重新執行，後面的往往就跟著消失了。例如少了結尾的雙引號：</p>
+    <pre class="code bad" data-compile-error><code>package main
+
+import "fmt"
+
+func main() {
+	fmt.Println("你好)
+}</code></pre>
+    <p class="label">編譯錯誤</p>
+    <pre class="out err"><code>./main.go:6:22: newline in string
+./main.go:6:22: syntax error: unexpected newline in argument list; possibly missing comma or )</code></pre>
+    <p>第一則已經說中了：字串在第 6 行還沒結束就換行了。第二則是連帶的結果：Go 以為右括號也還在字串裡，所以說少了 <code>)</code>。補上雙引號，兩則訊息都會消失。</p>
+  </section>
+
+  <section aria-labelledby="kinds">
+    <h2 id="kinds">7. 三種錯誤</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 214" role="img" aria-label="編譯錯誤：程式跑不起來；執行時錯誤：跑到一半當掉；邏輯錯誤：跑完了但答案是錯的，最難發現">
+        <title>三種錯誤</title>
+        <rect class="hot" x="16" y="30" width="140" height="130" rx="10"/>
+        <rect class="hot" x="170" y="30" width="140" height="130" rx="10"/>
+        <rect class="hot" x="324" y="30" width="140" height="130" rx="10"/>
+        <text class="small bold" x="86" y="62" text-anchor="middle">編譯錯誤</text>
+        <text class="small bold" x="240" y="62" text-anchor="middle">執行時錯誤</text>
+        <text class="small bold" x="394" y="62" text-anchor="middle">邏輯錯誤</text>
+        <text class="sm" x="86" y="100" text-anchor="middle">跑不起來</text>
+        <text class="sm" x="240" y="100" text-anchor="middle">跑到一半當掉</text>
+        <text class="sm" x="394" y="100" text-anchor="middle">跑完，答案錯</text>
+        <text class="sm mono" x="86" y="136" text-anchor="middle">undefined</text>
+        <text class="sm mono" x="240" y="136" text-anchor="middle">panic</text>
+        <text class="sm mono" x="394" y="136" text-anchor="middle">125</text>
+        <path class="wire" d="M16 186 H452"/>
+        <path class="tip" d="M464 186 L451 179 L451 193 Z"/>
+        <text class="sm" x="16" y="208">容易發現</text>
+        <text class="sm" x="464" y="208" text-anchor="end">難發現</text>
+      </svg>
+      <figcaption>越晚出現的錯誤越難發現。編譯錯誤最友善：電腦直接告訴你哪一行有問題。</figcaption>
+    </figure>
+    <p><strong>編譯錯誤</strong>：上一節看到的那種，程式寫得不合規則，編譯器拒絕翻譯，程式根本跑不起來。它最容易處理，因為訊息會直接指出位置。</p>
+    <p><strong>執行時錯誤</strong>：程式符合規則、編譯成功了，但執行到某一行時遇到做不到的事，例如除以 0。這時程式會印出 <code>panic</code> 開頭的訊息然後停止，後面的程式都不會執行：</p>
+    <pre class="code" data-src="chapters/pre-1-running/crash/main.go#main"><code>func main() {
+	total := 300
+	people := 0
+	fmt.Println("開始分帳")
+	fmt.Println(total / people)
+	fmt.Println("這一行不會執行")
+}</code></pre>
+    <pre class="shell"><code>go run ./chapters/pre-1-running/crash</code></pre>
+    <p class="label">輸出（檔案路徑的前半段以 … 代替）</p>
+    <pre class="out err"><code>開始分帳
+panic: runtime error: integer divide by zero
+
+goroutine 1 [running]:
+main.main()
+	…/chapters/pre-1-running/crash/main.go:13 +0x50
+exit status 2</code></pre>
+    <p>第一行證明程式確實開始執行了；接著是 panic 的原因「整數除以 0」，下面告訴你出事的是 main.go 的第 13 行。「這一行不會執行」沒有印出來。</p>
+    <p><strong>邏輯錯誤</strong>：程式順利跑完，但答案是錯的。電腦不會抱怨，因為它只是忠實地照你寫的做。這是最難發現的一種：</p>
+    <pre class="code" data-src="chapters/pre-1-running/main.go#wrongAverage,rightAverage"><code>func wrongAverage() {
+	fmt.Println(80 + 90/2)
+}
+
+func rightAverage() {
+	fmt.Println((80 + 90) / 2)
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/pre-1-running#Example_wrongAverage"><code>125</code></pre>
+    <pre class="out" data-example="chapters/pre-1-running#Example_rightAverage"><code>85</code></pre>
+    <p>想算 80 和 90 的平均，但先乘除後加減，<code>80 + 90/2</code> 先算 90/2 = 45，再加 80 得到 125，比兩個分數都高。加上括號讓加法先算才是 85。找邏輯錯誤的方法是<strong>先想好正確答案</strong>，再和程式的結果比對：平均一定介於最低和最高之間，125 一看就知道不對。這本手冊的每一題練習都附有自動檢查答案的測試，做的就是這件事（練習 4）。</p>
+  </section>
+
+  <section aria-labelledby="playground">
+    <h2 id="playground">8. 在瀏覽器裡試：Go Playground</h2>
+    <p>還沒裝好 Go，或只是想快速試一小段程式時，可以用官方的 <a href="https://go.dev/play/">Go Playground</a>：在網頁上貼上程式，按 Run，結果就顯示在下方。它很適合試一個想法、或把程式分享給別人看（按 Share 會產生一個連結）。</p>
+    <p>但它有一些限制：不能讀鍵盤輸入、不能存取你電腦上的檔案、執行時間和記憶體有上限。做這本手冊的練習時，還是請在自己的電腦上執行，因為練習需要用到 <code>go test</code>。</p>
+  </section>
+
+  <section aria-labelledby="pitfalls">
+    <h2 id="pitfalls">常見錯誤</h2>
+    <h3 id="pit-dir">1. 終端機站錯資料夾</h3>
+    <p>執行 <code>go run ./chapters/pre-1-running</code> 時看到「找不到」的錯誤，多半是終端機不在手冊的資料夾裡。先用 <code>pwd</code> 確認位置，再用 <code>cd</code> 移過去。</p>
+
+    <h3 id="pit-case">2. 大小寫打錯</h3>
+    <p>Go 分大小寫：<code>fmt.println</code>、<code>Fmt.Println</code>、<code>fmt.PrintLn</code> 都是錯的，只有 <code>fmt.Println</code> 是對的。錯誤訊息會是 <code>undefined</code>。</p>
+
+    <h3 id="pit-quotes">3. 用了全形符號或彎引號</h3>
+    <p>程式裡的括號、引號、逗號都要用半形：<code>( ) " ,</code>。中文輸入法打出來的 <code>（）“”，</code> 是不同的字元，Go 看不懂。雙引號<strong>裡面</strong>的文字可以是中文，符號本身不行。從網頁或文件複製程式碼時也要注意，有些軟體會把直的引號換成彎的。</p>
+
+    <h3 id="pit-import">4. 忘了 import</h3>
+    <p>用到 <code>fmt.Println</code>，程式開頭就要有 <code>import "fmt"</code>，否則會看到 <code>undefined: fmt</code>。好的編輯器存檔時會自動幫你加上。</p>
+
+    <h3 id="pit-unsaved">5. 改了程式卻沒存檔</h3>
+    <p>go 讀的是存在磁碟上的檔案。改完沒存檔就執行，跑的還是舊的版本，看起來就像「怎麼改都沒用」。</p>
+  </section>
+
+  <section aria-labelledby="exercises">
+    <h2 id="exercises">練習</h2>
+    <p>題目在 <code>exercises/pre-1-running/exercises.go</code>。用編輯器打開它，照著每一題的說明修改，存檔後執行測試：</p>
+    <pre class="shell"><code>go test ./exercises/pre-1-running/                    <span class="c"># 跑全部練習</span>
+go test ./exercises/pre-1-running/ -run TestMotto     <span class="c"># 只跑一題</span>
+go test -tags solution ./exercises/pre-1-running/     <span class="c"># 跑參考解答</span></code></pre>
+    <p>還沒作答時，測試會失敗，並告訴你得到什麼、應該要是什麼：</p>
+    <p class="label">輸出（還沒作答時）</p>
+    <pre class="out err"><code>--- FAIL: TestMotto (0.00s)
+    exercises_test.go:10: Motto() = "", want "我會寫 Go 了"
+FAIL</code></pre>
+    <p><code>=</code> 後面是你的程式回傳的東西（現在是空的），<code>want</code> 後面是正確答案。全部答對時，最後一行會變成 <code>ok</code>。</p>
+    <ol class="exercises">
+      <li>
+        <h3><span class="level l1">入門</span>練習 1：第一句話</h3>
+        <p>把 <code>return ""</code> 的 <code>""</code> 換成那句話，雙引號要留著。</p>
+        <pre class="code" data-src="exercises/pre-1-running/exercises.go#Motto"><code>func Motto() string {
+	// TODO: 把 "" 換成答案
+	return ""
+}</code></pre>
+        <p>測試：<code>TestMotto</code>。</p>
+        <details><summary>提示</summary><p>答案寫成 <code>return "我會寫 Go 了"</code>。注意 Go 和「了」之間各有一個空白，要和題目一模一樣，電腦會逐字比對。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l1">入門</span>練習 2：三行收據</h3>
+        <p>回傳三行的收據。字串裡的 <code>\n</code> 代表換行。</p>
+        <pre class="code" data-src="exercises/pre-1-running/exercises.go#Receipt"><code>func Receipt() string {
+	// TODO: 把 "" 換成答案
+	return ""
+}</code></pre>
+        <p>測試：<code>TestReceipt</code>。</p>
+        <details><summary>提示</summary><p>三行寫在同一個字串裡：<code>"排骨便當 85\n雞腿便當 90\n合計 175"</code>。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l1">入門</span>練習 3：讓電腦算</h3>
+        <p>回傳 4 個雞腿便當的總價。把 0 換成一個算式。</p>
+        <pre class="code" data-src="exercises/pre-1-running/exercises.go#Total"><code>func Total() int {
+	// TODO: 把 0 換成算式
+	return 0
+}</code></pre>
+        <p>測試：<code>TestTotal</code>。</p>
+        <details><summary>提示</summary><p>乘號是 <code>*</code>，算式不用加雙引號。</p></details>
+      </li>
+      <li>
+        <h3><span class="level fix">找錯</span>練習 4：平均分數</h3>
+        <p>三次考試的平均怎麼會比滿分還高？</p>
+        <pre class="code" data-src="exercises/pre-1-running/exercises.go#Average"><code>func Average() int {
+	return 72 + 85 + 91/3
+}</code></pre>
+        <p>測試：<code>TestAverage</code>。</p>
+        <details><summary>提示</summary><p>第 7 節的邏輯錯誤。電腦先算了哪一個？</p></details>
+      </li>
+      <li>
+        <h3><span class="level fix">找錯</span>練習 5：泡茶</h3>
+        <p>泡茶的步驟都在，但順序錯了。</p>
+        <pre class="code" data-src="exercises/pre-1-running/exercises.go#Steps"><code>func Steps() []string {
+	return []string{
+		"放茶葉",
+		"倒熱水",
+		"燒開水",
+		"等三分鐘",
+	}
+}</code></pre>
+        <p>這裡用到的 <code>[]string{…}</code> 是一份文字的清單，先修 4 會介紹；現在只要調整清單裡各行的順序。測試：<code>TestSteps</code>。</p>
+        <details><summary>提示</summary><p>沒有熱水，就不能倒熱水。題目的說明列出了正確的順序。</p></details>
+      </li>
+      <li>
+        <h3><span class="level task">動手做</span>練習 6：跑起來</h3>
+        <ol>
+          <li>打開終端機，用 <code>cd</code> 移到手冊的資料夾，用 <code>pwd</code> 確認位置。</li>
+          <li>執行 <code>go version</code>，確認 Go 已經安裝。</li>
+          <li>執行 <code>go run ./chapters/pre-1-running</code>，對照第 1、5、7 節的輸出。</li>
+          <li>用 <code>go build</code> 產生執行檔並執行它，再用 <code>ls</code> 看看資料夾裡多了什麼。看完可以刪掉它（macOS、Linux 用 <code>rm hello</code>，Windows 用 <code>del hello.exe</code>）。</li>
+        </ol>
+      </li>
+      <li>
+        <h3><span class="level task">動手做</span>練習 7：故意寫錯</h3>
+        <p>打開 <code>chapters/pre-1-running/main.go</code>，每次只做下面一種修改，執行 <code>go run ./chapters/pre-1-running</code>，讀錯誤訊息，然後改回來：</p>
+        <ol>
+          <li>把 <code>Println</code> 改成 <code>println</code>。</li>
+          <li>刪掉某一行結尾的右括號 <code>)</code>。</li>
+          <li>把某個雙引號換成中文的「”」。</li>
+          <li>刪掉 <code>import "fmt"</code> 那一行。</li>
+        </ol>
+        <p>每一次都找出訊息裡的行號，確認它指向你改的地方。全部改回來之後，執行 <code>go test ./chapters/pre-1-running</code>，應該看到 <code>ok</code>。</p>
+      </li>
+    </ol>
+    <p><a href="https://github.com/xinqilin/GO-Playground/blob/main/exercises/pre-1-running/solution.go">參考解答</a>：先自己寫完再看。</p>
+  </section>
+
+  <section aria-labelledby="recap">
+    <h2 id="recap">重點回顧</h2>
+    <ul class="recap">
+      <li>程式是給電腦的一串指令，電腦從上到下一行一行照做，不會自己調整順序。</li>
+      <li>終端機隨時站在某個資料夾裡：<code>pwd</code> 看位置、<code>ls</code> 列內容、<code>cd</code> 換位置，<code>..</code> 是上一層。</li>
+      <li>Tab 自動補完、上方向鍵叫出上一個指令、Ctrl-C 停止程式。</li>
+      <li>原始碼經過編譯變成執行檔；<code>go run</code> 編譯完馬上執行，<code>go build</code> 留下執行檔。</li>
+      <li>錯誤訊息的格式是「檔案:行:字: 說明」，先看第一則。</li>
+      <li>三種錯誤：編譯錯誤跑不起來、執行時錯誤會 panic、邏輯錯誤跑完但答案錯。</li>
+      <li>找邏輯錯誤要先想好正確答案再比對，這本手冊的測試就是在做這件事。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="further">
+    <h2 id="further">延伸閱讀</h2>
+    <ul class="notes">
+      <li>安裝：<a href="https://go.dev/doc/install">Download and install</a>。</li>
+      <li>官方的入門教學：<a href="https://go.dev/doc/tutorial/getting-started">Tutorial: Get started with Go</a>。</li>
+      <li>編輯器：<a href="https://go.dev/doc/editors">Editor plugins and IDEs</a>。</li>
+      <li>線上執行：<a href="https://go.dev/play/">Go Playground</a>。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="run">
+    <h2 id="run">動手跑</h2>
+    <p class="label">在手冊的資料夾（GO-Playground）裡</p>
+    <pre class="shell"><code>go run ./chapters/pre-1-running            <span class="c"># 執行本章所有示範</span>
+go run ./chapters/pre-1-running/crash      <span class="c"># 看執行時錯誤</span>
+go test ./chapters/pre-1-running           <span class="c"># 驗證頁面上的每一段輸出</span>
+go test ./exercises/pre-1-running/         <span class="c"># 做練習</span></code></pre>
+    <p><a href="https://github.com/xinqilin/GO-Playground/tree/main/chapters/pre-1-running">在 GitHub 看本章完整程式碼</a>，或看<a href="https://github.com/xinqilin/GO-Playground/tree/main/exercises/pre-1-running">練習題</a>。</p>
+  </section>
+</main>
+
+<nav class="pager" aria-label="章節導覽">
+  <span></span>
+  <a class="home" href="index.html">目錄</a>
+  <a class="next" href="pre-2-values.html">先修 2 值、變數與運算 →</a>
+</nav>
+</body>
+</html>

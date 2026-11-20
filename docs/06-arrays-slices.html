@@ -4,159 +4,777 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>陣列與切片｜Go 圖解手冊</title>
-<meta name="description" content="Go 的陣列與 slice：slice header 的 ptr、len、cap，append 何時搬家，以及共用底層陣列的陷阱。">
+<meta name="description" content="Go 的陣列與 slice：陣列是值、slice header 的 ptr/len/cap、append 何時換陣列、共用底層陣列的陷阱與完整切片運算式、copy、插入與刪除、nil slice、slices 套件、二維 slice，以及小 slice 拖住大陣列，附可執行的練習題。">
 <link rel="stylesheet" href="assets/style.css">
 </head>
 <body>
 <header class="site">
   <a href="index.html">Go 圖解手冊</a>
-  <span class="count">06 / 24</span>
+  <span class="count">06 / 33</span>
 </header>
 
-<main class="page">
+<main class="page long">
   <header class="hero">
     <div class="num" aria-hidden="true">06</div>
     <p class="eyebrow">Part 1 · 基礎 · 第 06 章</p>
     <h1>陣列與切片</h1>
-    <p class="analogy">陣列是一排固定的格子；slice 是看向這排格子的一扇窗。</p>
+    <p class="analogy">陣列是一排數量固定的置物櫃；slice 是看向那排櫃子的一扇窗，記著從哪一格開始看、看幾格、最多能看到哪一格。</p>
   </header>
 
-  <section aria-labelledby="look">
-    <h2 id="look">看圖</h2>
-    <div class="figs">
-      <figure class="fig">
-        <svg viewBox="0 0 480 282" role="img" aria-label="s := arr[1:4] 的 slice header 有三格：ptr 指向陣列第 1 格，len 是 3，cap 是 4；窗戶框住 20、30、40">
-          <title>slice 是一扇窗</title>
-          <text class="small mono" x="240" y="26" text-anchor="middle">s := arr[1:4]</text>
-          <rect class="acc" x="120" y="40" width="80" height="50"/>
-          <rect class="acc" x="200" y="40" width="80" height="50"/>
-          <rect class="acc" x="280" y="40" width="80" height="50"/>
-          <text class="mono" x="160" y="71" text-anchor="middle">ptr</text>
-          <text class="mono" x="240" y="71" text-anchor="middle">len 3</text>
-          <text class="mono" x="320" y="71" text-anchor="middle">cap 4</text>
-          <path class="wire acc-ln" d="M156 90 V134"/>
-          <path class="tip acc-tip" d="M156 144 L149 131 L163 131 Z"/>
-          <rect class="soft" x="32" y="146" width="80" height="50"/>
-          <rect class="soft" x="116" y="146" width="80" height="50"/>
-          <rect class="soft" x="200" y="146" width="80" height="50"/>
-          <rect class="soft" x="284" y="146" width="80" height="50"/>
-          <rect class="soft" x="368" y="146" width="80" height="50"/>
-          <text class="lg" x="72" y="182" text-anchor="middle">10</text>
-          <text class="lg" x="156" y="182" text-anchor="middle">20</text>
-          <text class="lg" x="240" y="182" text-anchor="middle">30</text>
-          <text class="lg" x="324" y="182" text-anchor="middle">40</text>
-          <text class="lg" x="408" y="182" text-anchor="middle">50</text>
-          <rect class="wire hot-ln" x="110" y="140" width="260" height="62" rx="8"/>
-          <path class="wire acc-ln" d="M116 210 V218 H364 V210"/>
-          <text class="sm t-acc" x="240" y="236" text-anchor="middle">len 3：看得到的格子</text>
-          <path class="wire" d="M116 246 V254 H448 V246"/>
-          <text class="sm" x="282" y="272" text-anchor="middle">cap 4：從起點到陣列結尾</text>
-        </svg>
-        <figcaption>slice 自己不裝資料，只記著從哪裡開始看（ptr）、看幾格（len）、最多能看到哪裡（cap）。</figcaption>
-      </figure>
+  <nav class="toc-inline" aria-labelledby="toc-title">
+    <p class="label" id="toc-title">本章內容</p>
+    <ol>
+      <li><a href="#goals">本章你會學到</a></li>
+      <li><a href="#arrays">陣列</a></li>
+      <li><a href="#window">slice 是一扇窗</a></li>
+      <li><a href="#append">append</a></li>
+      <li><a href="#shared">共用底層陣列</a></li>
+      <li><a href="#copy">copy、插入與刪除</a></li>
+      <li><a href="#nil">nil slice 與空 slice</a></li>
+      <li><a href="#pkg">slices 套件</a></li>
+      <li><a href="#grid">二維 slice</a></li>
+      <li><a href="#pitfalls">常見錯誤</a></li>
+      <li><a href="#java">從 Java 來的你</a></li>
+      <li><a href="#exercises">練習</a></li>
+      <li><a href="#recap">重點回顧</a></li>
+      <li><a href="#further">延伸閱讀</a></li>
+    </ol>
+  </nav>
 
-      <figure class="fig">
-        <svg viewBox="0 0 480 244" role="img" aria-label="cap 4 的陣列已經滿了，append 4 時放不下，搬到 cap 8 的新陣列，再把 4 放進去">
-          <title>append 放不下就搬家</title>
-          <rect class="soft" x="26" y="40" width="50" height="46" rx="4"/>
-          <rect class="soft" x="80" y="40" width="50" height="46" rx="4"/>
-          <rect class="soft" x="134" y="40" width="50" height="46" rx="4"/>
-          <rect class="soft" x="188" y="40" width="50" height="46" rx="4"/>
-          <text class="bold" x="51" y="70" text-anchor="middle">0</text>
-          <text class="bold" x="105" y="70" text-anchor="middle">1</text>
-          <text class="bold" x="159" y="70" text-anchor="middle">2</text>
-          <text class="bold" x="213" y="70" text-anchor="middle">3</text>
-          <text class="small" x="252" y="68">cap 4，已經滿了</text>
-          <path class="wire" d="M120 92 V140"/>
-          <path class="tip" d="M120 152 L113 139 L127 139 Z"/>
-          <text class="small mono" x="132" y="118">append(s, 4)</text>
-          <text class="small t-hot" x="132" y="140">放不下，搬家</text>
-          <rect class="acc" x="26" y="160" width="50" height="46" rx="4"/>
-          <rect class="acc" x="80" y="160" width="50" height="46" rx="4"/>
-          <rect class="acc" x="134" y="160" width="50" height="46" rx="4"/>
-          <rect class="acc" x="188" y="160" width="50" height="46" rx="4"/>
-          <rect class="hot" x="242" y="160" width="50" height="46" rx="4"/>
-          <rect class="soft dash" x="296" y="160" width="50" height="46" rx="4"/>
-          <rect class="soft dash" x="350" y="160" width="50" height="46" rx="4"/>
-          <rect class="soft dash" x="404" y="160" width="50" height="46" rx="4"/>
-          <text class="bold" x="51" y="190" text-anchor="middle">0</text>
-          <text class="bold" x="105" y="190" text-anchor="middle">1</text>
-          <text class="bold" x="159" y="190" text-anchor="middle">2</text>
-          <text class="bold" x="213" y="190" text-anchor="middle">3</text>
-          <text class="bold t-hot" x="267" y="190" text-anchor="middle">4</text>
-          <text class="sm" x="26" y="230">新的底層陣列，cap 變大（例如 8）</text>
-        </svg>
-        <figcaption>容量夠就原地放；不夠就搬到更大的新陣列。舊變數還指著舊陣列，所以一定要寫 <code>s = append(s, …)</code>。</figcaption>
-      </figure>
-
-      <figure class="fig">
-        <svg viewBox="0 0 480 262" role="img" aria-label="part 是 s 的前兩格，但容量還有四格；append(part, 99) 直接寫進第三格，把 s 的 3 蓋成 99">
-          <title>共用底層陣列的陷阱</title>
-          <text class="bold" x="16" y="70">之前</text>
-          <rect class="soft" x="96" y="40" width="70" height="46" rx="4"/>
-          <rect class="soft" x="170" y="40" width="70" height="46" rx="4"/>
-          <rect class="soft" x="244" y="40" width="70" height="46" rx="4"/>
-          <rect class="soft" x="318" y="40" width="70" height="46" rx="4"/>
-          <text class="lg" x="131" y="74" text-anchor="middle">1</text>
-          <text class="lg" x="205" y="74" text-anchor="middle">2</text>
-          <text class="lg" x="279" y="74" text-anchor="middle">3</text>
-          <text class="lg" x="353" y="74" text-anchor="middle">4</text>
-          <rect class="wire dash" x="240" y="34" width="152" height="58" rx="6"/>
-          <path class="wire hot-ln" d="M96 96 V102 H240 V96"/>
-          <text class="sm t-hot" x="168" y="120" text-anchor="middle">part（len 2）</text>
-          <text class="sm" x="316" y="120" text-anchor="middle">part 還能用的空間</text>
-          <path class="wire" d="M240 130 V160"/>
-          <path class="tip" d="M240 172 L233 159 L247 159 Z"/>
-          <text class="small mono" x="252" y="152">part = append(part, 99)</text>
-          <text class="bold" x="16" y="208">之後</text>
-          <rect class="soft" x="96" y="178" width="70" height="46" rx="4"/>
-          <rect class="soft" x="170" y="178" width="70" height="46" rx="4"/>
-          <rect class="hot" x="244" y="178" width="70" height="46" rx="4"/>
-          <rect class="soft" x="318" y="178" width="70" height="46" rx="4"/>
-          <text class="lg" x="131" y="212" text-anchor="middle">1</text>
-          <text class="lg" x="205" y="212" text-anchor="middle">2</text>
-          <text class="lg t-hot" x="279" y="212" text-anchor="middle">99</text>
-          <text class="lg" x="353" y="212" text-anchor="middle">4</text>
-          <text class="sm t-hot" x="242" y="250" text-anchor="middle">s 也跟著變成 [1 2 99 4]</text>
-        </svg>
-        <figcaption>part 和 s 共用同一個陣列。part 的容量還沒用完，append 就直接寫進去，蓋掉 s 的資料。用 <code>s[:2:2]</code> 把容量限制住就安全。</figcaption>
-      </figure>
-    </div>
+  <section aria-labelledby="goals">
+    <h2 id="goals">本章你會學到</h2>
+    <ul class="notes">
+      <li>陣列的長度是型別的一部分，陣列是值：指定和傳參數都會整個複製。</li>
+      <li>slice 的內部結構（ptr、len、cap），以及切片運算式 <code>s[low:high]</code>。</li>
+      <li><code>append</code> 什麼時候寫進原本的陣列、什麼時候換一個新陣列，以及為什麼一定要接住回傳值。</li>
+      <li>兩個 slice 共用底層陣列時的陷阱，以及用完整切片運算式 <code>s[low:high:max]</code> 避開它。</li>
+      <li>用 <code>copy</code>、<code>slices.Clone</code>、<code>slices.Insert</code>、<code>slices.Delete</code> 複製、插入、刪除，以及原地過濾。</li>
+      <li>nil slice 和空 slice 的差別，以及 <code>slices</code> 套件常用的函式。</li>
+      <li>二維 slice 的建立和複製，以及小 slice 讓大陣列無法回收的問題。</li>
+    </ul>
+    <p>先備：<a href="03-control-flow.html">03 流程控制</a>（<code>for range</code>）、<a href="05-pointers.html">05 指標</a>（傳值、共用同一個變數）。</p>
   </section>
 
-  <section aria-labelledby="code">
-    <h2 id="code">最小範例</h2>
-    <pre class="code"><code>func main() {
-	arr := [5]int{10, 20, 30, 40, 50}
-	s := arr[1:4] <span class="c">// 看見 20 30 40</span>
-	s[0] = 99     <span class="c">// 改到的是 arr</span>
-	fmt.Println(arr, len(s), cap(s))
+  <section aria-labelledby="arrays">
+    <h2 id="arrays">1. 陣列</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 214" role="img" aria-label="a 是 85、90、15 三格；b := a 把三格整個複製一份，把 b 的第一格改成 100，a 還是 85">
+        <title>陣列是值</title>
+        <text class="bold t-acc" x="40" y="62" text-anchor="middle">a</text>
+        <rect class="acc" x="70" y="36" width="80" height="44" rx="4"/>
+        <rect class="acc" x="154" y="36" width="80" height="44" rx="4"/>
+        <rect class="acc" x="238" y="36" width="80" height="44" rx="4"/>
+        <text class="lg" x="110" y="69" text-anchor="middle">85</text>
+        <text class="lg" x="194" y="69" text-anchor="middle">90</text>
+        <text class="lg" x="278" y="69" text-anchor="middle">15</text>
+        <text class="sm mono" x="110" y="26" text-anchor="middle">[0]</text>
+        <text class="sm mono" x="194" y="26" text-anchor="middle">[1]</text>
+        <text class="sm mono" x="278" y="26" text-anchor="middle">[2]</text>
+        <text class="small mono" x="336" y="64">[3]int</text>
+        <path class="wire" d="M194 86 V118"/>
+        <path class="tip" d="M194 130 L187 117 L201 117 Z"/>
+        <text class="small mono" x="208" y="112">b := a</text>
+        <text class="sm" x="300" y="112">三格整個複製</text>
+        <text class="bold" x="40" y="166" text-anchor="middle">b</text>
+        <rect class="hot" x="70" y="140" width="80" height="44" rx="4"/>
+        <rect class="soft" x="154" y="140" width="80" height="44" rx="4"/>
+        <rect class="soft" x="238" y="140" width="80" height="44" rx="4"/>
+        <text class="lg t-hot" x="110" y="173" text-anchor="middle">100</text>
+        <text class="lg" x="194" y="173" text-anchor="middle">90</text>
+        <text class="lg" x="278" y="173" text-anchor="middle">15</text>
+        <text class="sm" x="194" y="206" text-anchor="middle">改 b[0]，a 不受影響</text>
+      </svg>
+      <figcaption>陣列是一整塊值。<code>b := a</code> 得到一份獨立的複本，傳給函式時也一樣。</figcaption>
+    </figure>
+    <p>陣列是一排數量固定、型別相同的元素。長度寫在型別裡：<code>[7]int</code> 是「7 個 int」，和 <code>[30]int</code> 是不同的型別。沒有給值的元素是零值：</p>
+    <pre class="code" data-src="chapters/06-arrays-slices/arrays.go#arrayBasics"><code>func arrayBasics() {
+	var sales [7]int // 一週七天的營業額，一開始全部是 0
+	sales[0] = 3200
+	sales[6] = 4100
+	fmt.Println(sales, len(sales))
 
-	head := []int{1, 2, 3, 4}
-	part := head[:2]
-	part = append(part, 99) <span class="c">// 容量夠：蓋掉 head[2]</span>
-	fmt.Println(head, part)
+	weekdays := [...]string{"一", "二", "三", "四", "五"} // ... 讓編譯器自己數長度
+	fmt.Println(len(weekdays), weekdays[len(weekdays)-1])
 
-	safe := head[:2:2]
-	safe = append(safe, 7) <span class="c">// 容量不夠：換新陣列</span>
-	fmt.Println(head, safe)
+	booked := [5]bool{1: true, 3: true} // 指定索引給值，其他格是 false
+	fmt.Println(booked)
 }</code></pre>
     <p class="label">輸出</p>
-    <pre class="out"><code>[10 99 30 40 50] 3 4
-[1 2 99 4] [1 2 99]
-[1 2 99 4] [1 2 7]</code></pre>
+    <pre class="out" data-example="chapters/06-arrays-slices#Example_arrayBasics"><code>[3200 0 0 0 0 0 4100] 7
+5 五
+[false true false true false]</code></pre>
+    <ul class="notes">
+      <li>索引從 0 開始，最後一個是 <code>len(a)-1</code>。</li>
+      <li><code>[...]string{…}</code> 讓編譯器依照給的值數長度，結果還是陣列，不是 slice。</li>
+      <li><code>{1: true, 3: true}</code> 指定索引給值，適合大部分是零值、只有少數幾格要設定的情況。</li>
+    </ul>
+
+    <h3>陣列是值</h3>
+    <pre class="code" data-src="chapters/06-arrays-slices/arrays.go#doubleAll,arrayIsValue"><code>func doubleAll(prices [3]int) {
+	for i := range prices {
+		prices[i] *= 2
+	}
+}
+
+func arrayIsValue() {
+	a := [3]int{85, 90, 15}
+	b := a // 複製三格
+	b[0] = 100
+	fmt.Println(a, b)
+
+	doubleAll(a)
+	fmt.Println(a)
+
+	fmt.Println(a == [3]int{85, 90, 15}, a == b)
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/06-arrays-slices#Example_arrayIsValue"><code>[85 90 15] [100 90 15]
+[85 90 15]
+true false</code></pre>
+    <p>和 Java 的陣列不同，Go 的陣列不是參考，而是一整塊值：<code>b := a</code> 複製了三個元素，<code>doubleAll(a)</code> 也只改到複本。元素型別可以比較時，陣列本身也能用 <code>==</code> 比較，比的是每個元素，所以陣列可以當 map 的 key。</p>
+    <p>長度是型別的一部分，所以不同長度的陣列不能互相指定：</p>
+    <pre class="code bad" data-compile-error><code>package main
+
+import "fmt"
+
+func main() {
+	var week [7]int
+	var month [30]int
+	week = month
+	fmt.Println(week)
+}</code></pre>
+    <p class="label">編譯錯誤</p>
+    <pre class="out err"><code>./main.go:8:9: cannot use month (variable of type [30]int) as [7]int value in assignment</code></pre>
+    <p>這也代表寫不出「接受任意長度陣列」的函式。這正是陣列在 Go 裡很少直接使用的原因：日常的「一串資料」都用 slice。陣列適合長度本來就固定的資料，例如 RGB 顏色 <code>[3]uint8</code>、SHA-256 的雜湊值 <code>[32]byte</code>、井字棋盤 <code>[3][3]string</code>。</p>
+
+    <h3>索引超出範圍</h3>
+    <p>索引是常數時，編譯器就能檢查。對 <code>prices := [3]int{85, 90, 15}</code> 寫 <code>fmt.Println(prices[3])</code>，編譯器會拒絕：</p>
+    <pre class="out err"><code>./main.go:7:21: invalid argument: index 3 out of bounds [0:3]</code></pre>
+    <p>索引是變數時，要到執行時才知道，超出範圍會 panic：</p>
+    <pre class="code" data-src="chapters/06-arrays-slices/arrays.go#indexOutOfRange"><code>func indexOutOfRange() {
+	defer func() {
+		fmt.Println("panic:", recover())
+	}()
+	prices := [3]int{85, 90, 15}
+	i := 3
+	fmt.Println(prices[i])
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/06-arrays-slices#Example_indexOutOfRange"><code>panic: runtime error: index out of range [3] with length 3</code></pre>
+    <p>訊息會告訴你用了哪個索引、長度是多少。Go 每次存取都會檢查範圍，不會像 C 一樣默默讀到別的記憶體；編譯器能證明不會超出範圍時，會把檢查省掉。</p>
   </section>
 
-  <section aria-labelledby="notes">
-    <h2 id="notes">工程師筆記</h2>
+  <section aria-labelledby="window">
+    <h2 id="window">2. slice 是一扇窗</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 282" role="img" aria-label="s := arr[1:4] 的 slice header 有三格：ptr 指向陣列第 1 格，len 是 3，cap 是 4；窗戶框住 20、30、40">
+        <title>slice 是一扇窗</title>
+        <text class="small mono" x="240" y="26" text-anchor="middle">s := arr[1:4]</text>
+        <rect class="acc" x="120" y="40" width="80" height="50"/>
+        <rect class="acc" x="200" y="40" width="80" height="50"/>
+        <rect class="acc" x="280" y="40" width="80" height="50"/>
+        <text class="mono" x="160" y="71" text-anchor="middle">ptr</text>
+        <text class="mono" x="240" y="71" text-anchor="middle">len 3</text>
+        <text class="mono" x="320" y="71" text-anchor="middle">cap 4</text>
+        <path class="wire acc-ln" d="M156 90 V134"/>
+        <path class="tip acc-tip" d="M156 144 L149 131 L163 131 Z"/>
+        <rect class="soft" x="32" y="146" width="80" height="50"/>
+        <rect class="soft" x="116" y="146" width="80" height="50"/>
+        <rect class="soft" x="200" y="146" width="80" height="50"/>
+        <rect class="soft" x="284" y="146" width="80" height="50"/>
+        <rect class="soft" x="368" y="146" width="80" height="50"/>
+        <text class="lg" x="72" y="182" text-anchor="middle">10</text>
+        <text class="lg" x="156" y="182" text-anchor="middle">20</text>
+        <text class="lg" x="240" y="182" text-anchor="middle">30</text>
+        <text class="lg" x="324" y="182" text-anchor="middle">40</text>
+        <text class="lg" x="408" y="182" text-anchor="middle">50</text>
+        <rect class="wire hot-ln" x="110" y="140" width="260" height="62" rx="8"/>
+        <path class="wire acc-ln" d="M116 210 V218 H364 V210"/>
+        <text class="sm t-acc" x="240" y="236" text-anchor="middle">len 3：看得到的格子</text>
+        <path class="wire" d="M116 246 V254 H448 V246"/>
+        <text class="sm" x="282" y="272" text-anchor="middle">cap 4：從起點到陣列結尾</text>
+      </svg>
+      <figcaption>slice 自己不裝資料，只記著從哪裡開始看（ptr）、看幾格（len）、最多能看到哪裡（cap）。</figcaption>
+    </figure>
+    <p>slice 的型別寫成 <code>[]int</code>，方括號裡沒有長度。建立 slice 最常用字面值和 <code>make</code>：</p>
+    <pre class="code" data-src="chapters/06-arrays-slices/window.go#sliceLiteral"><code>func sliceLiteral() {
+	menu := []string{"排骨", "雞腿", "素食"} // 方括號裡沒有長度：這是 slice
+	fmt.Println(menu, len(menu), cap(menu))
+
+	orders := make([]int, 3)    // len 3、cap 3，內容是零值
+	queue := make([]int, 0, 10) // len 0、cap 10：先保留空間
+	fmt.Println(orders, len(orders), cap(orders))
+	fmt.Println(queue, len(queue), cap(queue))
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/06-arrays-slices#Example_sliceLiteral"><code>[排骨 雞腿 素食] 3 3
+[0 0 0] 3 3
+[] 0 10</code></pre>
+    <p><code>make([]T, len, cap)</code> 建立一個長度 len 的 slice，元素都是零值；cap 可以省略，省略時等於 len。<code>len</code> 是目前看得到的元素個數，<code>cap</code> 是不換陣列的情況下最多能長到多長。</p>
+
+    <h3>slice header</h3>
+    <pre class="code" data-src="chapters/06-arrays-slices/window.go#sliceWindow"><code>func sliceWindow() {
+	arr := [5]int{10, 20, 30, 40, 50}
+	s := arr[1:4] // 索引 1、2、3，不含 4
+	fmt.Println(s, len(s), cap(s))
+	s[0] = 99
+	fmt.Println(arr)
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/06-arrays-slices#Example_sliceWindow"><code>[20 30 40] 3 4
+[10 99 30 40 50]</code></pre>
+    <p>一個 slice 其實只是三個欄位組成的小結構，叫做 <strong>slice header</strong>：</p>
     <ul class="notes">
-      <li>陣列長度是型別的一部分，<code>[3]int</code> 和 <code>[4]int</code> 是不同型別；指定或傳參數都會複製整個陣列。實務上幾乎都用 slice。</li>
-      <li>slice 是一個小小的描述子（ptr、len、cap）。傳進函式只複製描述子：函式裡改元素，呼叫端看得到；但函式裡 append 的結果要回傳出去。</li>
-      <li><code>append</code> 一定要接回傳值：<code>s = append(s, x)</code>。</li>
-      <li>用 <code>s[low:high:max]</code> 限制容量，避免 append 蓋到別人的資料。從大 slice 切出一小段要長期保存，用 <code>slices.Clone</code> 複製，否則整個大陣列都會留在記憶體裡。</li>
-      <li>nil slice 和空 slice 的 len 都是 0，也都能 append；差別在 JSON：nil 編成 <code>null</code>，空 slice 編成 <code>[]</code>。</li>
-      <li>知道大概大小時先 <code>make([]T, 0, n)</code> 預留容量，減少搬家。新容量是多少是 runtime 的實作細節：在 Go 1.27 上，nil 的 <code>[]int</code> 第一次 append 就拿到 cap 4。</li>
+      <li><strong>ptr</strong>：指向底層陣列的某一格，也就是這扇窗的起點。</li>
+      <li><strong>len</strong>：窗戶的寬度，能用索引存取的範圍是 <code>0</code> 到 <code>len-1</code>。</li>
+      <li><strong>cap</strong>：從起點到底層陣列結尾有幾格。</li>
     </ul>
+    <p>資料都在底層陣列裡，slice 只是看向它的窗，所以 <code>s[0] = 99</code> 改到的是 <code>arr[1]</code>。用字面值或 make 建立 slice 時，Go 會在背後配置一個沒有名字的陣列。把 slice 指定給另一個變數、傳給函式，複製的都只是這三個欄位，不會複製資料。</p>
+
+    <h3>切片運算式</h3>
+    <pre class="code" data-src="chapters/06-arrays-slices/window.go#sliceBounds"><code>func sliceBounds() {
+	s := []int{0, 1, 2, 3, 4, 5}
+	fmt.Println(s[:2], s[4:], s[:])
+
+	part := s[1:3]
+	fmt.Println(part, len(part), cap(part))
+	more := part[:4] // part 的長度只有 2，但容量有 5
+	fmt.Println(more)
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/06-arrays-slices#Example_sliceBounds"><code>[0 1] [4 5] [0 1 2 3 4 5]
+[1 2] 2 5
+[1 2 3 4]</code></pre>
+    <p><code>s[low:high]</code> 包含 low、不包含 high，長度是 <code>high-low</code>。low 省略是 0，high 省略是 <code>len(s)</code>。high 可以超過 len，只要不超過 cap：<code>part</code> 的長度只有 2，但它的窗戶後面還有 3 格，所以 <code>part[:4]</code> 可以往後延伸，看到原本 s 裡的 3 和 4。超過 cap 就會 panic。</p>
+  </section>
+
+  <section aria-labelledby="append">
+    <h2 id="append">3. append</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 244" role="img" aria-label="cap 4 的陣列已經滿了，append 4 時放不下，搬到 cap 8 的新陣列，再把 4 放進去">
+        <title>append 放不下就搬家</title>
+        <rect class="soft" x="26" y="40" width="50" height="46" rx="4"/>
+        <rect class="soft" x="80" y="40" width="50" height="46" rx="4"/>
+        <rect class="soft" x="134" y="40" width="50" height="46" rx="4"/>
+        <rect class="soft" x="188" y="40" width="50" height="46" rx="4"/>
+        <text class="bold" x="51" y="70" text-anchor="middle">0</text>
+        <text class="bold" x="105" y="70" text-anchor="middle">1</text>
+        <text class="bold" x="159" y="70" text-anchor="middle">2</text>
+        <text class="bold" x="213" y="70" text-anchor="middle">3</text>
+        <text class="small" x="252" y="68">cap 4，已經滿了</text>
+        <path class="wire" d="M120 92 V140"/>
+        <path class="tip" d="M120 152 L113 139 L127 139 Z"/>
+        <text class="small mono" x="132" y="118">append(s, 4)</text>
+        <text class="small t-hot" x="132" y="140">放不下，搬家</text>
+        <rect class="acc" x="26" y="160" width="50" height="46" rx="4"/>
+        <rect class="acc" x="80" y="160" width="50" height="46" rx="4"/>
+        <rect class="acc" x="134" y="160" width="50" height="46" rx="4"/>
+        <rect class="acc" x="188" y="160" width="50" height="46" rx="4"/>
+        <rect class="hot" x="242" y="160" width="50" height="46" rx="4"/>
+        <rect class="soft dash" x="296" y="160" width="50" height="46" rx="4"/>
+        <rect class="soft dash" x="350" y="160" width="50" height="46" rx="4"/>
+        <rect class="soft dash" x="404" y="160" width="50" height="46" rx="4"/>
+        <text class="bold" x="51" y="190" text-anchor="middle">0</text>
+        <text class="bold" x="105" y="190" text-anchor="middle">1</text>
+        <text class="bold" x="159" y="190" text-anchor="middle">2</text>
+        <text class="bold" x="213" y="190" text-anchor="middle">3</text>
+        <text class="bold t-hot" x="267" y="190" text-anchor="middle">4</text>
+        <text class="sm" x="26" y="230">新的底層陣列，cap 變大（例如 8）</text>
+      </svg>
+      <figcaption>容量夠就原地放；不夠就搬到更大的新陣列。舊變數還指著舊陣列，所以一定要寫 <code>s = append(s, …)</code>。</figcaption>
+    </figure>
+    <p><code>append</code> 把元素加到 slice 的後面，回傳加長後的 slice。一次可以加好幾個，也可以用 <code>...</code> 把另一個 slice 展開加進去（第 <a href="04-functions.html#variadic">04 章的可變參數</a>）：</p>
+    <pre class="code" data-src="chapters/06-arrays-slices/append.go#appendBasics"><code>func appendBasics() {
+	var cart []string // nil slice，可以直接 append
+	cart = append(cart, "排骨")
+	cart = append(cart, "雞腿", "滷蛋")
+	drinks := []string{"紅茶", "味噌湯"}
+	cart = append(cart, drinks...)
+	fmt.Println(cart, len(cart))
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/06-arrays-slices#Example_appendBasics"><code>[排骨 雞腿 滷蛋 紅茶 味噌湯] 5</code></pre>
+    <p>nil slice 可以直接 append，不需要先 make。這是 Go 最常見的寫法：宣告一個空的 slice，在迴圈裡一個一個 append。</p>
+
+    <h3>什麼時候換陣列</h3>
+    <pre class="code" data-src="chapters/06-arrays-slices/append.go#appendGrowth"><code>func appendGrowth() {
+	full := make([]int, 3) // len 3、cap 3：已經滿了
+	grown := append(full, 4)
+	grown[0] = 99
+	fmt.Println(full, grown, cap(grown) &gt; cap(full))
+
+	roomy := make([]int, 3, 10) // len 3、cap 10：後面還有空間
+	same := append(roomy, 4)
+	same[0] = 99
+	fmt.Println(roomy, same, &amp;roomy[0] == &amp;same[0])
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/06-arrays-slices#Example_appendGrowth"><code>[0 0 0] [99 0 0 4] true
+[99 0 0] [99 0 0 4] true</code></pre>
+    <p>append 的規則只有一條：</p>
+    <ul class="notes">
+      <li><strong>容量夠</strong>：直接寫進原本陣列的下一格，回傳的 slice 和原本的 slice 共用同一個陣列。上面的 <code>roomy</code> 和 <code>same</code> 第一格的位址相同，改 same[0]，roomy[0] 也變了。</li>
+      <li><strong>容量不夠</strong>：配置一個更大的新陣列，把舊資料複製過去，再放進新元素。回傳的 slice 指向新陣列，和原本的 slice 從此分開。上面改 grown[0]，full 不受影響。</li>
+    </ul>
+    <p>所以 append 的回傳值<strong>一定</strong>要接住，而且幾乎都是接回同一個變數：<code>s = append(s, x)</code>。沒接住時，加進去的元素可能留在一個沒有人看得到的新陣列裡。</p>
+
+    <h3>事先保留容量</h3>
+    <pre class="code" data-src="chapters/06-arrays-slices/append.go#countMoves,appendPrealloc"><code>func countMoves(s []int, n int) int {
+	moves := 0
+	for i := range n {
+		before := cap(s)
+		s = append(s, i)
+		if cap(s) != before {
+			moves++
+		}
+	}
+	return moves
+}
+
+func appendPrealloc() {
+	fmt.Println("沒有保留容量，換過陣列：", countMoves(nil, 1000) &gt; 0)
+	fmt.Println("保留 1000 格，換陣列的次數：", countMoves(make([]int, 0, 1000), 1000))
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/06-arrays-slices#Example_appendPrealloc"><code>沒有保留容量，換過陣列： true
+保留 1000 格，換陣列的次數： 0</code></pre>
+    <p>每次換陣列都要配置記憶體、複製所有舊資料。事先知道大概會有幾個元素時（例如把一個 slice 轉換成另一個），用 <code>make([]T, 0, n)</code> 保留容量，之後的 append 就不必換陣列。注意 len 要寫 0：寫成 <code>make([]T, n)</code> 會先有 n 個零值，append 會接在它們後面（常見錯誤 7）。</p>
+
+    <section class="deep" aria-labelledby="growth">
+      <p class="tag">深入：第一次讀可以先跳過</p>
+      <h3 id="growth">3.1 新的容量是多少</h3>
+      <p>容量不夠時，新陣列要多大是 runtime 的實作細節，規格沒有規定。目前的實作大致是：小的 slice 容量加倍，變大之後每次的成長比例逐漸降到約 1.25 倍，最後再依記憶體配置器的大小級距往上取整。這個策略讓一連串 append 的平均成本維持在常數時間，代價是可能浪費一些空間。</p>
+      <p>這些數字在不同 Go 版本之間調整過，所以本章的範例只比較容量的大小關係，不印出確切的數字。你的程式也不應該依賴它：需要確定的容量，就自己用 make 指定。</p>
+    </section>
+  </section>
+
+  <section aria-labelledby="shared">
+    <h2 id="shared">4. 共用底層陣列</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 262" role="img" aria-label="part 是 s 的前兩格，但容量還有四格；append(part, 99) 直接寫進第三格，把 s 的 3 蓋成 99">
+        <title>共用底層陣列的陷阱</title>
+        <text class="bold" x="16" y="70">之前</text>
+        <rect class="soft" x="96" y="40" width="70" height="46" rx="4"/>
+        <rect class="soft" x="170" y="40" width="70" height="46" rx="4"/>
+        <rect class="soft" x="244" y="40" width="70" height="46" rx="4"/>
+        <rect class="soft" x="318" y="40" width="70" height="46" rx="4"/>
+        <text class="lg" x="131" y="74" text-anchor="middle">1</text>
+        <text class="lg" x="205" y="74" text-anchor="middle">2</text>
+        <text class="lg" x="279" y="74" text-anchor="middle">3</text>
+        <text class="lg" x="353" y="74" text-anchor="middle">4</text>
+        <rect class="wire dash" x="240" y="34" width="152" height="58" rx="6"/>
+        <path class="wire hot-ln" d="M96 96 V102 H240 V96"/>
+        <text class="sm t-hot" x="168" y="120" text-anchor="middle">part（len 2）</text>
+        <text class="sm" x="316" y="120" text-anchor="middle">part 還能用的空間</text>
+        <path class="wire" d="M240 130 V160"/>
+        <path class="tip" d="M240 172 L233 159 L247 159 Z"/>
+        <text class="small mono" x="252" y="152">part = append(part, 99)</text>
+        <text class="bold" x="16" y="208">之後</text>
+        <rect class="soft" x="96" y="178" width="70" height="46" rx="4"/>
+        <rect class="soft" x="170" y="178" width="70" height="46" rx="4"/>
+        <rect class="hot" x="244" y="178" width="70" height="46" rx="4"/>
+        <rect class="soft" x="318" y="178" width="70" height="46" rx="4"/>
+        <text class="lg" x="131" y="212" text-anchor="middle">1</text>
+        <text class="lg" x="205" y="212" text-anchor="middle">2</text>
+        <text class="lg t-hot" x="279" y="212" text-anchor="middle">99</text>
+        <text class="lg" x="353" y="212" text-anchor="middle">4</text>
+        <text class="sm t-hot" x="242" y="250" text-anchor="middle">s 也跟著變成 [1 2 99 4]</text>
+      </svg>
+      <figcaption>part 和 s 共用同一個陣列。part 的容量還沒用完，append 就直接寫進去，蓋掉 s 的資料。</figcaption>
+    </figure>
+    <p>把第 2 節和第 3 節合起來，就會得到 slice 最有名的陷阱：</p>
+    <pre class="code" data-src="chapters/06-arrays-slices/shared.go#sharedBacking"><code>func sharedBacking() {
+	s := []int{1, 2, 3, 4}
+	part := s[:2]           // len 2、cap 4：後面還有空間
+	part = append(part, 99) // 容量夠，直接寫進底層陣列的索引 2
+	fmt.Println(s, part)
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/06-arrays-slices#Example_sharedBacking"><code>[1 2 99 4] [1 2 99]</code></pre>
+    <p><code>part := s[:2]</code> 的長度是 2，但容量是 4。對 part append 時容量還夠，append 就照規則直接寫進底層陣列的索引 2，而那一格正是 s 的第三個元素。程式裡沒有任何一行明寫要改 s，s 卻被改了。這種 bug 很難追，因為修改發生的地方和出問題的地方可能相隔很遠。</p>
+
+    <h3>完整切片運算式</h3>
+    <pre class="code" data-src="chapters/06-arrays-slices/shared.go#fullSliceExpr"><code>func fullSliceExpr() {
+	s := []int{1, 2, 3, 4}
+	part := s[:2:2] // len 2、cap 2
+	part = append(part, 99)
+	fmt.Println(s, part)
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/06-arrays-slices#Example_fullSliceExpr"><code>[1 2 3 4] [1 2 99]</code></pre>
+    <p><code>s[low:high:max]</code> 多了第三個數字，把容量限制成 <code>max-low</code>。<code>s[:2:2]</code> 的容量只有 2，下一次 append 一定會換到新陣列，s 就安全了。把一個 slice 的一部分交給別人、而對方可能會 append 時，就用這個寫法把容量切掉。練習 4 就是這個 bug。</p>
+
+    <h3>傳給函式的 slice</h3>
+    <pre class="code" data-src="chapters/06-arrays-slices/shared.go#raise,addItem,withItem,passSlice"><code>func raise(prices []int) {
+	for i := range prices {
+		prices[i] += 5
+	}
+}
+
+func addItem(cart []string, item string) {
+	cart = append(cart, item)
+}
+
+func withItem(cart []string, item string) []string {
+	return append(cart, item)
+}
+
+func passSlice() {
+	prices := []int{85, 90}
+	raise(prices)
+	fmt.Println(prices)
+
+	cart := []string{"排骨"}
+	addItem(cart, "滷蛋")
+	fmt.Println(cart, len(cart))
+	cart = withItem(cart, "滷蛋")
+	fmt.Println(cart, len(cart))
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/06-arrays-slices#Example_passSlice"><code>[90 95]
+[排骨] 1
+[排骨 滷蛋] 2</code></pre>
+    <p>這解答了第 <a href="05-pointers.html#when">05 章</a>留下的問題。傳 slice 給函式時，複製的是 slice header（ptr、len、cap 三個欄位）：</p>
+    <ul class="notes">
+      <li><strong>改元素</strong>：函式的 header 和呼叫端的 header 指向同一個陣列，所以 <code>raise</code> 的修改呼叫端看得到。</li>
+      <li><strong>append</strong>：函式改的是自己那份 header 的 len（可能還有 ptr），呼叫端的 header 完全沒變，所以 <code>addItem</code> 之後，cart 的長度還是 1。</li>
+    </ul>
+    <p>Go 的慣例是讓函式回傳新的 slice，由呼叫端接住，就像 append 本身一樣（<code>withItem</code>）。標準庫的 <code>slices.Insert</code>、<code>slices.Delete</code> 都是這樣設計的。</p>
+  </section>
+
+  <section aria-labelledby="copy">
+    <h2 id="copy">5. copy、插入與刪除</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 252" role="img" aria-label="queue 原本是 A01 到 A04；Delete 刪掉 A02，後面的往前搬，最後一格清成零值；再用 Insert 在索引 1 放進 V01，後面的往後搬">
+        <title>刪除和插入都要搬動後面的元素</title>
+        <rect class="soft" x="16" y="20" width="64" height="44" rx="4"/>
+        <rect class="hot" x="84" y="20" width="64" height="44" rx="4"/>
+        <rect class="soft" x="152" y="20" width="64" height="44" rx="4"/>
+        <rect class="soft" x="220" y="20" width="64" height="44" rx="4"/>
+        <text class="mono" x="48" y="48" text-anchor="middle">A01</text>
+        <text class="mono t-hot" x="116" y="48" text-anchor="middle">A02</text>
+        <text class="mono" x="184" y="48" text-anchor="middle">A03</text>
+        <text class="mono" x="252" y="48" text-anchor="middle">A04</text>
+        <text class="sm" x="300" y="47">原本的隊伍</text>
+        <path class="wire" d="M150 68 V96"/>
+        <path class="tip" d="M150 106 L143 93 L157 93 Z"/>
+        <text class="sm mono" x="164" y="90">slices.Delete(queue, 1, 2)</text>
+        <rect class="soft" x="16" y="108" width="64" height="44" rx="4"/>
+        <rect class="soft" x="84" y="108" width="64" height="44" rx="4"/>
+        <rect class="soft" x="152" y="108" width="64" height="44" rx="4"/>
+        <rect class="soft dash" x="220" y="108" width="64" height="44" rx="4"/>
+        <text class="mono" x="48" y="136" text-anchor="middle">A01</text>
+        <text class="mono" x="116" y="136" text-anchor="middle">A03</text>
+        <text class="mono" x="184" y="136" text-anchor="middle">A04</text>
+        <text class="mono mute" x="252" y="136" text-anchor="middle">""</text>
+        <text class="sm" x="300" y="135">往前搬，最後一格清空</text>
+        <path class="wire" d="M150 156 V184"/>
+        <path class="tip" d="M150 194 L143 181 L157 181 Z"/>
+        <text class="sm mono" x="164" y="178">slices.Insert(queue, 1, "V01")</text>
+        <rect class="soft" x="16" y="196" width="64" height="44" rx="4"/>
+        <rect class="acc" x="84" y="196" width="64" height="44" rx="4"/>
+        <rect class="soft" x="152" y="196" width="64" height="44" rx="4"/>
+        <rect class="soft" x="220" y="196" width="64" height="44" rx="4"/>
+        <text class="mono" x="48" y="224" text-anchor="middle">A01</text>
+        <text class="mono bold t-acc" x="116" y="224" text-anchor="middle">V01</text>
+        <text class="mono" x="184" y="224" text-anchor="middle">A03</text>
+        <text class="mono" x="252" y="224" text-anchor="middle">A04</text>
+        <text class="sm" x="300" y="223">往後搬，放進 V01</text>
+      </svg>
+      <figcaption>在中間刪除或插入，後面的元素都要搬一格。元素越多、位置越前面，成本越高。</figcaption>
+    </figure>
+    <h3>copy 與 Clone</h3>
+    <pre class="code" data-src="chapters/06-arrays-slices/copy.go#copyBasics"><code>func copyBasics() {
+	src := []int{85, 90, 15}
+	dst := make([]int, 2)
+	n := copy(dst, src)
+	fmt.Println(n, dst)
+
+	clone := slices.Clone(src)
+	clone[0] = 0
+	fmt.Println(src, clone)
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/06-arrays-slices#Example_copyBasics"><code>2 [85 90]
+[85 90 15] [0 90 15]</code></pre>
+    <p>內建的 <code>copy(dst, src)</code> 把元素從 src 複製到 dst，個數是兩者長度的較小值，回傳實際複製了幾個。注意它看的是 dst 的<strong>長度</strong>，不是容量：<code>make([]int, 0, 10)</code> 當 dst 一個都複製不進去。要一份內容相同、但完全獨立的 slice，用 <code>slices.Clone</code> 最簡單。</p>
+
+    <h3>插入與刪除</h3>
+    <pre class="code" data-src="chapters/06-arrays-slices/copy.go#insertDelete"><code>func insertDelete() {
+	queue := []string{"A01", "A02", "A03", "A04"}
+	queue = slices.Delete(queue, 1, 2) // 刪掉 queue[1:2]，也就是 A02
+	fmt.Println(queue)
+	queue = slices.Insert(queue, 1, "V01")
+	fmt.Println(queue)
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/06-arrays-slices#Example_insertDelete"><code>[A01 A03 A04]
+[A01 V01 A03 A04]</code></pre>
+    <p><code>slices.Delete(s, i, j)</code> 刪掉 <code>s[i:j]</code>，<code>slices.Insert(s, i, v...)</code> 在索引 i 插入值。兩者都會<strong>原地修改</strong> s 的底層陣列，並回傳新的 slice，所以和 append 一樣要接回去。Go 1.22 起，Delete 會把尾端空出來的格子清成零值（圖中的 <code>""</code>），舊的 slice 如果還看得到那一格，會看到零值而不是殘留的資料。</p>
+
+    <h3>原地過濾</h3>
+    <pre class="code" data-src="chapters/06-arrays-slices/copy.go#filterInPlace"><code>func filterInPlace() {
+	prices := []int{85, 120, 90, 150, 70}
+	cheap := prices[:0]
+	for _, p := range prices {
+		if p &lt; 100 {
+			cheap = append(cheap, p)
+		}
+	}
+	fmt.Println(cheap)
+	fmt.Println(prices) // 前三格被覆寫了，後面是舊資料
+
+	others := []int{85, 120, 90, 150, 70}
+	others = slices.DeleteFunc(others, func(p int) bool { return p &gt;= 100 })
+	fmt.Println(others)
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/06-arrays-slices#Example_filterInPlace"><code>[85 90 70]
+[85 90 70 150 70]
+[85 90 70]</code></pre>
+    <p><code>prices[:0]</code> 是一個長度 0、但沿用 prices 底層陣列的 slice。走過每個元素，把要留下的 append 進去：因為寫入的位置永遠不會超過正在讀的位置，所以不會蓋掉還沒讀到的資料，也不必配置新的陣列。代價是原本的 prices 被改掉了（後面殘留著舊資料），只有在不再需要原本的資料時才這樣做。<code>slices.DeleteFunc</code> 做的是同一件事，條件反過來：回傳 true 的元素會被刪掉。練習 3 用這個技巧去除相鄰的重複條碼。</p>
+  </section>
+
+  <section aria-labelledby="nil">
+    <h2 id="nil">6. nil slice 與空 slice</h2>
+    <pre class="code" data-src="chapters/06-arrays-slices/nil.go#nilVsEmpty"><code>func nilVsEmpty() {
+	var a []int
+	b := []int{}
+	c := make([]int, 0)
+	fmt.Println(a == nil, b == nil, c == nil)
+	fmt.Println(len(a), len(b), len(c))
+	fmt.Printf("%v %v\n", a, b)
+	fmt.Printf("%#v %#v\n", a, b)
+
+	for range a {
+		fmt.Println("不會執行")
+	}
+	a = append(a, 1)
+	fmt.Println(a, len(a))
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/06-arrays-slices#Example_nilVsEmpty"><code>true false false
+0 0 0
+[] []
+[]int(nil) []int{}
+[1] 1</code></pre>
+    <p>slice 的零值是 nil：ptr 是 nil，len 和 cap 都是 0。<code>[]int{}</code> 和 <code>make([]int, 0)</code> 則是長度 0、但不是 nil 的空 slice。兩者在幾乎所有操作上都一樣：len 是 0、range 一圈都不跑、可以 append、<code>%v</code> 都印成 <code>[]</code>。只有和 nil 比較，以及用 <code>%#v</code> 印出時看得出差別。</p>
+    <ul class="notes">
+      <li><strong>判斷是否為空</strong>：用 <code>len(s) == 0</code>，不要用 <code>s == nil</code>，這樣兩種情況都涵蓋得到。</li>
+      <li><strong>宣告</strong>：慣用 <code>var s []int</code>，不需要先建立空 slice。</li>
+      <li><strong>函式回傳</strong>：沒有結果時回傳 nil 即可，呼叫端用 len 判斷。少數情況下差別很重要，例如用 encoding/json（v1）轉成 JSON 時，nil slice 是 <code>null</code>、空 slice 是 <code>[]</code>；新的 encoding/json/v2 兩種都是 <code>[]</code>，見「<a href="23-json.html">JSON 與資料編碼</a>」那一章。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="pkg">
+    <h2 id="pkg">7. slices 套件</h2>
+    <p>Go 1.21 起，標準庫的 <code>slices</code> 套件提供了一整組處理 slice 的泛型函式，任何元素型別都能用（泛型在第 <a href="12-generics.html">12 章</a>）：</p>
+    <pre class="code" data-src="chapters/06-arrays-slices/pkg.go#slicesPackage"><code>func slicesPackage() {
+	prices := []int{90, 85, 120, 85, 70}
+	fmt.Println(slices.Contains(prices, 120), slices.Index(prices, 85), slices.Index(prices, 999))
+	fmt.Println(slices.Min(prices), slices.Max(prices))
+
+	sorted := slices.Clone(prices)
+	slices.Sort(sorted)
+	fmt.Println(sorted)
+	i, found := slices.BinarySearch(sorted, 90)
+	fmt.Println(i, found)
+
+	sorted = slices.Compact(sorted) // 移除相鄰的重複值
+	fmt.Println(sorted)
+	slices.Reverse(sorted)
+	fmt.Println(sorted)
+	fmt.Println(slices.Equal(sorted, []int{120, 90, 85, 70}))
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/06-arrays-slices#Example_slicesPackage"><code>true 1 -1
+70 120
+[70 85 85 90 120]
+3 true
+[70 85 90 120]
+[120 90 85 70]
+true</code></pre>
+    <div class="table-wrap">
+      <table class="vs">
+        <thead><tr><th scope="col">想做的事</th><th scope="col">函式</th><th scope="col">注意</th></tr></thead>
+        <tbody>
+          <tr><th scope="row">找元素</th><td><code>Contains</code>、<code>Index</code>、<code>IndexFunc</code></td><td>找不到時 Index 回傳 -1</td></tr>
+          <tr><th scope="row">最大、最小</th><td><code>Max</code>、<code>Min</code></td><td>空的 slice 會 panic</td></tr>
+          <tr><th scope="row">排序</th><td><code>Sort</code>、<code>SortFunc</code>、<code>SortStableFunc</code></td><td>原地排序；自訂順序見第 <a href="04-functions.html#values">04 章</a></td></tr>
+          <tr><th scope="row">二分搜尋</th><td><code>BinarySearch</code></td><td>slice 必須已經排好序；回傳位置和有沒有找到</td></tr>
+          <tr><th scope="row">比較內容</th><td><code>Equal</code></td><td>slice 不能用 <code>==</code> 比較（常見錯誤 4）</td></tr>
+          <tr><th scope="row">去除相鄰重複</th><td><code>Compact</code></td><td>只移除<strong>相鄰</strong>的重複，通常先排序</td></tr>
+          <tr><th scope="row">反轉</th><td><code>Reverse</code></td><td>原地反轉</td></tr>
+          <tr><th scope="row">複製、插入、刪除</th><td><code>Clone</code>、<code>Insert</code>、<code>Delete</code>、<code>DeleteFunc</code></td><td>要接住回傳值（第 5 節）</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>舊的程式碼常見 <code>sort.Ints</code>、<code>sort.Slice</code>，新程式優先用 slices 套件，型別更安全，通常也更快。Go 1.23 起還有 <code>slices.All</code>、<code>slices.Sorted</code>、<code>slices.Chunk</code> 這些和疊代器搭配的函式，第 <a href="13-iterators.html">13 章</a>會介紹。</p>
+  </section>
+
+  <section aria-labelledby="grid">
+    <h2 id="grid">8. 二維 slice</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 232" role="img" aria-label="seats 是一個有三格的 slice，每一格各自指向一列四個座位；第 1 列第 2 個座位是 X">
+        <title>slice 裡裝著 slice</title>
+        <text class="small mono bold" x="56" y="22" text-anchor="middle">seats</text>
+        <rect class="acc" x="16" y="34" width="80" height="44" rx="4"/>
+        <rect class="acc" x="16" y="94" width="80" height="44" rx="4"/>
+        <rect class="acc" x="16" y="154" width="80" height="44" rx="4"/>
+        <text class="small mono" x="48" y="61" text-anchor="middle">[0]</text>
+        <text class="small mono" x="48" y="121" text-anchor="middle">[1]</text>
+        <text class="small mono" x="48" y="181" text-anchor="middle">[2]</text>
+        <circle class="tip" cx="80" cy="56" r="5"/>
+        <circle class="tip" cx="80" cy="116" r="5"/>
+        <circle class="tip" cx="80" cy="176" r="5"/>
+        <path class="wire" d="M86 56 H138 M86 116 H138 M86 176 H138"/>
+        <path class="tip" d="M150 56 L137 49 L137 63 Z"/>
+        <path class="tip" d="M150 116 L137 109 L137 123 Z"/>
+        <path class="tip" d="M150 176 L137 169 L137 183 Z"/>
+        <rect class="soft" x="152" y="34" width="60" height="44" rx="4"/>
+        <rect class="soft" x="220" y="34" width="60" height="44" rx="4"/>
+        <rect class="soft" x="288" y="34" width="60" height="44" rx="4"/>
+        <rect class="soft" x="356" y="34" width="60" height="44" rx="4"/>
+        <rect class="soft" x="152" y="94" width="60" height="44" rx="4"/>
+        <rect class="soft" x="220" y="94" width="60" height="44" rx="4"/>
+        <rect class="hot" x="288" y="94" width="60" height="44" rx="4"/>
+        <rect class="soft" x="356" y="94" width="60" height="44" rx="4"/>
+        <rect class="soft" x="152" y="154" width="60" height="44" rx="4"/>
+        <rect class="soft" x="220" y="154" width="60" height="44" rx="4"/>
+        <rect class="soft" x="288" y="154" width="60" height="44" rx="4"/>
+        <rect class="soft" x="356" y="154" width="60" height="44" rx="4"/>
+        <text class="mono" x="182" y="62" text-anchor="middle">.</text>
+        <text class="mono" x="250" y="62" text-anchor="middle">.</text>
+        <text class="mono" x="318" y="62" text-anchor="middle">.</text>
+        <text class="mono" x="386" y="62" text-anchor="middle">.</text>
+        <text class="mono" x="182" y="122" text-anchor="middle">.</text>
+        <text class="mono" x="250" y="122" text-anchor="middle">.</text>
+        <text class="mono bold t-hot" x="318" y="122" text-anchor="middle">X</text>
+        <text class="mono" x="386" y="122" text-anchor="middle">.</text>
+        <text class="mono" x="182" y="182" text-anchor="middle">.</text>
+        <text class="mono" x="250" y="182" text-anchor="middle">.</text>
+        <text class="mono" x="318" y="182" text-anchor="middle">.</text>
+        <text class="mono" x="386" y="182" text-anchor="middle">.</text>
+        <text class="sm" x="240" y="222" text-anchor="middle">外層存的是三個 slice header，每一列是各自的陣列</text>
+      </svg>
+      <figcaption><code>seats[1][2]</code>：先從外層拿到第 1 列，再從那一列拿第 2 個座位。</figcaption>
+    </figure>
+    <p>Go 沒有專門的多維 slice，二維就是「元素是 slice 的 slice」。外層要先 make，再替每一列各自 make：</p>
+    <pre class="code" data-src="chapters/06-arrays-slices/grid.go#newSeats,printSeats,seatGrid"><code>func newSeats(rows, cols int) [][]string {
+	seats := make([][]string, rows)
+	for r := range seats {
+		seats[r] = make([]string, cols)
+		for c := range seats[r] {
+			seats[r][c] = "."
+		}
+	}
+	return seats
+}
+
+func printSeats(seats [][]string) {
+	for _, row := range seats {
+		fmt.Println(strings.Join(row, " "))
+	}
+}
+
+func seatGrid() {
+	seats := newSeats(3, 4)
+	seats[1][2] = "X"
+	printSeats(seats)
+
+	daily := [][]string{{"排骨"}, {"雞腿", "素食", "排骨"}, {}} // 每一列可以不一樣長
+	for day, orders := range daily {
+		fmt.Println(day, len(orders))
+	}
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/06-arrays-slices#Example_seatGrid"><code>. . . .
+. . X .
+. . . .
+0 1
+1 3
+2 0</code></pre>
+    <p>只 make 外層、忘了 make 每一列，每一列都是 nil slice，<code>seats[1][2] = "X"</code> 就會索引超出範圍而 panic。每一列各自獨立，所以長度可以不同，像 <code>daily</code> 每天的訂單數不一樣。</p>
+
+    <h3>複製二維 slice</h3>
+    <pre class="code" data-src="chapters/06-arrays-slices/grid.go#gridCopy"><code>func gridCopy() {
+	seats := newSeats(2, 3)
+	shallow := slices.Clone(seats)
+	shallow[0][0] = "X"
+	fmt.Println(seats[0][0])
+
+	var board [2][3]string
+	copied := board
+	copied[0][0] = "X"
+	fmt.Printf("%q\n", board[0][0])
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/06-arrays-slices#Example_gridCopy"><code>X
+""</code></pre>
+    <p><code>slices.Clone(seats)</code> 只複製外層的三個 header，每一列還是同一個陣列，所以改 shallow 也改到了 seats。這和第 <a href="05-pointers.html#passing">05 章</a>的淺複製是同一件事。要完全獨立，就要逐列 Clone。二維<strong>陣列</strong> <code>[2][3]string</code> 則是一整塊值，指定時全部複製。</p>
+
+    <section class="deep" aria-labelledby="retain">
+      <p class="tag">深入：第一次讀可以先跳過</p>
+      <h3 id="retain">8.1 小 slice 拖住大陣列</h3>
+      <pre class="code" data-src="chapters/06-arrays-slices/grid.go#retainBig"><code>func retainBig() {
+	big := make([]byte, 1&lt;&lt;20) // 1 MB，例如整個讀進來的檔案
+	header := big[:16]
+	fmt.Println(len(header), cap(header))
+	kept := slices.Clone(header)
+	fmt.Println(len(kept), cap(kept) &lt; 1024)
+}</code></pre>
+      <p class="label">輸出</p>
+      <pre class="out" data-example="chapters/06-arrays-slices#Example_retainBig"><code>16 1048576
+16 true</code></pre>
+      <p>header 只有 16 個 byte，但它的容量是 1,048,576：它仍然指向整個 1 MB 的陣列。只要 header 還被保存著（例如存進一個長期存在的 map），垃圾回收器就無法回收那 1 MB，即使你只需要前 16 個 byte。從大量資料中切出一小段要長期保存時，用 <code>slices.Clone</code> 複製出來，大陣列就能被回收。字串也有同樣的問題，第 <a href="08-strings-runes.html">08 章</a>會提到。</p>
+    </section>
+  </section>
+
+  <section aria-labelledby="pitfalls">
+    <h2 id="pitfalls">常見錯誤</h2>
+    <h3 id="pit-append-result">1. 沒有接住 append 的回傳值</h3>
+    <p>單獨寫一行 <code>append(cart, "滷蛋")</code> 會編譯失敗：</p>
+    <pre class="code bad" data-compile-error><code>package main
+
+import "fmt"
+
+func main() {
+	cart := []string{"排骨"}
+	append(cart, "滷蛋")
+	fmt.Println(cart)
+}</code></pre>
+    <p class="label">編譯錯誤</p>
+    <pre class="out err"><code>./main.go:7:2: append(cart, "滷蛋") (value of type []string) is not used</code></pre>
+    <p>比較難發現的是在函式裡 append 到參數上（第 4 節的 <code>addItem</code>）：編譯會過，呼叫端卻看不到新元素。一律寫 <code>s = append(s, …)</code>，函式要加長 slice 時就回傳新的 slice。</p>
+
+    <h3 id="pit-overwrite">2. append 蓋掉別人的資料</h3>
+    <p>從同一個 slice 切出來的 slice 共用底層陣列，對其中一個 append 可能寫進另一個的範圍（第 4 節）。把 slice 的一部分交出去時，用 <code>s[low:high:high]</code> 把容量限制住。</p>
+
+    <h3 id="pit-assign-copy">3. 以為 b := a 會複製 slice</h3>
+    <p>對 slice 來說，<code>b := a</code> 只複製了 header，兩個變數看向同一個陣列，改 b[0] 就改了 a[0]。要獨立的複本用 <code>slices.Clone(a)</code>，二維的要逐列 Clone。練習 2 就是這個 bug。</p>
+
+    <h3 id="pit-compare">4. 用 == 比較兩個 slice</h3>
+    <pre class="code bad" data-compile-error><code>package main
+
+import "fmt"
+
+func main() {
+	a := []int{85, 90}
+	b := []int{85, 90}
+	fmt.Println(a == b)
+}</code></pre>
+    <p class="label">編譯錯誤</p>
+    <pre class="out err"><code>./main.go:8:14: invalid operation: a == b (slice can only be compared to nil)</code></pre>
+    <p>slice 只能和 nil 比較。比較內容用 <code>slices.Equal(a, b)</code>。這也代表 slice 不能當 map 的 key，需要時改用陣列或把內容轉成字串。</p>
+
+    <h3 id="pit-range-copy">5. 在 range 裡改元素的複本</h3>
+    <p><code>for _, p := range prices { p *= 2 }</code> 改的是複本，prices 不會變。要修改元素就用索引：<code>for i := range prices { prices[i] *= 2 }</code>。見第 <a href="03-control-flow.html#range">03 章的 range</a>。</p>
+
+    <h3 id="pit-out-of-range">6. 索引超出範圍</h3>
+    <p>執行時的錯誤訊息是 <code>index out of range [3] with length 3</code>，切片時是 <code>slice bounds out of range</code>。最常見的原因是把 <code>len(s)</code> 當成最後一個索引，或是在空的 slice 上取 <code>s[0]</code>。取第一個或最後一個元素前，先確認 <code>len(s) &gt; 0</code>。</p>
+
+    <h3 id="pit-make-len">7. make 給了長度又 append</h3>
+    <p>第 2 節的 <code>orders := make([]int, 3)</code> 已經有三個 0。如果接著寫 <code>orders = append(orders, 85)</code>，結果是 <code>[0 0 0 85]</code>，不是 <code>[85]</code>。打算用 append 填資料時，要寫 <code>make([]int, 0, 3)</code>（像 <code>queue</code> 那樣）；打算用索引 <code>orders[i] = …</code> 填資料時，才寫 <code>make([]int, 3)</code>。</p>
   </section>
 
   <section aria-labelledby="java">
@@ -165,22 +783,139 @@
       <table class="vs">
         <thead><tr><th scope="col">主題</th><th scope="col">Java</th><th scope="col">Go</th></tr></thead>
         <tbody>
-          <tr><th scope="row">固定長度</th><td class="java"><code>int[]</code> 是物件，傳的是參考</td><td><code>[3]int</code> 是值，傳參數會複製</td></tr>
+          <tr><th scope="row">固定長度</th><td class="java"><code>int[]</code> 是物件，傳的是參考；長度不是型別的一部分</td><td><code>[3]int</code> 是值，傳參數會複製；長度是型別的一部分</td></tr>
           <tr><th scope="row">可變長度</th><td class="java"><code>ArrayList&lt;Integer&gt;</code></td><td><code>[]int</code></td></tr>
           <tr><th scope="row">取一段</th><td class="java"><code>list.subList(1, 4)</code>，也共用底層</td><td><code>s[1:4]</code>，共用底層陣列</td></tr>
           <tr><th scope="row">新增</th><td class="java"><code>list.add(x)</code> 原地修改</td><td><code>s = append(s, x)</code>，要接回傳值</td></tr>
+          <tr><th scope="row">預留容量</th><td class="java"><code>new ArrayList&lt;&gt;(n)</code></td><td><code>make([]T, 0, n)</code></td></tr>
           <tr><th scope="row">基本型別</th><td class="java">要裝箱成 <code>Integer</code></td><td><code>[]int</code> 直接存 int，不用裝箱</td></tr>
+          <tr><th scope="row">比較內容</th><td class="java"><code>Arrays.equals</code>、<code>list.equals</code></td><td><code>slices.Equal</code>；<code>==</code> 不能用在 slice</td></tr>
+          <tr><th scope="row">排序</th><td class="java"><code>Arrays.sort</code>、<code>Collections.sort</code></td><td><code>slices.Sort</code>、<code>slices.SortFunc</code></td></tr>
+          <tr><th scope="row">越界</th><td class="java"><code>ArrayIndexOutOfBoundsException</code></td><td><code>index out of range</code> panic</td></tr>
+          <tr><th scope="row">多維</th><td class="java"><code>int[][]</code>，每一列可以不同長</td><td><code>[][]int</code>，每一列要自己 make</td></tr>
         </tbody>
       </table>
     </div>
   </section>
 
+  <section aria-labelledby="exercises">
+    <h2 id="exercises">練習</h2>
+    <p>題目在 <code>exercises/06-arrays-slices/exercises.go</code>。</p>
+    <pre class="shell"><code>go test ./exercises/06-arrays-slices/                   <span class="c"># 跑全部練習</span>
+go test ./exercises/06-arrays-slices/ -run TestChunk    <span class="c"># 只跑一題</span>
+go test -tags solution ./exercises/06-arrays-slices/    <span class="c"># 跑參考解答</span></code></pre>
+    <ol class="exercises">
+      <li>
+        <h3><span class="level l1">入門</span>練習 1：分批出餐</h3>
+        <p>把訂單依序分批，每批 size 筆，最後一批可以不滿。</p>
+        <pre class="code" data-src="exercises/06-arrays-slices/exercises.go#Chunk"><code>func Chunk(orders []string, size int) [][]string {
+	// TODO: 實作
+	return nil
+}</code></pre>
+        <p>例如 5 筆訂單、每批 2 筆，結果是 <code>[[o1 o2] [o3 o4] [o5]]</code>。測試：<code>TestChunk</code>。</p>
+        <details><summary>提示</summary><p>用 <code>for start := 0; start &lt; len(orders); start += size</code> 走過每一批的起點，終點是 <code>min(start+size, len(orders))</code>，把 <code>orders[start:end]</code> append 到結果裡。</p></details>
+      </li>
+      <li>
+        <h3><span class="level fix">找錯</span>練習 2：打折後的價格</h3>
+        <p>應該回傳一個新的 slice，原本的價格不能被改。但呼叫之後，原本的價格也變了。</p>
+        <pre class="code" data-src="exercises/06-arrays-slices/exercises.go#Discounted"><code>func Discounted(prices []int, pct int) []int {
+	out := prices
+	for i := range out {
+		out[i] = out[i] * (100 - pct) / 100
+	}
+	return out
+}</code></pre>
+        <p>測試：<code>TestDiscounted</code>。</p>
+        <details><summary>提示</summary><p><code>out := prices</code> 複製了什麼？見常見錯誤 3。用 <code>make([]int, len(prices))</code> 配置新的 slice 再填值。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l2">進階</span>練習 3：重複刷到的條碼</h3>
+        <p>掃描器常常把同一個條碼連刷好幾次。移除相鄰的重複條碼，只保留第一個，而且要原地處理，不配置新的陣列。</p>
+        <pre class="code" data-src="exercises/06-arrays-slices/exercises.go#Compact"><code>func Compact(codes []string) []string {
+	// TODO: 實作
+	return nil
+}</code></pre>
+        <p><code>[A1 A1 B2 A1 C3 C3 C3]</code> 變成 <code>[A1 B2 A1 C3]</code>：不相鄰的 A1 要留著。測試會確認結果和輸入共用同一個陣列。測試：<code>TestCompact</code>。</p>
+        <details><summary>提示</summary><p>第 5 節的原地過濾。先放進第一個條碼：<code>kept := codes[:1]</code>，之後每個條碼和 <code>kept</code> 的最後一個比較，不同才 append。記得先處理空的輸入。</p></details>
+      </li>
+      <li>
+        <h3><span class="level fix">找錯</span>練習 4：切成兩段</h3>
+        <p>把訂單分成前 n 筆和其餘的。呼叫端之後會對 head append，這不能影響 tail，但現在 tail 的第一筆被蓋掉了。</p>
+        <pre class="code" data-src="exercises/06-arrays-slices/exercises.go#SplitAt"><code>func SplitAt(orders []int, n int) (head, tail []int) {
+	n = max(0, min(n, len(orders)))
+	return orders[:n], orders[n:]
+}</code></pre>
+        <p>測試：<code>TestSplitAt</code>。</p>
+        <details><summary>提示</summary><p>head 的容量是多少？第 4 節的圖。只要改一個運算式。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l2">進階</span>練習 5：值班輪替</h3>
+        <p>把值班表原地往左轉 k 格。k 可能大於人數。</p>
+        <pre class="code" data-src="exercises/06-arrays-slices/exercises.go#Rotate"><code>func Rotate(staff []string, k int) {
+	// TODO: 實作
+}</code></pre>
+        <p><code>[A B C D]</code> 轉 1 格是 <code>[B C D A]</code>，轉 5 格也一樣。測試：<code>TestRotate</code>。</p>
+        <details><summary>提示</summary><p>先 <code>k %= len(staff)</code>（記得先處理空的值班表，不然會除以 0）。把前 k 個 Clone 出來存著，用 <code>copy(staff, staff[k:])</code> 把後面的往前搬，再把存起來的 copy 到最後 k 格。copy 允許來源和目的重疊。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l2">進階</span>練習 6：營業額最高的連續 k 天</h3>
+        <p>找出連續 k 天營業額總和最高的區間，回傳起始索引和總和；一樣高時取最早的。</p>
+        <pre class="code" data-src="exercises/06-arrays-slices/exercises.go#BestStreak"><code>func BestStreak(sales []int, k int) (start, total int) {
+	// TODO: 實作
+	return 0, 0
+}</code></pre>
+        <p><code>[3 8 2 9 9 1]</code>、k 是 2 時，答案是從索引 3 開始的 9 + 9 = 18。測試：<code>TestBestStreak</code>。</p>
+        <details><summary>提示</summary><p>每個起點都重新加 k 天也能通過，但有更好的寫法：先算前 k 天的總和，之後每往右移一天，加上新進來的 <code>sales[i]</code>、減掉離開的 <code>sales[i-k]</code>。這叫滑動視窗，每天只要做一次加減。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l3">挑戰</span>練習 7：插入排好序的 slice</h3>
+        <p>把 v 插入由小到大排好的 s，結果仍然排好。容量足夠時要原地插入；容量不夠時才配置新陣列，而且不能改到原本的 s。</p>
+        <pre class="code" data-src="exercises/06-arrays-slices/exercises.go#InsertSorted"><code>func InsertSorted(s []int, v int) []int {
+	// TODO: 實作
+	return s
+}</code></pre>
+        <p>測試會檢查兩種容量的情況：容量夠時結果要和 s 共用陣列，容量不夠時原本的 s 要保持不變。測試：<code>TestInsertSorted</code>。</p>
+        <details><summary>提示</summary><p>先找插入的位置 i（第一個大於 v 的元素）。接著 <code>s = append(s, 0)</code> 多要一格：容量夠時原地加長，不夠時 append 會換到新陣列，原本的 s 不受影響。最後 <code>copy(s[i+1:], s[i:])</code> 把後面的元素往後搬一格，再放進 v。想想為什麼一定要先 append 再搬。</p></details>
+      </li>
+    </ol>
+    <p><a href="https://github.com/xinqilin/GO-Playground/blob/main/exercises/06-arrays-slices/solution.go">參考解答</a>：先自己寫完再看。測試通過的寫法都是對的。</p>
+  </section>
+
+  <section aria-labelledby="recap">
+    <h2 id="recap">重點回顧</h2>
+    <ul class="recap">
+      <li>陣列的長度是型別的一部分；陣列是值，指定和傳參數都會整個複製，可以用 <code>==</code> 比較。</li>
+      <li>slice 是 ptr、len、cap 三個欄位的 header，資料在底層陣列裡；複製 slice 只複製 header。</li>
+      <li><code>s[low:high]</code> 包含 low、不包含 high；high 不能超過 cap。</li>
+      <li>append 容量夠就寫進原本的陣列，不夠就換新陣列；一律寫 <code>s = append(s, …)</code>。</li>
+      <li>知道大概的數量時用 <code>make([]T, 0, n)</code> 保留容量。</li>
+      <li>共用底層陣列的 slice，append 可能互相覆蓋；交出 slice 的一部分時用 <code>s[low:high:high]</code> 限制容量。</li>
+      <li>函式改 slice 的元素呼叫端看得到，append 看不到；要加長就回傳新的 slice。</li>
+      <li><code>copy</code> 依兩邊長度的較小值複製；<code>slices.Clone</code> 產生獨立的複本；Insert、Delete 要接住回傳值。</li>
+      <li>判斷 slice 是否為空用 <code>len(s) == 0</code>；nil slice 可以直接 append 和 range。</li>
+      <li>slice 不能用 <code>==</code> 比較，用 <code>slices.Equal</code>。</li>
+      <li>二維 slice 要逐列 make，Clone 外層不會複製每一列。</li>
+      <li>從大 slice 切出的小 slice 會拖住整個陣列，要長期保存就 Clone。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="further">
+    <h2 id="further">延伸閱讀</h2>
+    <ul class="notes">
+      <li>Go 語言規格：<a href="https://go.dev/ref/spec#Array_types">Array types</a>、<a href="https://go.dev/ref/spec#Slice_types">Slice types</a>、<a href="https://go.dev/ref/spec#Slice_expressions">Slice expressions</a>、<a href="https://go.dev/ref/spec#Index_expressions">Index expressions</a>、<a href="https://go.dev/ref/spec#Appending_and_copying_slices">Appending to and copying slices</a>、<a href="https://go.dev/ref/spec#Making_slices_maps_and_channels">Making slices, maps and channels</a>。</li>
+      <li>套件文件：<a href="https://pkg.go.dev/slices">slices</a>，內建函式 <a href="https://pkg.go.dev/builtin#append">append</a>、<a href="https://pkg.go.dev/builtin#copy">copy</a>、<a href="https://pkg.go.dev/builtin#make">make</a>。</li>
+      <li>Go Blog：<a href="https://go.dev/blog/slices-intro">Go Slices: usage and internals</a>、<a href="https://go.dev/blog/slices">Arrays, slices (and strings): The mechanics of 'append'</a>。</li>
+      <li>Delete 等函式清除尾端元素的改變：<a href="https://go.dev/doc/go1.22#minor_library_changes">Go 1.22 版本說明</a>。</li>
+    </ul>
+  </section>
+
   <section aria-labelledby="run">
     <h2 id="run">動手跑</h2>
     <p class="label">在 repo 根目錄</p>
-    <pre class="shell"><code>go run ./chapters/06-arrays-slices
-go test ./chapters/06-arrays-slices</code></pre>
-    <p><a href="https://github.com/xinqilin/GO-Playground/tree/main/chapters/06-arrays-slices">在 GitHub 看完整程式碼</a></p>
+    <pre class="shell"><code>go run ./chapters/06-arrays-slices                  <span class="c"># 執行本章所有示範</span>
+go test ./chapters/06-arrays-slices                 <span class="c"># 驗證頁面上的每一段輸出</span>
+go test ./exercises/06-arrays-slices/               <span class="c"># 做練習</span></code></pre>
+    <p><a href="https://github.com/xinqilin/GO-Playground/tree/main/chapters/06-arrays-slices">在 GitHub 看本章完整程式碼</a>，或看<a href="https://github.com/xinqilin/GO-Playground/tree/main/exercises/06-arrays-slices">練習題</a>。</p>
   </section>
 </main>
 

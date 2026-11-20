@@ -4,149 +4,824 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>struct 與方法｜Go 圖解手冊</title>
-<meta name="description" content="Go 的 struct 與方法：value receiver 與 pointer receiver 的差別，以及用嵌入做組合。">
+<meta name="description" content="Go 的自訂型別、type alias、struct 的建立與複製、比較與當成 map key、方法、值 receiver 與指標 receiver、method set、建構函式與好用的零值、嵌入與方法提升，以及 struct tag，附可執行的練習題。">
 <link rel="stylesheet" href="assets/style.css">
 </head>
 <body>
 <header class="site">
   <a href="index.html">Go 圖解手冊</a>
-  <span class="count">09 / 24</span>
+  <span class="count">09 / 33</span>
 </header>
 
-<main class="page">
+<main class="page long">
   <header class="hero">
     <div class="num" aria-hidden="true">09</div>
     <p class="eyebrow">Part 2 · 型別系統 · 第 09 章</p>
     <h1>struct 與方法</h1>
-    <p class="analogy">struct 是一張表格，把相關的欄位放在一起；方法是綁在這張表格上的函式。</p>
+    <p class="analogy">struct 是一張表格，把相關的欄位放在一起；方法是掛在型別上的函式。Go 沒有 class，也沒有繼承，靠的是「型別 + 方法 + 組合」。</p>
   </header>
 
-  <section aria-labelledby="look">
-    <h2 id="look">看圖</h2>
-    <div class="figs">
-      <figure class="fig">
-        <svg viewBox="0 0 480 196" role="img" aria-label="Point 是一張有 X、Y 兩個欄位的表格；Point{X: 3, Y: 4} 填了值，Point{} 沒填，欄位都是零值 0">
-          <title>struct 是一張表格</title>
-          <rect class="acc" x="30" y="24" width="180" height="38" rx="6"/>
-          <text class="mono bold" x="120" y="49" text-anchor="middle">Point</text>
-          <rect class="box" x="30" y="62" width="180" height="46"/>
-          <rect class="box" x="30" y="108" width="180" height="46"/>
-          <path class="wire faint" d="M90 62 V154"/>
-          <text class="mono" x="60" y="92" text-anchor="middle">X</text>
-          <text class="mono" x="60" y="138" text-anchor="middle">Y</text>
-          <text class="lg" x="150" y="96" text-anchor="middle">3</text>
-          <text class="lg" x="150" y="142" text-anchor="middle">4</text>
-          <text class="small mono" x="120" y="182" text-anchor="middle">Point{X: 3, Y: 4}</text>
+  <nav class="toc-inline" aria-labelledby="toc-title">
+    <p class="label" id="toc-title">本章內容</p>
+    <ol>
+      <li><a href="#goals">本章你會學到</a></li>
+      <li><a href="#types">自訂型別</a></li>
+      <li><a href="#structs">struct</a></li>
+      <li><a href="#copy">複製與比較</a></li>
+      <li><a href="#receivers">方法與 receiver</a></li>
+      <li><a href="#ctor">建構函式與零值</a></li>
+      <li><a href="#embed">嵌入</a></li>
+      <li><a href="#tags">struct tag</a></li>
+      <li><a href="#pitfalls">常見錯誤</a></li>
+      <li><a href="#java">從 Java 來的你</a></li>
+      <li><a href="#exercises">練習</a></li>
+      <li><a href="#recap">重點回顧</a></li>
+      <li><a href="#further">延伸閱讀</a></li>
+    </ol>
+  </nav>
 
-          <rect class="acc" x="270" y="24" width="180" height="38" rx="6"/>
-          <text class="mono bold" x="360" y="49" text-anchor="middle">Point</text>
-          <rect class="box" x="270" y="62" width="180" height="46"/>
-          <rect class="box" x="270" y="108" width="180" height="46"/>
-          <path class="wire faint" d="M330 62 V154"/>
-          <text class="mono" x="300" y="92" text-anchor="middle">X</text>
-          <text class="mono" x="300" y="138" text-anchor="middle">Y</text>
-          <text class="lg mute" x="390" y="96" text-anchor="middle">0</text>
-          <text class="lg mute" x="390" y="142" text-anchor="middle">0</text>
-          <text class="small mono" x="360" y="182" text-anchor="middle">Point{}</text>
-        </svg>
-        <figcaption>struct 把相關的欄位綁成一張表格；沒填的欄位就是零值。</figcaption>
-      </figure>
-
-      <figure class="fig">
-        <svg viewBox="0 0 480 296" role="img" aria-label="Dist2 是 value receiver，拿到 p 的影印本只能讀；Move 是 pointer receiver，拿到 p 的地址，改到原本的 p">
-          <title>value receiver 與 pointer receiver</title>
-          <path class="wire faint" d="M240 12 V286"/>
-          <text class="mono bold" x="117" y="28" text-anchor="middle">p.Dist2()</text>
-          <text class="sm" x="117" y="50" text-anchor="middle">value receiver：拿到影印本</text>
-          <rect class="acc" x="57" y="66" width="120" height="70" rx="6"/>
-          <text class="mono" x="117" y="96" text-anchor="middle">X: 3</text>
-          <text class="mono" x="117" y="122" text-anchor="middle">Y: 4</text>
-          <path class="wire" d="M117 142 V166"/>
-          <path class="tip" d="M117 176 L110 163 L124 163 Z"/>
-          <text class="sm" x="126" y="160">複製</text>
-          <rect class="soft dash" x="57" y="180" width="120" height="70" rx="6"/>
-          <text class="mono" x="117" y="210" text-anchor="middle">X: 3</text>
-          <text class="mono" x="117" y="236" text-anchor="middle">Y: 4</text>
-          <text class="bold" x="117" y="280" text-anchor="middle">回傳 25</text>
-
-          <text class="mono bold" x="363" y="28" text-anchor="middle">p.Move(1, 1)</text>
-          <text class="sm" x="363" y="50" text-anchor="middle">pointer receiver：拿到地址</text>
-          <rect class="acc" x="303" y="66" width="120" height="70" rx="6"/>
-          <text class="mono t-hot" x="363" y="96" text-anchor="middle">X: 4</text>
-          <text class="mono t-hot" x="363" y="122" text-anchor="middle">Y: 5</text>
-          <path class="wire" d="M343 142 V178"/>
-          <path class="tip" d="M343 188 L336 175 L350 175 Z"/>
-          <text class="sm" x="334" y="166" text-anchor="end">給地址</text>
-          <rect class="hot" x="318" y="192" width="90" height="44" rx="4"/>
-          <text class="mono" x="363" y="221" text-anchor="middle">&amp;p</text>
-          <path class="wire hot-ln" d="M383 192 V154"/>
-          <path class="tip hot-tip" d="M383 142 L376 155 L390 155 Z"/>
-          <text class="sm t-hot" x="392" y="172">改原本的</text>
-          <text class="small t-hot" x="363" y="280" text-anchor="middle">p 變成 {4 5}</text>
-        </svg>
-        <figcaption>value receiver 拿到影印本，只能讀；pointer receiver 拿到地址，改的是原本那一張。</figcaption>
-      </figure>
-
-      <figure class="fig">
-        <svg viewBox="0 0 480 246" role="img" aria-label="Dog 裡面裝著一個 Animal；d.Name 直接拿到 Animal 的 Name，d.Hello() 呼叫的是 Animal 的 Hello">
-          <title>嵌入是組合，不是繼承</title>
-          <rect class="soft" x="150" y="20" width="310" height="210" rx="12"/>
-          <text class="mono bold" x="166" y="46">Dog</text>
-          <rect class="acc" x="170" y="60" width="270" height="96" rx="10"/>
-          <text class="small mono t-acc" x="186" y="82">Animal</text>
-          <text class="mono" x="186" y="116">Name 小黑</text>
-          <rect class="box" x="320" y="118" width="104" height="30" rx="6"/>
-          <text class="small mono" x="372" y="138" text-anchor="middle">Hello()</text>
-          <text class="mono" x="166" y="200">Breed 柴犬</text>
-          <text class="small mono" x="14" y="110">d.Name</text>
-          <path class="wire acc-ln" d="M80 106 H158"/>
-          <path class="tip acc-tip" d="M168 106 L156 100 L156 112 Z"/>
-          <text class="small mono" x="14" y="140">d.Hello()</text>
-          <path class="wire acc-ln" d="M92 136 H306"/>
-          <path class="tip acc-tip" d="M316 136 L304 130 L304 142 Z"/>
-        </svg>
-        <figcaption>Dog 裡面裝著一個 Animal。<code>d.Name</code> 其實是 <code>d.Animal.Name</code>，方法也一樣被提升上來。</figcaption>
-      </figure>
-    </div>
+  <section aria-labelledby="goals">
+    <h2 id="goals">本章你會學到</h2>
+    <ul class="notes">
+      <li>用 <code>type</code> 定義新型別，分清楚新型別、底層型別和 type alias。</li>
+      <li>建立 struct 的幾種寫法，以及複製 struct 時哪些東西會被共用。</li>
+      <li>什麼時候 struct 可以用 <code>==</code> 比較、可以當 map 的 key。</li>
+      <li>寫方法，選擇值 receiver 或指標 receiver，以及 method set 的規則。</li>
+      <li>用 <code>NewX</code> 建構函式檢查輸入，或設計成零值就能直接用的型別。</li>
+      <li>嵌入：欄位和方法的提升、遮蔽，以及它為什麼不是繼承。</li>
+      <li>struct tag 是什麼，<code>encoding/json</code> 怎麼用它。</li>
+    </ul>
+    <p>先備：<a href="05-pointers.html">05 指標</a>（傳值與傳指標）、<a href="02-input-output.html#stringer">02 章的 Stringer</a>、<a href="07-maps.html">07 map</a>。</p>
   </section>
 
-  <section aria-labelledby="code">
-    <h2 id="code">最小範例</h2>
-    <pre class="code"><code>type Point struct{ X, Y int }
+  <section aria-labelledby="types">
+    <h2 id="types">1. 自訂型別</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 210" role="img" aria-label="左邊：type Gram float64 定義一個新型別，底層型別是 float64，兩者之間要轉換，Gram 可以有自己的方法。右邊：type Score = int 是別名，Score 和 int 是同一個型別">
+        <title>新型別與別名</title>
+        <path class="wire faint" d="M240 14 V202"/>
+        <text class="small mono" x="120" y="28" text-anchor="middle">type Gram float64</text>
+        <rect class="soft" x="30" y="44" width="180" height="40" rx="6"/>
+        <text class="mono" x="120" y="70" text-anchor="middle">float64</text>
+        <path class="wire dash" d="M120 84 V112"/>
+        <text class="sm" x="132" y="104">轉換</text>
+        <rect class="acc" x="30" y="112" width="180" height="40" rx="6"/>
+        <text class="mono bold" x="120" y="138" text-anchor="middle">Gram</text>
+        <text class="sm" x="120" y="176" text-anchor="middle">新型別：可以有自己的方法</text>
+        <text class="sm" x="120" y="198" text-anchor="middle">和 float64 不能直接混著算</text>
+        <text class="small mono" x="360" y="28" text-anchor="middle">type Score = int</text>
+        <rect class="soft" x="270" y="44" width="180" height="108" rx="6"/>
+        <text class="mono bold" x="360" y="84" text-anchor="middle">int</text>
+        <text class="sm" x="360" y="108" text-anchor="middle">也可以叫</text>
+        <text class="mono" x="360" y="136" text-anchor="middle">Score</text>
+        <text class="sm" x="360" y="176" text-anchor="middle">別名：同一個型別</text>
+        <text class="sm" x="360" y="198" text-anchor="middle">不需要轉換，也不能加方法</text>
+      </svg>
+      <figcaption><code>type A B</code> 造出一個新型別；<code>type A = B</code> 只是替 B 多取一個名字。</figcaption>
+    </figure>
+    <p><code>type 名稱 底層型別</code> 定義一個<strong>新型別</strong>（defined type）。它和底層型別長得一樣（同樣的值、同樣的運算），卻是不同的型別，而且可以有自己的方法：</p>
+    <pre class="code" data-src="chapters/09-structs-methods/types.go#Gram,Jin,Jin.Grams,Gram.String,definedTypes"><code>type Gram float64
 
-func (p Point) Dist2() int { return p.X*p.X + p.Y*p.Y } <span class="c">// 只讀：value receiver</span>
+type Jin float64
 
-func (p *Point) Move(dx, dy int) { p.X += dx; p.Y += dy } <span class="c">// 要改：pointer receiver</span>
+func (j Jin) Grams() Gram {
+	return Gram(j * 600)
+}
 
-type Animal struct{ Name string }
+func (g Gram) String() string {
+	return fmt.Sprintf("%.0f 公克", float64(g))
+}
 
-func (a Animal) Hello() string { return "我是" + a.Name }
+func definedTypes() {
+	pork := Jin(1.5)
+	fmt.Println(pork)
+	fmt.Println(pork.Grams())
 
-type Dog struct {
-	Animal <span class="c">// 嵌入：欄位和方法都被提升</span>
-	Breed  string
+	var raw float64 = 300
+	rice := Gram(raw)
+	fmt.Println(rice + 50)
+	fmt.Println(float64(rice))
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/09-structs-methods#Example_definedTypes"><code>1.5
+900 公克
+350 公克
+300</code></pre>
+    <ul class="notes">
+      <li><code>Jin(1.5)</code>、<code>Gram(raw)</code>：底層型別相同就能轉換。<code>rice + 50</code> 不用轉換，因為 50 是 untyped 常數，會自動變成 Gram（<a href="01-variables.html#consts">01 章的常數</a>）。</li>
+      <li>Jin 沒有 String 方法，就照 float64 的樣子印出 1.5；Gram 有，所以 <code>pork.Grams()</code> 印出「900 公克」。<code>float64(rice)</code> 轉回去之後，String 方法也跟著不見了：<strong>方法屬於型別</strong>，不屬於值。</li>
+      <li>新型別最大的用處是讓編譯器幫你檢查。把公克和台斤直接加在一起，在菜市場是算錯錢，在 Go 裡是編譯錯誤：</li>
+    </ul>
+    <pre class="code bad" data-compile-error><code>package main
+
+import "fmt"
+
+type Gram float64
+
+type Jin float64
+
+func main() {
+	rice := Gram(300)
+	pork := Jin(1.5)
+	fmt.Println(rice + pork)
+}</code></pre>
+    <p class="label">編譯錯誤</p>
+    <pre class="out err"><code>./main.go:12:14: invalid operation: rice + pork (mismatched types Gram and Jin)</code></pre>
+    <p>標準庫到處都是這種用法：<code>time.Duration</code> 的底層型別是 int64，但它有 <code>Hours()</code>、<code>String()</code> 等方法，也不會和一般的整數搞混。</p>
+
+    <h3>type alias</h3>
+    <pre class="code" data-src="chapters/09-structs-methods/types.go#Score,Points,aliasDemo"><code>type Score = int
+
+type Points int
+
+func aliasDemo() {
+	var s Score = 90
+	var p Points = 90
+	var n int = s
+	fmt.Printf("%T %T %d\n", s, p, n)
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/09-structs-methods#Example_aliasDemo"><code>int main.Points 90</code></pre>
+    <p>多了一個等號，意思就完全不同：<code>type Score = int</code> 是<strong>別名</strong>（alias），Score 和 int 是同一個型別，<code>%T</code> 印出來就是 int，互相指定不用轉換，也不能替 Score 加方法（那等於替 int 加方法）。你已經用過好幾個別名：<code>byte</code> 是 uint8 的別名、<code>rune</code> 是 int32 的別名（<a href="08-strings-runes.html">08 字串與 rune</a>）、<code>any</code> 是 <code>interface{}</code> 的別名。自己的程式很少需要 alias，它主要用在大型重構時，把型別從一個 package 搬到另一個 package，讓舊名字還能繼續用。想要一個新的型別，就用沒有等號的寫法。</p>
+  </section>
+
+  <section aria-labelledby="structs">
+    <h2 id="structs">2. struct</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 226" role="img" aria-label="Bento 是一張有 Name、Price、Spicy 三個欄位的表格。a 填了排骨飯和 85，Spicy 沒填是 false；var zero Bento 的欄位都是零值：空字串、0、false">
+        <title>struct 是一張表格</title>
+        <rect class="acc" x="20" y="20" width="200" height="36" rx="6"/>
+        <text class="mono bold" x="120" y="44" text-anchor="middle">Bento</text>
+        <rect class="box" x="20" y="56" width="200" height="42"/>
+        <rect class="box" x="20" y="98" width="200" height="42"/>
+        <rect class="box" x="20" y="140" width="200" height="42"/>
+        <path class="wire faint" d="M96 56 V182"/>
+        <text class="small mono" x="58" y="82" text-anchor="middle">Name</text>
+        <text class="small mono" x="58" y="124" text-anchor="middle">Price</text>
+        <text class="small mono" x="58" y="166" text-anchor="middle">Spicy</text>
+        <text x="158" y="83" text-anchor="middle">排骨飯</text>
+        <text class="mono" x="158" y="125" text-anchor="middle">85</text>
+        <text class="mono mute" x="158" y="167" text-anchor="middle">false</text>
+        <text class="small mono" x="120" y="210" text-anchor="middle">a := Bento{…}</text>
+        <rect class="acc" x="260" y="20" width="200" height="36" rx="6"/>
+        <text class="mono bold" x="360" y="44" text-anchor="middle">Bento</text>
+        <rect class="box" x="260" y="56" width="200" height="42"/>
+        <rect class="box" x="260" y="98" width="200" height="42"/>
+        <rect class="box" x="260" y="140" width="200" height="42"/>
+        <path class="wire faint" d="M336 56 V182"/>
+        <text class="small mono" x="298" y="82" text-anchor="middle">Name</text>
+        <text class="small mono" x="298" y="124" text-anchor="middle">Price</text>
+        <text class="small mono" x="298" y="166" text-anchor="middle">Spicy</text>
+        <text class="mono mute" x="398" y="83" text-anchor="middle">""</text>
+        <text class="mono mute" x="398" y="125" text-anchor="middle">0</text>
+        <text class="mono mute" x="398" y="167" text-anchor="middle">false</text>
+        <text class="small mono" x="360" y="210" text-anchor="middle">var zero Bento</text>
+      </svg>
+      <figcaption>struct 把相關的欄位綁成一張表格。沒有填的欄位就是那個型別的零值。</figcaption>
+    </figure>
+    <pre class="code" data-src="chapters/09-structs-methods/structs.go#Bento,structLiterals"><code>type Bento struct {
+	Name  string
+	Price int
+	Spicy bool
+}
+
+func structLiterals() {
+	var zero Bento
+	a := Bento{Name: "排骨飯", Price: 85}
+	b := Bento{"雞腿飯", 95, true}
+	fmt.Printf("%v\n", zero)
+	fmt.Printf("%+v\n", a)
+	fmt.Printf("%#v\n", b)
+
+	a.Price = 90
+	fmt.Println(a.Name, a.Price, a.Spicy)
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/09-structs-methods#Example_structLiterals"><code>{ 0 false}
+{Name:排骨飯 Price:85 Spicy:false}
+main.Bento{Name:"雞腿飯", Price:95, Spicy:true}
+排骨飯 90 false</code></pre>
+    <ul class="notes">
+      <li><code>var zero Bento</code>：每個欄位都是零值。<code>%v</code> 印出 <code>{ 0 false}</code>，開頭那個空白是空字串。</li>
+      <li><code>Bento{Name: "排骨飯", Price: 85}</code>：寫出欄位名稱，順序隨意，沒寫的欄位是零值。<strong>平常都用這種寫法。</strong></li>
+      <li><code>Bento{"雞腿飯", 95, true}</code>：依照欄位順序填，每個欄位都要填。struct 之後多一個欄位或調換順序，這種寫法就會編譯失敗或填錯欄位，所以只適合欄位很少、而且不會改的型別。</li>
+      <li><code>%+v</code> 加上欄位名稱，<code>%#v</code> 印成 Go 的語法，除錯時很好用（<a href="02-input-output.html">02 章</a>）。</li>
+      <li>欄位用 <code>.</code> 讀寫：<code>a.Price = 90</code>。</li>
+    </ul>
+    <pre class="code" data-src="chapters/09-structs-methods/structs.go#structPointer"><code>func structPointer() {
+	p := &amp;Bento{Name: "素食餐", Price: 80}
+	p.Price += 5
+	fmt.Println(p.Price)
+	fmt.Printf("%+v\n", p)
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/09-structs-methods#Example_structPointer"><code>85
+&amp;{Name:素食餐 Price:85 Spicy:false}</code></pre>
+    <p><code>&amp;Bento{…}</code> 建立 struct 並直接拿到它的指標，這個寫法非常常見。透過指標存取欄位時不用寫 <code>(*p).Price</code>，Go 會自動解參考，寫 <code>p.Price</code> 就好（<a href="05-pointers.html#struct-ptr">05 章</a>）。印出指標時，fmt 會在前面加一個 <code>&amp;</code>。</p>
+
+    <h3>匿名 struct</h3>
+    <pre class="code" data-src="chapters/09-structs-methods/structs.go#anonymousStruct"><code>func anonymousStruct() {
+	stats := []struct {
+		Day   string
+		Sales int
+	}{
+		{"一", 3200},
+		{"二", 4100},
+	}
+	for _, s := range stats {
+		fmt.Println(s.Day, s.Sales)
+	}
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/09-structs-methods#Example_anonymousStruct"><code>一 3200
+二 4100</code></pre>
+    <p>只用一次的資料不必替它取名字，直接寫 <code>struct{ … }</code> 當型別。最常見的地方是表格測試：<code>tests := []struct{ in, want int }{ … }</code>，本書每一章的練習測試都是這樣寫的。</p>
+  </section>
+
+  <section aria-labelledby="copy">
+    <h2 id="copy">3. 複製與比較</h2>
+    <pre class="code" data-src="chapters/09-structs-methods/structs.go#copyStruct"><code>func copyStruct() {
+	a := Bento{Name: "排骨飯", Price: 85}
+	b := a
+	b.Price = 100
+	fmt.Println(a.Price, b.Price)
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/09-structs-methods#Example_copyStruct"><code>85 100</code></pre>
+    <p>struct 是值。<code>b := a</code> 把每個欄位都複製一份，改 b 不影響 a；傳給函式、從函式回傳、放進 slice、用 range 拿出來，也都是複製。這讓 struct 用起來很安全，但要注意「複製一份」只複製到欄位這一層：</p>
+    <figure class="fig">
+      <svg viewBox="0 0 480 234" role="img" aria-label="a 和 b 各有自己的 Name，但 Sides 欄位都指向同一個底層陣列，所以改 b.Sides[0] 為豆干，a.Sides 也看到豆干">
+        <title>複製 struct：slice 欄位還是共用</title>
+        <text class="mono bold" x="110" y="22" text-anchor="middle">a</text>
+        <text class="mono bold" x="370" y="22" text-anchor="middle">b := a</text>
+        <rect class="soft" x="20" y="32" width="180" height="84" rx="8"/>
+        <rect class="soft" x="280" y="32" width="180" height="84" rx="8"/>
+        <text class="small mono" x="36" y="62">Name: A 餐</text>
+        <text class="small mono t-acc" x="296" y="62">Name: B 餐</text>
+        <text class="small mono" x="36" y="98">Sides:</text>
+        <text class="small mono" x="296" y="98">Sides:</text>
+        <path class="wire" d="M100 104 V140 H190 V160"/>
+        <path class="tip" d="M190 170 L183 157 L197 157 Z"/>
+        <path class="wire" d="M360 104 V140 H290 V160"/>
+        <path class="tip" d="M290 170 L283 157 L297 157 Z"/>
+        <rect class="hot" x="150" y="172" width="90" height="40" rx="4"/>
+        <rect class="soft" x="240" y="172" width="90" height="40" rx="4"/>
+        <text x="195" y="198" text-anchor="middle">豆干</text>
+        <text x="285" y="198" text-anchor="middle">青菜</text>
+        <text class="sm" x="240" y="228" text-anchor="middle">底層陣列只有一份</text>
+      </svg>
+      <figcaption>複製 struct 時，slice 欄位複製的只是 slice header（指標、長度、容量），兩邊仍然指向同一個底層陣列。map、指標欄位也一樣。</figcaption>
+    </figure>
+    <pre class="code" data-src="chapters/09-structs-methods/structs.go#Combo,shallowCopy"><code>type Combo struct {
+	Name  string
+	Sides []string
+}
+
+func shallowCopy() {
+	a := Combo{Name: "A 餐", Sides: []string{"滷蛋", "青菜"}}
+	b := a
+	b.Name = "B 餐"
+	b.Sides[0] = "豆干"
+	fmt.Println(a.Name, a.Sides)
+	fmt.Println(b.Name, b.Sides)
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/09-structs-methods#Example_shallowCopy"><code>A 餐 [豆干 青菜]
+B 餐 [豆干 青菜]</code></pre>
+    <p>改 b.Name 只影響 b，因為字串欄位被複製了；改 <code>b.Sides[0]</code> 卻連 a 也變了，因為兩個 Sides 共用同一個底層陣列（<a href="06-arrays-slices.html#shared">06 章的共用底層陣列</a>、<a href="05-pointers.html#pit-shallow">05 章的淺複製</a>）。需要完全獨立的複本時，要自己複製 slice：<code>b.Sides = slices.Clone(a.Sides)</code>。</p>
+
+    <h3>比較與當成 map 的 key</h3>
+    <pre class="code" data-src="chapters/09-structs-methods/structs.go#compareStructs"><code>func compareStructs() {
+	a := Bento{Name: "排骨飯", Price: 85}
+	b := Bento{Name: "排骨飯", Price: 85}
+	c := Bento{Name: "排骨飯", Price: 90}
+	fmt.Println(a == b, a == c)
+
+	sold := map[Bento]int{}
+	sold[a]++
+	sold[b]++
+	sold[c]++
+	fmt.Println(len(sold), sold[a])
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/09-structs-methods#Example_compareStructs"><code>true false
+2 2</code></pre>
+    <p>每個欄位都可以比較時，struct 就能用 <code>==</code>：逐一比較每個欄位，全部相等才是 true。可以比較的 struct 也能當 map 的 key（<a href="07-maps.html#keys">07 章的 key 的型別</a>），a 和 b 內容一樣，所以是同一個 key，map 裡只有兩筆。只要有一個欄位是 slice、map 或函式，整個 struct 就不能比較：</p>
+    <pre class="code bad" data-compile-error><code>package main
+
+import "fmt"
+
+type Combo struct {
+	Name  string
+	Sides []string
 }
 
 func main() {
-	p := Point{X: 3, Y: 4}
-	p.Move(1, 1)
-	d := Dog{Name: "小白", Breed: "米克斯"} <span class="c">// Go 1.27 起可以這樣寫</span>
-	fmt.Println(p, p.Dist2(), d.Hello())
+	a := Combo{Name: "A 餐", Sides: []string{"滷蛋"}}
+	b := Combo{Name: "A 餐", Sides: []string{"滷蛋"}}
+	fmt.Println(a == b)
 }</code></pre>
-    <p class="label">輸出</p>
-    <pre class="out"><code>{4 5} 41 我是小白</code></pre>
+    <p class="label">編譯錯誤</p>
+    <pre class="out err"><code>./main.go:13:14: invalid operation: a == b (struct containing []string cannot be compared)</code></pre>
+    <p>這種 struct 要自己寫比較的方法，例如比 Name 再用 <code>slices.Equal</code> 比 Sides。</p>
   </section>
 
-  <section aria-labelledby="notes">
-    <h2 id="notes">工程師筆記</h2>
+  <section aria-labelledby="receivers">
+    <h2 id="receivers">4. 方法與 receiver</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 296" role="img" aria-label="StampCopy 是值 receiver，拿到 card 的複本，蓋章蓋在複本上，card 還是 0 點；Stamp 是指標 receiver，拿到 card 的地址，蓋在原本的卡上，card 變成 1 點">
+        <title>值 receiver 與指標 receiver</title>
+        <path class="wire faint" d="M240 12 V286"/>
+        <text class="mono bold" x="120" y="28" text-anchor="middle">card.StampCopy()</text>
+        <text class="sm" x="120" y="50" text-anchor="middle">值 receiver：拿到複本</text>
+        <rect class="acc" x="50" y="66" width="140" height="56" rx="6"/>
+        <text class="mono" x="120" y="100" text-anchor="middle">Stamps: 0</text>
+        <path class="wire" d="M120 128 V164"/>
+        <path class="tip" d="M120 174 L113 161 L127 161 Z"/>
+        <text class="sm" x="130" y="152">複製</text>
+        <rect class="soft dash" x="50" y="178" width="140" height="56" rx="6"/>
+        <text class="mono t-hot" x="120" y="212" text-anchor="middle">Stamps: 1</text>
+        <text class="small" x="120" y="270" text-anchor="middle">蓋在複本上，card 還是 0</text>
+        <text class="mono bold" x="360" y="28" text-anchor="middle">card.Stamp()</text>
+        <text class="sm" x="360" y="50" text-anchor="middle">指標 receiver：拿到地址</text>
+        <rect class="acc" x="290" y="66" width="140" height="56" rx="6"/>
+        <text class="mono t-hot" x="360" y="100" text-anchor="middle">Stamps: 1</text>
+        <path class="wire" d="M336 128 V172"/>
+        <path class="tip" d="M336 182 L329 169 L343 169 Z"/>
+        <text class="sm" x="326" y="160" text-anchor="end">給地址</text>
+        <rect class="hot" x="306" y="184" width="100" height="44" rx="4"/>
+        <text class="mono" x="356" y="212" text-anchor="middle">&amp;card</text>
+        <path class="wire hot-ln" d="M384 184 V140"/>
+        <path class="tip hot-tip" d="M384 128 L377 141 L391 141 Z"/>
+        <text class="sm t-hot" x="394" y="162">改原本的</text>
+        <text class="small t-hot" x="360" y="270" text-anchor="middle">蓋在原本的卡上，card 變成 1</text>
+      </svg>
+      <figcaption>值 receiver 拿到的是呼叫者那個值的複本；指標 receiver 拿到的是它的地址，改的是原本那一個。</figcaption>
+    </figure>
+    <p><strong>方法</strong>（method）是在 <code>func</code> 和名稱之間多寫一個 <strong>receiver</strong> 的函式：<code>func (s *StampCard) Stamp()</code>。receiver 就像一個特別的參數，呼叫時寫在點的前面：<code>card.Stamp()</code>。方法可以掛在同一個 package 裡定義的任何型別上，不只是 struct，第 1 節的 Gram 就是一例。</p>
+    <pre class="code" data-src="chapters/09-structs-methods/methods.go#StampCard,StampCard.StampCopy,StampCard.Stamp,receiverDemo"><code>type StampCard struct {
+	Stamps int
+}
+
+func (s StampCard) StampCopy() {
+	s.Stamps++
+}
+
+func (s *StampCard) Stamp() {
+	s.Stamps++
+}
+
+func receiverDemo() {
+	card := StampCard{}
+	card.StampCopy()
+	fmt.Println(card.Stamps)
+	card.Stamp()
+	card.Stamp()
+	fmt.Println(card.Stamps)
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/09-structs-methods#Example_receiverDemo"><code>0
+2</code></pre>
+    <p>receiver 和一般參數一樣是傳值的（<a href="05-pointers.html#passing">05 章</a>）。<code>StampCopy</code> 的 receiver 是 <code>StampCard</code>，它拿到的是 card 的複本，蓋章蓋在複本上，函式結束複本就丟了，所以 card 還是 0 點。<code>Stamp</code> 的 receiver 是 <code>*StampCard</code>，拿到的是 card 的地址，改的就是 card 本身。</p>
+    <pre class="code" data-src="chapters/09-structs-methods/methods.go#StampCard.Free,autoAddress"><code>func (s *StampCard) Free() bool {
+	return s.Stamps &gt;= 10
+}
+
+func autoAddress() {
+	card := StampCard{Stamps: 9}
+	p := &amp;card
+	p.Stamp()
+	card.Stamp()
+	fmt.Println(p.Free(), card.Stamps)
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/09-structs-methods#Example_autoAddress"><code>true 11</code></pre>
+    <p>card 是一般的變數，卻可以直接呼叫指標 receiver 的方法：<code>card.Stamp()</code> 會自動變成 <code>(&amp;card).Stamp()</code>。反過來，指標也可以呼叫值 receiver 的方法，Go 會自動補上 <code>*</code>。所以呼叫的時候不用管 receiver 是哪一種，只有定義的時候要選。</p>
+    <p>自動取地址有一個前提：那個值要<strong>可以取地址</strong>（addressable）。變數、slice 的元素、指標指向的欄位都可以；map 的元素、函式的回傳值、字面值都不行：</p>
+    <pre class="code bad" data-compile-error><code>package main
+
+import "fmt"
+
+type StampCard struct {
+	Stamps int
+}
+
+func (s *StampCard) Stamp() {
+	s.Stamps++
+}
+
+func main() {
+	cards := map[string]StampCard{"小明": {Stamps: 3}}
+	cards["小明"].Stamp()
+	fmt.Println(cards)
+}</code></pre>
+    <p class="label">編譯錯誤</p>
+    <pre class="out err"><code>./main.go:15:18: cannot call pointer method Stamp on StampCard</code></pre>
+    <p>map 的元素沒有固定的位址（map 長大時會搬家），所以不能取地址。解法和 <a href="07-maps.html#values">07 章的「值是 struct」</a>一樣：取出來、改、放回去，或者讓 map 存指標 <code>map[string]*StampCard</code>。</p>
+
+    <h3>選哪一種 receiver</h3>
     <ul class="notes">
-      <li>receiver 怎麼選：要修改、struct 很大、或含有不能複製的欄位（例如 <code>sync.Mutex</code>）就用指標；同一個型別的方法最好統一。</li>
-      <li>用變數呼叫 pointer receiver 的方法時，Go 會自動取地址；但 map 裡的值、函式回傳值不能取地址，就不能這樣呼叫。</li>
-      <li>嵌入是組合：被嵌入型別的方法拿到的仍是它自己那一份，不知道外面包著 Dog。沒有 override，也沒有透過嵌入的多型。</li>
-      <li>欄位大寫開頭才會匯出；<code>encoding/json</code> 只看得到匯出的欄位，用 struct tag 改 JSON 名稱（第 22 章）。</li>
-      <li>Go 1.27 起，struct 字面值可以直接用被提升的欄位當 key：<code>Dog{Name: "小白"}</code>。</li>
-      <li>建構子只是慣例：寫一個 <code>NewXxx</code> 函式回傳 <code>*Xxx</code>。零值就能用的型別不需要建構子。</li>
+      <li><strong>要修改 receiver</strong>：一定用指標。</li>
+      <li><strong>struct 很大</strong>：用指標，避免每次呼叫都複製整個 struct。</li>
+      <li><strong>struct 裡有不能複製的東西</strong>，例如 <code>sync.Mutex</code>：一定用指標，否則每次呼叫都會複製一把新的鎖，<code>go vet</code> 會報錯（常見錯誤 4）。</li>
+      <li><strong>小而且不會變的值</strong>，例如 Gram、<code>time.Time</code>：用值 receiver，用起來就像數字一樣。</li>
+      <li><strong>保持一致</strong>：一個型別只要有一個方法用了指標 receiver，其他方法通常也全部用指標，讀的人不用一個一個想。拿不定主意時，用指標。</li>
     </ul>
+
+    <section class="deep" aria-labelledby="method-set">
+      <p class="tag">深入：第一次讀可以先跳過</p>
+      <h3 id="method-set">4.1 method set</h3>
+      <p>呼叫時的自動 <code>&amp;</code>、<code>*</code> 只是語法上的方便。型別本身真正「擁有」哪些方法，由 <strong>method set</strong> 決定：型別 <code>T</code> 的 method set 只有值 receiver 的方法；<code>*T</code> 的 method set 則包含值 receiver 和指標 receiver 的全部方法。</p>
+      <p>這條規則平常感覺不到，一遇到 interface 就很重要。<code>fmt.Println</code> 印一個值時，會檢查它有沒有 String 方法（也就是有沒有實作 <code>fmt.Stringer</code>）：</p>
+      <pre class="code" data-src="chapters/09-structs-methods/methods.go#Ticket,Ticket.String,methodSetDemo"><code>type Ticket struct {
+	No int
+}
+
+func (t *Ticket) String() string {
+	return fmt.Sprintf("第 %d 號", t.No)
+}
+
+func methodSetDemo() {
+	t := Ticket{No: 7}
+	fmt.Println(t)
+	fmt.Println(&amp;t)
+}</code></pre>
+      <p class="label">輸出</p>
+      <pre class="out" data-example="chapters/09-structs-methods#Example_methodSetDemo"><code>{7}
+第 7 號</code></pre>
+      <p>String 掛在 <code>*Ticket</code> 上，所以 <code>Ticket</code> 這個型別沒有 String 方法。把 t 傳給 Println，fmt 找不到 String，只好照 struct 的樣子印出 <code>{7}</code>；傳 <code>&amp;t</code> 才印出「第 7 號」。這不是編譯錯誤，很容易沒注意到。明確地把 Ticket 當成 Stringer 用，編譯器就會說出原因：</p>
+      <pre class="code bad" data-compile-error><code>package main
+
+import "fmt"
+
+type Ticket struct {
+	No int
+}
+
+func (t *Ticket) String() string {
+	return fmt.Sprintf("第 %d 號", t.No)
+}
+
+func main() {
+	t := Ticket{No: 7}
+	var s fmt.Stringer = t
+	fmt.Println(s)
+}</code></pre>
+      <p class="label">編譯錯誤</p>
+      <pre class="out err"><code>./main.go:15:23: cannot use t (variable of struct type Ticket) as fmt.Stringer value in variable declaration: Ticket does not implement fmt.Stringer (method String has pointer receiver)</code></pre>
+      <p>為什麼 T 不能擁有指標方法？因為放進 interface 的是值的複本，而複本不一定能取地址；如果允許，指標方法改到的會是那個看不到的複本。<a href="10-interfaces.html">10 interface</a> 會再回到這條規則。</p>
+    </section>
+  </section>
+
+  <section aria-labelledby="ctor">
+    <h2 id="ctor">5. 建構函式與零值</h2>
+    <p>Go 沒有建構子（constructor）。建立 struct 有兩種常見的設計：讓零值就能直接用，或者提供一個 <code>NewX</code> 函式。</p>
+    <h3>讓零值就能用</h3>
+    <pre class="code" data-src="chapters/09-structs-methods/ctor.go#Queue,Queue.Take,Queue.Call,Queue.Waiting,zeroValueDemo"><code>type Queue struct {
+	next    int // 最後發出的號碼
+	serving int // 目前叫到的號碼
+}
+
+func (q *Queue) Take() int {
+	q.next++
+	return q.next
+}
+
+func (q *Queue) Call() (int, bool) {
+	if q.serving &gt;= q.next {
+		return 0, false
+	}
+	q.serving++
+	return q.serving, true
+}
+
+func (q *Queue) Waiting() int {
+	return q.next - q.serving
+}
+
+func zeroValueDemo() {
+	var q Queue
+	a := q.Take()
+	b := q.Take()
+	fmt.Println(a, b, q.Waiting())
+
+	n, ok := q.Call()
+	fmt.Println(n, ok, q.Waiting())
+
+	q.Call()
+	n, ok = q.Call()
+	fmt.Println(n, ok)
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/09-structs-methods#Example_zeroValueDemo"><code>1 2 2
+1 true 1
+0 false</code></pre>
+    <p>排隊叫號機的兩個計數都從 0 開始，正好就是 int 的零值，所以 <code>var q Queue</code> 宣告完就能用，不需要任何初始化。這是 Go 很推崇的設計：<code>bytes.Buffer</code>、<code>strings.Builder</code>、<code>sync.Mutex</code> 的零值都能直接用。設計型別時，先想想「零值代表什麼」，讓它是一個合理的初始狀態。</p>
+    <p>欄位用小寫開頭（<code>next</code>、<code>serving</code>），其他 package 就讀不到也改不到，只能透過 Take、Call 操作，叫號機的狀態不會被弄亂。大寫開頭才會被匯出，這條規則在<a href="29-packages-modules.html">package 與 module</a> 那一章會詳細說明。</p>
+    <p>欄位是 map 時，零值是 nil map，讀取沒問題，寫入會 panic（<a href="07-maps.html#pit-nil-write">07 章</a>）。讓零值也能用的技巧是第一次寫入時才建立：</p>
+    <pre class="code" data-src="chapters/09-structs-methods/ctor.go#Tally,Tally.Add,Tally.Count,tallyDemo"><code>type Tally struct {
+	counts map[string]int
+}
+
+func (t *Tally) Add(name string) {
+	if t.counts == nil {
+		t.counts = map[string]int{}
+	}
+	t.counts[name]++
+}
+
+func (t *Tally) Count(name string) int {
+	return t.counts[name]
+}
+
+func tallyDemo() {
+	var t Tally
+	fmt.Println(t.Count("排骨飯"))
+	t.Add("排骨飯")
+	t.Add("排骨飯")
+	t.Add("雞腿飯")
+	fmt.Println(t.Count("排骨飯"), t.Count("雞腿飯"))
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/09-structs-methods#Example_tallyDemo"><code>0
+2 1</code></pre>
+
+    <h3>NewX 建構函式</h3>
+    <p>有些型別必須有合理的初始值，或者要檢查輸入才能建立。慣例是寫一個 <code>NewX</code> 函式，回傳 <code>*X</code>，可能失敗時再多回傳一個 error：</p>
+    <pre class="code" data-src="chapters/09-structs-methods/ctor.go#Reservation,NewReservation,constructorDemo"><code>type Reservation struct {
+	Name   string
+	People int
+}
+
+func NewReservation(name string, people int) (*Reservation, error) {
+	if name == "" {
+		return nil, errors.New("訂位要留名字")
+	}
+	if people &lt; 1 || people &gt; 12 {
+		return nil, fmt.Errorf("人數 %d 不在 1 到 12 之間", people)
+	}
+	return &amp;Reservation{Name: name, People: people}, nil
+}
+
+func constructorDemo() {
+	r, err := NewReservation("王先生", 4)
+	fmt.Println(r.Name, r.People, err)
+
+	_, err = NewReservation("林小姐", 20)
+	fmt.Println(err)
+
+	_, err = NewReservation("", 2)
+	fmt.Println(err)
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/09-structs-methods#Example_constructorDemo"><code>王先生 4 &lt;nil&gt;
+人數 20 不在 1 到 12 之間
+訂位要留名字</code></pre>
+    <ul class="notes">
+      <li>失敗時回傳 <code>nil, err</code>，呼叫的人要先檢查 err 才能用結果（錯誤處理的細節在 <a href="11-errors.html">11 錯誤處理</a>）。</li>
+      <li>回傳指標 <code>&amp;Reservation{…}</code> 是安全的，Go 會把它放在 heap 上（<a href="05-pointers.html#escape">05 章</a>）。</li>
+      <li>只要欄位是匯出的，別人還是可以繞過 NewReservation 直接寫 <code>Reservation{People: 99}</code>。真的要保證不變量，就把欄位改成小寫，再提供讀取用的方法。</li>
+      <li>只有一個主要型別的 package，建構函式常常直接叫 <code>New</code>，例如 <code>errors.New</code>、<code>list.New</code>。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="embed">
+    <h2 id="embed">6. 嵌入</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 246" role="img" aria-label="BentoShop 裡面裝著一個 Shop；b.Name 直接拿到 Shop 的 Name，b.Contact() 呼叫的是 Shop 的 Contact">
+        <title>嵌入：欄位和方法被提升</title>
+        <rect class="soft" x="150" y="20" width="310" height="210" rx="12"/>
+        <text class="mono bold" x="166" y="46">BentoShop</text>
+        <rect class="acc" x="170" y="60" width="270" height="96" rx="10"/>
+        <text class="small mono t-acc" x="186" y="82">Shop</text>
+        <text class="mono" x="186" y="116">Name 阿姨便當</text>
+        <rect class="box" x="320" y="118" width="104" height="30" rx="6"/>
+        <text class="small mono" x="372" y="138" text-anchor="middle">Contact()</text>
+        <text class="mono" x="166" y="200">Menu [排骨飯 雞腿飯]</text>
+        <text class="small mono" x="14" y="110">b.Name</text>
+        <path class="wire acc-ln" d="M80 106 H158"/>
+        <path class="tip acc-tip" d="M168 106 L156 100 L156 112 Z"/>
+        <text class="small mono" x="14" y="140">b.Contact()</text>
+        <path class="wire acc-ln" d="M110 136 H306"/>
+        <path class="tip acc-tip" d="M316 136 L304 130 L304 142 Z"/>
+      </svg>
+      <figcaption>BentoShop 裡面裝著一個 Shop。<code>b.Name</code> 其實是 <code>b.Shop.Name</code>，方法也一樣被提升上來。</figcaption>
+    </figure>
+    <p>struct 的欄位只寫型別、不寫名稱，就是<strong>嵌入</strong>（embedding）。被嵌入型別的欄位和方法會被<strong>提升</strong>（promote）到外層，可以直接用：</p>
+    <pre class="code" data-src="chapters/09-structs-methods/embed.go#Shop,Shop.Contact,BentoShop,embedDemo"><code>type Shop struct {
+	Name  string
+	Phone string
+}
+
+func (s Shop) Contact() string {
+	return s.Name + " " + s.Phone
+}
+
+type BentoShop struct {
+	Shop
+	Menu []string
+}
+
+func embedDemo() {
+	b := BentoShop{
+		Shop: Shop{Name: "阿姨便當", Phone: "02-2345-6789"},
+		Menu: []string{"排骨飯", "雞腿飯"},
+	}
+	fmt.Println(b.Name)
+	fmt.Println(b.Contact())
+	fmt.Println(b.Shop.Name)
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/09-structs-methods#Example_embedDemo"><code>阿姨便當
+阿姨便當 02-2345-6789
+阿姨便當</code></pre>
+    <p>嵌入的欄位仍然是一個普通的欄位，它的名稱就是型別名稱 <code>Shop</code>，所以 <code>b.Shop.Name</code> 這種完整的寫法也一直可以用。建立時，傳統的寫法是替這個欄位寫 key：<code>Shop: Shop{…}</code>。Go 1.27 起，也可以直接用被提升的欄位當 key：</p>
+    <pre class="code" data-src="chapters/09-structs-methods/embed.go#promotedKeys"><code>func promotedKeys() {
+	b := BentoShop{Name: "巷口便當", Phone: "02-8765-4321"}
+	fmt.Println(b.Contact())
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/09-structs-methods#Example_promotedKeys"><code>巷口便當 02-8765-4321</code></pre>
+    <p>這個新寫法有兩個限制：通往那個欄位的路上不能經過指標型別的嵌入欄位（例如嵌入的是 <code>*Shop</code> 就不行），而且同一個字面值裡不能同時寫 <code>Shop: …</code> 又寫 <code>Name: …</code>。本章的 embedDemo 和下面的 shadowDemo 故意保留傳統寫法來對照，<code>go fix</code> 會建議把它們改成新寫法。</p>
+
+    <h3>遮蔽</h3>
+    <pre class="code" data-src="chapters/09-structs-methods/embed.go#DrinkShop,DrinkShop.Contact,shadowDemo"><code>type DrinkShop struct {
+	Shop
+	LineID string
+}
+
+func (d DrinkShop) Contact() string {
+	return d.Shop.Contact() + " LINE:" + d.LineID
+}
+
+func shadowDemo() {
+	d := DrinkShop{Shop: Shop{Name: "手搖飲", Phone: "02-1111-2222"}, LineID: "@drink"}
+	fmt.Println(d.Contact())
+	fmt.Println(d.Shop.Contact())
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/09-structs-methods#Example_shadowDemo"><code>手搖飲 02-1111-2222 LINE:@drink
+手搖飲 02-1111-2222</code></pre>
+    <p>外層自己有同名的欄位或方法時，外層的優先，被嵌入的那一個被<strong>遮蔽</strong>（shadow），要用完整路徑 <code>d.Shop.Contact()</code> 才拿得到。DrinkShop.Contact 就是先呼叫 Shop.Contact，再加上自己的東西。注意它必須寫 <code>d.Shop.Contact()</code>，寫成 <code>d.Contact()</code> 就是呼叫自己，永遠停不下來。</p>
+    <p>兩個被嵌入的型別有同名的欄位，而外層沒有時，直接用那個名字是模稜兩可的，編譯器不會替你選：</p>
+    <pre class="code bad" data-compile-error><code>package main
+
+import "fmt"
+
+type Shop struct {
+	Name string
+}
+
+type Bento struct {
+	Name  string
+	Price int
+}
+
+type ShopBento struct {
+	Shop
+	Bento
+}
+
+func main() {
+	var x ShopBento
+	fmt.Println(x.Name)
+}</code></pre>
+    <p class="label">編譯錯誤</p>
+    <pre class="out err"><code>./main.go:21:16: ambiguous selector x.Name</code></pre>
+    <p>只要不去用 <code>x.Name</code> 就不會出錯；要用的時候寫清楚是 <code>x.Shop.Name</code> 還是 <code>x.Bento.Name</code>。</p>
+
+    <h3>嵌入不是繼承</h3>
+    <figure class="fig">
+      <svg viewBox="0 0 480 224" role="img" aria-label="VIPGreeter 裡面裝著 Greeter。Greeter 的 Welcome 呼叫的是 Greeter 自己的 Title，回傳客人；VIPGreeter 自己的 Title 回傳貴賓，但 Welcome 不會呼叫它">
+        <title>提升上來的方法，receiver 還是裡面那一個</title>
+        <rect class="soft" x="16" y="16" width="448" height="200" rx="12"/>
+        <text class="mono bold" x="32" y="42">VIPGreeter</text>
+        <rect class="acc" x="32" y="56" width="280" height="110" rx="10"/>
+        <text class="small mono t-acc" x="48" y="80">Greeter</text>
+        <rect class="box" x="48" y="96" width="110" height="34" rx="6"/>
+        <text class="small mono" x="103" y="118" text-anchor="middle">Welcome()</text>
+        <path class="wire acc-ln" d="M158 113 H178"/>
+        <path class="tip acc-tip" d="M188 113 L176 107 L176 119 Z"/>
+        <rect class="box" x="190" y="96" width="106" height="34" rx="6"/>
+        <text class="small mono" x="243" y="118" text-anchor="middle">Title()</text>
+        <text class="sm" x="243" y="152" text-anchor="middle">客人</text>
+        <rect class="hot" x="336" y="96" width="106" height="34" rx="6"/>
+        <text class="small mono" x="389" y="118" text-anchor="middle">Title()</text>
+        <text class="sm" x="389" y="152" text-anchor="middle">貴賓</text>
+        <path class="wire hot-ln dash" d="M103 130 V184 H389 V136"/>
+        <text class="sm t-hot" x="246" y="204" text-anchor="middle">Welcome 不會呼叫 VIPGreeter 的 Title</text>
+      </svg>
+      <figcaption>提升上來的 Welcome，receiver 仍然是裡面那個 Greeter。它呼叫的 Title 永遠是 Greeter 的，不會因為外層有同名的方法就改變。</figcaption>
+    </figure>
+    <pre class="code" data-src="chapters/09-structs-methods/embed.go#Greeter,Greeter.Title,Greeter.Welcome,VIPGreeter,VIPGreeter.Title,notInheritance"><code>type Greeter struct{}
+
+func (Greeter) Title() string { return "客人" }
+
+func (g Greeter) Welcome() string { return "歡迎光臨，" + g.Title() }
+
+type VIPGreeter struct {
+	Greeter
+}
+
+func (VIPGreeter) Title() string { return "貴賓" }
+
+func notInheritance() {
+	v := VIPGreeter{}
+	fmt.Println(v.Title())
+	fmt.Println(v.Welcome())
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/09-structs-methods#Example_notInheritance"><code>貴賓
+歡迎光臨，客人</code></pre>
+    <p>在有繼承的語言裡，子類別覆寫 Title 之後，父類別的 Welcome 也會改呼叫新的 Title。Go 的嵌入不是這樣：<code>v.Welcome()</code> 只是 <code>v.Greeter.Welcome()</code> 的簡寫，Welcome 收到的 receiver 是裡面那個 Greeter，它根本不知道外面還包著一個 VIPGreeter。嵌入是<strong>組合</strong>（composition）：「BentoShop 有一個 Shop」，不是「BentoShop 是一種 Shop」。需要「同一個呼叫、依型別做不同的事」時，Go 用的是 interface，下一章的主題。</p>
+  </section>
+
+  <section aria-labelledby="tags">
+    <h2 id="tags">7. struct tag</h2>
+    <pre class="code" data-src="chapters/09-structs-methods/tags.go#Member,tagsDemo"><code>type Member struct {
+	Name   string `json:"name"`
+	Phone  string `json:"phone,omitempty"`
+	Points int    `json:"points"`
+	note   string // 小寫開頭：其他 package（包括 encoding/json）看不到
+}
+
+func tagsDemo() {
+	m := Member{Name: "小明", Points: 120, note: "常客"}
+	data, err := json.Marshal(m)
+	fmt.Println(string(data), err)
+
+	f, _ := reflect.TypeFor[Member]().FieldByName("Phone")
+	fmt.Println(f.Tag.Get("json"))
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/09-structs-methods#Example_tagsDemo"><code>{"name":"小明","points":120} &lt;nil&gt;
+phone,omitempty</code></pre>
+    <p>欄位後面用反引號包起來的字串叫 <strong>struct tag</strong>。它對程式本身沒有任何作用，是寫給其他套件在執行時讀的說明。<code>encoding/json</code> 讀 <code>json:"…"</code> 這個 key：</p>
+    <ul class="notes">
+      <li><code>json:"name"</code>：輸出成 JSON 時，欄位名稱用 <code>name</code>，而不是 Go 的 <code>Name</code>。</li>
+      <li><code>json:"phone,omitempty"</code>：逗號後面是選項，<code>omitempty</code> 表示值是空的就整個省略，所以輸出裡沒有 phone。</li>
+      <li><code>note</code> 是小寫開頭的未匯出欄位，encoding/json 在另一個 package，看不到它，所以也不會輸出。想輸出一定要大寫開頭，tag 救不了小寫的欄位。</li>
+    </ul>
+    <p>tag 的格式是用空白隔開的 <code>key:"value"</code>，例如 <code>json:"name" db:"member_name"</code>。冒號兩邊不能有空白、值一定要雙引號，寫錯不會編譯失敗，只會默默地沒有作用；還好 <code>go vet</code> 會檢查常見的格式錯誤。讀取 tag 用的是 reflect 套件，自己的程式很少需要；JSON 的完整用法留到「<a href="23-json.html">JSON 與資料編碼</a>」那一章。</p>
+  </section>
+
+  <section aria-labelledby="pitfalls">
+    <h2 id="pitfalls">常見錯誤</h2>
+    <h3 id="pit-value-receiver">1. 想修改欄位，卻用了值 receiver</h3>
+    <div class="compare">
+      <p class="label bad">錯誤寫法：改的是複本</p>
+      <pre class="code bad" data-src="chapters/09-structs-methods/methods.go#StampCard.StampCopy"><code>func (s StampCard) StampCopy() {
+	s.Stamps++
+}</code></pre>
+      <p class="label good">正確寫法</p>
+      <pre class="code good" data-src="chapters/09-structs-methods/methods.go#StampCard.Stamp"><code>func (s *StampCard) Stamp() {
+	s.Stamps++
+}</code></pre>
+    </div>
+    <p>能編譯、能執行，就是沒有效果（第 4 節）。練習 6 就是這個 bug。</p>
+
+    <h3 id="pit-range-struct">2. 在 range 裡改 struct 的複本</h3>
+    <p><code>for _, e := range staff { e.Salary += 1000 }</code> 改的是 e 這個複本，slice 裡的元素沒變。要改就用索引：<code>staff[i].Salary += 1000</code>（<a href="06-arrays-slices.html#pit-range-copy">06 章</a>、練習 7）。</p>
+
+    <h3 id="pit-map-struct">3. 直接改 map 裡的 struct</h3>
+    <p><code>cards["小明"].Stamps++</code> 和 <code>cards["小明"].Stamp()</code> 都是編譯錯誤，因為 map 的元素不能取地址（第 4 節）。取出來、改、放回去，或者讓 map 存指標。</p>
+
+    <h3 id="pit-copylocks">4. 複製含有 Mutex 的 struct</h3>
+    <pre class="code bad" data-vet-error><code>package main
+
+import (
+	"fmt"
+	"sync"
+)
+
+type SafeTally struct {
+	mu sync.Mutex
+	n  int
+}
+
+func (t SafeTally) Add() {
+	t.mu.Lock()
+	t.n++
+	t.mu.Unlock()
+}
+
+func main() {
+	var t SafeTally
+	t.Add()
+	fmt.Println(t.n)
+}</code></pre>
+    <p class="label">go vet</p>
+    <pre class="out err"><code>main.go:13:9: Add passes lock by value: example.com/tally.SafeTally contains sync.Mutex</code></pre>
+    <p>值 receiver 每次都複製整個 struct，連鎖也複製了一把新的，鎖了等於沒鎖，而且 n 也加在複本上。含有 <code>sync.Mutex</code> 的型別，方法一律用指標 receiver，也不要把它當值傳來傳去。（訊息裡的 <code>example.com/tally</code> 是這支程式的 module 路徑。）</p>
+
+    <h3 id="pit-inherit">5. 把嵌入當成繼承</h3>
+    <p>外層定義了同名方法，被嵌入型別裡的其他方法不會改呼叫它（第 6 節）。要依型別改變行為，用 interface。</p>
+
+    <h3 id="pit-stringer">6. String 用了指標 receiver，印值時沒有效果</h3>
+    <p><code>func (t *Ticket) String()</code> 只對 <code>*Ticket</code> 有效，<code>fmt.Println(t)</code> 還是印出 <code>{7}</code>（4.1 節）。String 這類「只讀」的方法通常用值 receiver，除非型別的其他方法都是指標 receiver，那就記得傳指標給 fmt。</p>
+
+    <h3 id="pit-positional">7. 用位置寫 struct 字面值</h3>
+    <p><code>Bento{"雞腿飯", 95, true}</code> 要依序填滿每個欄位。之後在 Bento 裡加一個欄位，所有這種寫法都要改；調換兩個同型別欄位的順序，甚至不會編譯失敗，只是值填錯了位置。一律寫出欄位名稱。</p>
   </section>
 
   <section aria-labelledby="java">
@@ -155,23 +830,190 @@ func main() {
       <table class="vs">
         <thead><tr><th scope="col">主題</th><th scope="col">Java</th><th scope="col">Go</th></tr></thead>
         <tbody>
-          <tr><th scope="row">類別</th><td class="java"><code>class</code> 包含欄位、方法、建構子</td><td><code>struct</code> 只放欄位，方法另外宣告</td></tr>
-          <tr><th scope="row">建立物件</th><td class="java"><code>new Point(1, 2)</code></td><td><code>Point{X: 1, Y: 2}</code>，或慣例的 <code>NewPoint</code></td></tr>
-          <tr><th scope="row">this</th><td class="java">隱含的 <code>this</code></td><td>receiver 明寫：<code>func (p *Point) Move()</code></td></tr>
-          <tr><th scope="row">繼承</th><td class="java"><code>extends</code></td><td>沒有繼承，用嵌入做組合</td></tr>
-          <tr><th scope="row">可見性</th><td class="java"><code>public</code> / <code>private</code></td><td>大寫開頭匯出，小寫只在 package 內可見</td></tr>
-          <tr><th scope="row">相等</th><td class="java">自己寫 <code>equals()</code></td><td>欄位都能比較時直接 <code>==</code></td></tr>
+          <tr><th scope="row">類別</th><td class="java"><code>class</code> 包含欄位、方法、建構子</td><td><code>struct</code> 只放欄位，方法在外面另外宣告</td></tr>
+          <tr><th scope="row">方法掛在哪</th><td class="java">只能寫在 class 裡</td><td>同一個 package 裡的任何型別，包括 <code>type Gram float64</code></td></tr>
+          <tr><th scope="row">建立物件</th><td class="java"><code>new Bento("排骨飯", 85)</code></td><td><code>Bento{Name: "排骨飯", Price: 85}</code>、零值，或 <code>NewX</code> 函式</td></tr>
+          <tr><th scope="row">this</th><td class="java">隱含的 <code>this</code>，永遠是參考</td><td>receiver 明寫出來，自己選值或指標</td></tr>
+          <tr><th scope="row">指定與傳參數</th><td class="java">物件是參考，指定只是多一個參考</td><td>struct 是值，指定和傳參數都會複製</td></tr>
+          <tr><th scope="row">繼承</th><td class="java"><code>extends</code>，方法可以覆寫</td><td>沒有繼承；嵌入是組合，沒有覆寫</td></tr>
+          <tr><th scope="row">可見性</th><td class="java"><code>public</code> / <code>private</code> / <code>protected</code></td><td>大寫開頭匯出，小寫只在 package 內可見</td></tr>
+          <tr><th scope="row">相等</th><td class="java">自己寫 <code>equals()</code> 和 <code>hashCode()</code></td><td>欄位都能比較時直接 <code>==</code>，也能直接當 map key</td></tr>
+          <tr><th scope="row">toString</th><td class="java"><code>toString()</code></td><td><code>String() string</code>（fmt.Stringer）</td></tr>
+          <tr><th scope="row">getter / setter</th><td class="java">慣例上每個欄位都有</td><td>直接用匯出的欄位；需要保護時才用小寫欄位加方法，getter 不加 Get 前綴</td></tr>
+          <tr><th scope="row">annotation</th><td class="java"><code>@JsonProperty("name")</code></td><td>struct tag <code>`json:"name"`</code></td></tr>
         </tbody>
       </table>
     </div>
   </section>
 
+  <section aria-labelledby="exercises">
+    <h2 id="exercises">練習</h2>
+    <p>題目在 <code>exercises/09-structs-methods/exercises.go</code>，用到的型別定義在 <code>doc.go</code>。</p>
+    <pre class="shell"><code>go test ./exercises/09-structs-methods/                          <span class="c"># 跑全部練習</span>
+go test ./exercises/09-structs-methods/ -run TestDoubleBooked    <span class="c"># 只跑一題</span>
+go test -tags solution ./exercises/09-structs-methods/           <span class="c"># 跑參考解答</span></code></pre>
+    <ol class="exercises">
+      <li>
+        <h3><span class="level l1">入門</span>練習 1：重複訂位</h3>
+        <p>依序檢查訂位紀錄，找出第一個被訂了第二次的座位。</p>
+        <pre class="code" data-src="exercises/09-structs-methods/doc.go#Seat"><code>type Seat struct {
+	Row string
+	No  int
+}</code></pre>
+        <pre class="code" data-src="exercises/09-structs-methods/exercises.go#DoubleBooked"><code>func DoubleBooked(orders []Seat) (Seat, bool) {
+	// TODO: 實作
+	return Seat{}, false
+}</code></pre>
+        <p>A5、B3、B3、A5 要回傳 B3 和 true；沒有重複時回傳 <code>Seat{}</code> 和 false。測試：<code>TestDoubleBooked</code>。</p>
+        <details><summary>提示</summary><p>Seat 的兩個欄位都能比較，所以 Seat 可以直接當 map 的 key（第 3 節）：用一個 <code>map[Seat]bool</code> 記住看過的座位，看到已經在 map 裡的就回傳。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l1">入門</span>練習 2：購物車</h3>
+        <p>加入品項時，同名的品項只增加數量；再算出總價。</p>
+        <pre class="code" data-src="exercises/09-structs-methods/doc.go#Line,Cart"><code>type Line struct {
+	Name  string
+	Price int
+	Qty   int
+}
+
+type Cart struct {
+	Lines []Line
+}</code></pre>
+        <pre class="code" data-src="exercises/09-structs-methods/exercises.go#Cart.Add,Cart.Total"><code>func (c *Cart) Add(name string, price, qty int) {
+	// TODO: 實作
+}
+
+func (c *Cart) Total() int {
+	// TODO: 實作
+	return 0
+}</code></pre>
+        <p>測試：<code>TestCart</code>。</p>
+        <details><summary>提示</summary><p>要改 c.Lines 裡的某一行，得用索引 <code>c.Lines[i].Qty += qty</code>，改完就 return；range 的第二個變數是複本。找不到同名的才 append 一行新的。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l2">進階</span>練習 3：交通卡</h3>
+        <p>儲值和扣款，不合規定時回傳對應的錯誤，而且餘額不能變。</p>
+        <pre class="code" data-src="exercises/09-structs-methods/doc.go#Card,ErrInsufficient,ErrBadAmount"><code>type Card struct {
+	Balance int
+}
+
+var ErrInsufficient = errors.New("不足")
+
+var ErrBadAmount = errors.New("金額不符合規定")</code></pre>
+        <pre class="code" data-src="exercises/09-structs-methods/exercises.go#Card.TopUp,Card.Pay"><code>func (c *Card) TopUp(amount int) error {
+	// TODO: 實作
+	return nil
+}
+
+func (c *Card) Pay(fare int) error {
+	// TODO: 實作
+	return nil
+}</code></pre>
+        <p>測試：<code>TestCard</code>。</p>
+        <details><summary>提示</summary><p>先檢查、後修改：條件不合就直接 <code>return ErrBadAmount</code>，餘額自然不會變。100 的倍數就是 <code>amount%100 == 0</code>。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l2">進階</span>練習 4：零值就能用的庫存表</h3>
+        <p><code>var inv Inventory</code> 宣告完就要能 Add、Remove、Count。</p>
+        <pre class="code" data-src="exercises/09-structs-methods/doc.go#Inventory"><code>type Inventory struct {
+	stock map[string]int
+}</code></pre>
+        <pre class="code" data-src="exercises/09-structs-methods/exercises.go#Inventory.Add,Inventory.Remove,Inventory.Count"><code>func (inv *Inventory) Add(name string, n int) {
+	// TODO: 實作
+}
+
+func (inv *Inventory) Remove(name string, n int) error {
+	// TODO: 實作
+	return nil
+}
+
+func (inv *Inventory) Count(name string) int {
+	// TODO: 實作
+	return 0
+}</code></pre>
+        <p>測試：<code>TestInventory</code>。</p>
+        <details><summary>提示</summary><p>和第 5 節的 Tally 一樣：Add 裡先檢查 <code>inv.stock == nil</code>，是就建立 map。Remove 和 Count 只讀 map，讀 nil map 會得到 0，不需要特別處理。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l3">挑戰</span>練習 5：會記錄的購物車</h3>
+        <p>LoggedCart 嵌入了 Cart。替它寫自己的 Add：除了加進購物車，還要記一行紀錄。Total 不用寫，它會從 Cart 提升上來。</p>
+        <pre class="code" data-src="exercises/09-structs-methods/doc.go#LoggedCart"><code>type LoggedCart struct {
+	Cart
+	Log []string
+}</code></pre>
+        <pre class="code" data-src="exercises/09-structs-methods/exercises.go#LoggedCart.Add"><code>func (c *LoggedCart) Add(name string, price, qty int) {
+	// TODO: 實作
+}</code></pre>
+        <p>這題用到練習 2 的 Cart.Add，先完成練習 2。測試：<code>TestLoggedCart</code>。</p>
+        <details><summary>提示</summary><p>LoggedCart.Add 遮蔽了 Cart.Add，所以要寫 <code>c.Cart.Add(name, price, qty)</code> 才會呼叫到被嵌入的那一個；寫成 <code>c.Add</code> 會呼叫自己。紀錄用 <code>fmt.Sprintf("加入 %s x%d", name, qty)</code>。</p></details>
+      </li>
+      <li>
+        <h3><span class="level fix">找錯</span>練習 6：計數器</h3>
+        <p>呼叫了三次 Inc，Value 還是 0。</p>
+        <pre class="code" data-src="exercises/09-structs-methods/doc.go#Counter,Counter.Value"><code>type Counter struct {
+	n int
+}
+
+func (c *Counter) Value() int {
+	return c.n
+}</code></pre>
+        <pre class="code" data-src="exercises/09-structs-methods/exercises.go#Counter.Inc"><code>func (c Counter) Inc() {
+	c.n++
+}</code></pre>
+        <p>測試：<code>TestCounter</code>。</p>
+        <details><summary>提示</summary><p>常見錯誤 1。只要改一個字元。</p></details>
+      </li>
+      <li>
+        <h3><span class="level fix">找錯</span>練習 7：全體加薪</h3>
+        <p>每位員工加薪 pct%，但呼叫之後，薪水一個都沒變。</p>
+        <pre class="code" data-src="exercises/09-structs-methods/doc.go#Employee"><code>type Employee struct {
+	Name   string
+	Salary int
+}</code></pre>
+        <pre class="code" data-src="exercises/09-structs-methods/exercises.go#RaiseAll"><code>func RaiseAll(staff []Employee, pct int) {
+	for _, e := range staff {
+		e.Salary = e.Salary * (100 + pct) / 100
+	}
+}</code></pre>
+        <p>測試：<code>TestRaiseAll</code>。</p>
+        <details><summary>提示</summary><p>常見錯誤 2。e 是 staff 裡元素的複本。</p></details>
+      </li>
+    </ol>
+    <p><a href="https://github.com/xinqilin/GO-Playground/blob/main/exercises/09-structs-methods/solution.go">參考解答</a>：先自己寫完再看。測試通過的寫法都是對的。</p>
+  </section>
+
+  <section aria-labelledby="recap">
+    <h2 id="recap">重點回顧</h2>
+    <ul class="recap">
+      <li><code>type A B</code> 定義新型別，可以有方法，和 B 之間要明確轉換；<code>type A = B</code> 只是別名。</li>
+      <li>方法屬於型別：轉換成別的型別，方法就不見了。</li>
+      <li>struct 字面值寫出欄位名稱；沒寫的欄位是零值。</li>
+      <li>struct 是值，指定和傳參數都會複製；但 slice、map、指標欄位複製的只是參考，內容仍然共用。</li>
+      <li>欄位都能比較的 struct 可以用 <code>==</code>，也能當 map 的 key。</li>
+      <li>要修改、struct 很大、含有 Mutex 時用指標 receiver；同一個型別的 receiver 保持一致。</li>
+      <li>呼叫時 Go 會自動補 <code>&amp;</code> 或 <code>*</code>，但 map 的元素不能取地址。</li>
+      <li><code>T</code> 的 method set 只有值 receiver 的方法，<code>*T</code> 兩種都有。</li>
+      <li>設計成零值就能用；需要檢查輸入時，寫 <code>NewX</code> 回傳 <code>*X</code> 和 error。</li>
+      <li>嵌入會提升欄位和方法，外層同名的會遮蔽裡面的；嵌入是組合，不是繼承。</li>
+      <li>struct tag 是給其他套件讀的說明，只對匯出的欄位有用。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="further">
+    <h2 id="further">延伸閱讀</h2>
+    <ul class="notes">
+      <li>Go 語言規格：<a href="https://go.dev/ref/spec#Type_definitions">Type definitions</a>、<a href="https://go.dev/ref/spec#Alias_declarations">Alias declarations</a>、<a href="https://go.dev/ref/spec#Struct_types">Struct types</a>（含嵌入與 tag）、<a href="https://go.dev/ref/spec#Composite_literals">Composite literals</a>、<a href="https://go.dev/ref/spec#Method_declarations">Method declarations</a>、<a href="https://go.dev/ref/spec#Method_sets">Method sets</a>、<a href="https://go.dev/ref/spec#Selectors">Selectors</a>、<a href="https://go.dev/ref/spec#Comparison_operators">Comparison operators</a>。</li>
+      <li>套件文件：<a href="https://pkg.go.dev/encoding/json#Marshal">encoding/json.Marshal</a>（tag 的完整規則）、<a href="https://pkg.go.dev/reflect#StructTag">reflect.StructTag</a>。</li>
+    </ul>
+  </section>
+
   <section aria-labelledby="run">
     <h2 id="run">動手跑</h2>
     <p class="label">在 repo 根目錄</p>
-    <pre class="shell"><code>go run ./chapters/09-structs-methods
-go test ./chapters/09-structs-methods</code></pre>
-    <p><a href="https://github.com/xinqilin/GO-Playground/tree/main/chapters/09-structs-methods">在 GitHub 看完整程式碼</a></p>
+    <pre class="shell"><code>go run ./chapters/09-structs-methods                 <span class="c"># 執行本章所有示範</span>
+go test ./chapters/09-structs-methods                <span class="c"># 驗證頁面上的每一段輸出</span>
+go test ./exercises/09-structs-methods/              <span class="c"># 做練習</span></code></pre>
+    <p><a href="https://github.com/xinqilin/GO-Playground/tree/main/chapters/09-structs-methods">在 GitHub 看本章完整程式碼</a>，或看<a href="https://github.com/xinqilin/GO-Playground/tree/main/exercises/09-structs-methods">練習題</a>。</p>
   </section>
 </main>
 

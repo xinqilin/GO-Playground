@@ -1,0 +1,1197 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>JSON 與資料編碼｜Go 圖解手冊</title>
+<meta name="description" content="用 Go 1.27 的 encoding/json/v2 處理 JSON：Marshal 與 Unmarshal、struct tag 的 omitzero 與 omitempty、解碼的規則與錯誤、結構未知的 JSON、TextMarshaler 與 WithMarshalers、jsontext 串流、和現有程式碼裡 encoding/json（v1）的差別，以及 encoding/csv，附可執行的練習題。">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<header class="site">
+  <a href="index.html">Go 圖解手冊</a>
+  <span class="count">23 / 33</span>
+</header>
+
+<main class="page long">
+  <header class="hero">
+    <div class="num" aria-hidden="true">23</div>
+    <p class="eyebrow">Part 4 · 標準庫實戰 · 第 23 章</p>
+    <h1>JSON 與資料編碼</h1>
+    <p class="analogy">外送平台和便當店之間傳的訂單單：雙方先說好每一格叫什麼名字、填什麼格式。看不懂的單子要退回去並說清楚是哪一格；格式自己定的欄位（辣度、金額），就由那一方負責寫和讀。</p>
+  </header>
+
+  <nav class="toc-inline" aria-labelledby="toc-title">
+    <p class="label" id="toc-title">本章內容</p>
+    <ol>
+      <li><a href="#goals">本章你會學到</a></li>
+      <li><a href="#marshal">Marshal 與 Unmarshal</a></li>
+      <li><a href="#tags">struct tag：名稱與省略</a></li>
+      <li><a href="#decode">解碼的規則與錯誤</a></li>
+      <li><a href="#dynamic">結構未知的 JSON</a></li>
+      <li><a href="#custom">自訂編碼</a></li>
+      <li><a href="#stream">串流：一次一筆</a></li>
+      <li><a href="#v1">現有程式碼裡的 encoding/json</a></li>
+      <li><a href="#csv">encoding/csv</a></li>
+      <li><a href="#pitfalls">常見錯誤</a></li>
+      <li><a href="#java">從 Java 來的你</a></li>
+      <li><a href="#exercises">練習</a></li>
+      <li><a href="#recap">重點回顧</a></li>
+      <li><a href="#further">延伸閱讀</a></li>
+    </ol>
+  </nav>
+
+  <section aria-labelledby="goals">
+    <h2 id="goals">本章你會學到</h2>
+    <ul class="notes">
+      <li>用 <code>encoding/json/v2</code> 的 Marshal、Unmarshal 在 Go 的值和 JSON 之間轉換。</li>
+      <li>struct tag：改名稱、<code>omitzero</code> 和 <code>omitempty</code> 的差別、<code>string</code>、<code>-</code>。</li>
+      <li>解碼的規則：解到 any 會得到什麼、不認得的欄位、大小寫、錯誤要怎麼判斷。</li>
+      <li>結構未知或要分兩階段解的 JSON：<code>map[string]any</code> 和 <code>jsontext.Value</code>。</li>
+      <li>讓自己的型別決定 JSON 長什麼樣子：TextMarshaler、uuid、WithMarshalers。</li>
+      <li>用 <code>jsontext.Decoder</code> 一次讀一筆，處理 JSON Lines 和很大的陣列。</li>
+      <li>看懂現有程式碼裡的 <code>encoding/json</code>（v1），知道它和 v2 哪裡不一樣。</li>
+      <li>用 <code>encoding/csv</code> 讀寫 CSV。</li>
+    </ul>
+    <p>先備：<a href="09-structs-methods.html#tags">09 章的 struct tag</a>、<a href="10-interfaces.html#assert">10 章的型別斷言</a>、<a href="11-errors.html#types">11 章的 errors.AsType</a>、<a href="20-files.html#stream">20 章的 io.Reader</a>。</p>
+    <p>Go 1.27 在標準庫加入了 <code>encoding/json/v2</code> 和 <code>encoding/json/jsontext</code>。舊的 <code>encoding/json</code> 現在叫 v1，會繼續支援，而且底層已經改用 v2 實作；官方文件建議新的程式用 v2。本章用 v2 寫，第 7 節再對照 v1，因為你在現有的程式碼、函式庫和網路文章裡看到的幾乎都是 v1。兩者的函式名稱大多一樣，import 的路徑不同，套件名稱都是 <code>json</code>：</p>
+    <pre class="shell"><code>import "encoding/json/v2"     <span class="c"># 本章用的 v2，套件名稱是 json</span>
+import "encoding/json"        <span class="c"># 現有程式碼裡的 v1，套件名稱也是 json</span></code></pre>
+  </section>
+
+  <section aria-labelledby="marshal">
+    <h2 id="marshal">1. Marshal 與 Unmarshal</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 200" role="img" aria-label="左邊是 Go 的 MenuItem struct，有 Name、Price、Tags、cost 四個欄位；大寫開頭的三個欄位依照 tag 變成 JSON 的 name、price、tags，小寫開頭的 cost 不會輸出">
+        <title>struct 的欄位變成 JSON 的成員</title>
+        <text class="sm" x="116" y="24" text-anchor="middle">Go 的 struct</text>
+        <text class="sm" x="377" y="24" text-anchor="middle">JSON</text>
+        <rect class="soft" x="16" y="36" width="200" height="30" rx="6"/>
+        <text class="sm" x="116" y="56" text-anchor="middle">Name：排骨飯</text>
+        <rect class="soft" x="16" y="76" width="200" height="30" rx="6"/>
+        <text class="sm" x="116" y="96" text-anchor="middle">Price：90</text>
+        <rect class="soft" x="16" y="116" width="200" height="30" rx="6"/>
+        <text class="sm" x="116" y="136" text-anchor="middle">Tags：招牌、炸物</text>
+        <rect class="hot" x="16" y="156" width="200" height="30" rx="6"/>
+        <text class="sm" x="116" y="176" text-anchor="middle">cost：55</text>
+        <path class="wire" d="M216 51 H278"/>
+        <path class="tip" d="M290 51 L278 45 L278 57 Z"/>
+        <path class="wire" d="M216 91 H278"/>
+        <path class="tip" d="M290 91 L278 85 L278 97 Z"/>
+        <path class="wire" d="M216 131 H278"/>
+        <path class="tip" d="M290 131 L278 125 L278 137 Z"/>
+        <rect class="acc" x="290" y="36" width="174" height="30" rx="6"/>
+        <text class="sm mono" x="377" y="56" text-anchor="middle">"name": "排骨飯"</text>
+        <rect class="acc" x="290" y="76" width="174" height="30" rx="6"/>
+        <text class="sm mono" x="377" y="96" text-anchor="middle">"price": 90</text>
+        <rect class="acc" x="290" y="116" width="174" height="30" rx="6"/>
+        <text class="sm mono" x="377" y="136" text-anchor="middle">"tags": [ … ]</text>
+        <text class="sm t-hot" x="240" y="176">小寫開頭：不輸出</text>
+      </svg>
+      <figcaption>大寫開頭（匯出）的欄位才會變成 JSON；名稱由 struct tag 決定。小寫開頭的欄位在 json 套件看來根本不存在。</figcaption>
+    </figure>
+    <p><code>json.Marshal(v)</code> 把 Go 的值編碼成 JSON 的 <code>[]byte</code>，<code>json.Unmarshal(data, &amp;v)</code> 反過來把 JSON 解碼到 Go 的值裡。最常用的是 struct：每個匯出的欄位變成 JSON 物件的一個成員，名稱寫在欄位後面的 struct tag 裡（<a href="09-structs-methods.html#tags">09 章</a>）：</p>
+    <pre class="code" data-src="chapters/23-json/marshal.go#MenuItem,marshalDemo"><code>type MenuItem struct {
+	Name  string   `json:"name"`
+	Price int      `json:"price"`
+	Tags  []string `json:"tags"`
+	cost  int      // 成本：小寫開頭，不會出現在 JSON 裡
+}
+
+func marshalDemo() {
+	item := MenuItem{Name: "排骨飯", Price: 90, Tags: []string{"招牌", "炸物"}, cost: 55}
+	b, err := json.Marshal(item)
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	fmt.Println(string(b))
+
+	b, err = json.Marshal(MenuItem{Name: "白飯", Price: 10}) // Tags 是 nil
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	fmt.Println(string(b))
+
+	b, err = json.Marshal(item, jsontext.WithIndent("  ")) // 給人看的時候加上縮排
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	fmt.Println(string(b))
+}</code></pre>
+    <pre class="out" data-example="chapters/23-json#Example_marshalDemo"><code>{"name":"排骨飯","price":90,"tags":["招牌","炸物"]}
+{"name":"白飯","price":10,"tags":[]}
+{
+  "name": "排骨飯",
+  "price": 90,
+  "tags": [
+    "招牌",
+    "炸物"
+  ]
+}</code></pre>
+    <ul class="notes">
+      <li>沒有 tag 的話，JSON 的名稱就是欄位名稱 <code>Name</code>。對外的 API 通常用小寫或底線，所以幾乎每個欄位都會寫 tag。</li>
+      <li>v2 把 nil slice 編成 <code>[]</code>、nil map 編成 <code>{}</code>，前端拿到的永遠是陣列，不用另外判斷 null。v1 在這裡不一樣（第 7 節）。</li>
+      <li>Marshal 的第二個參數起是選項。<code>jsontext.WithIndent("  ")</code> 加上縮排，給人看的時候用；傳給程式的就用預設的緊湊格式。</li>
+      <li>中文直接輸出，不會被跳脫成 <code>排</code> 這種格式。</li>
+    </ul>
+    <p>Unmarshal 要傳指標，它才改得到你的變數；傳值會回傳錯誤。JSON 裡多出來的欄位（這裡的 <code>calories</code>）預設會被略過：</p>
+    <pre class="code" data-src="chapters/23-json/marshal.go#unmarshalDemo"><code>func unmarshalDemo() {
+	data := []byte(`{"name":"雞腿飯","price":100,"tags":["招牌"],"calories":780}`)
+	var item MenuItem
+	if err := json.Unmarshal(data, &amp;item); err != nil {
+		fmt.Println(err)
+		return
+	}
+	fmt.Printf("%+v\n", item)
+
+	stock := map[string]int{"雞腿": 12, "排骨": 0, "滷蛋": 30}
+	b, err := json.Marshal(stock, json.Deterministic(true)) // map 的順序不固定，要固定就加這個選項
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	fmt.Println(string(b))
+}</code></pre>
+    <pre class="out" data-example="chapters/23-json#Example_unmarshalDemo"><code>{Name:雞腿飯 Price:100 Tags:[招牌] cost:0}
+{"排骨":0,"滷蛋":30,"雞腿":12}</code></pre>
+    <ul class="notes">
+      <li>map 的 key 要能編成字串，例如 string、整數，或第 5 節的 TextMarshaler。</li>
+      <li>v2 輸出 map 的順序不固定，和 range 一樣（<a href="07-maps.html">07 章</a>）。要固定的順序（測試、要比對內容、要算雜湊）就加 <code>json.Deterministic(true)</code>，或改用 struct。</li>
+      <li>Marshal 失敗時，回傳的 <code>[]byte</code> 可能是寫到一半的內容，一定要先檢查 err。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="tags">
+    <h2 id="tags">2. struct tag：名稱與省略</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 226" role="img" aria-label="比較 omitzero 和 omitempty：整數 0，omitzero 省略、omitempty 輸出；空字串兩者都省略；nil slice 兩者都省略；長度 0 的 slice，omitzero 輸出、omitempty 省略；零值的 time.Time，omitzero 省略、omitempty 輸出">
+        <title>omitzero 和 omitempty 什麼時候省略</title>
+        <text class="sm" x="90" y="22" text-anchor="middle">值</text>
+        <text class="sm mono bold" x="240" y="22" text-anchor="middle">omitzero</text>
+        <text class="sm mono bold" x="380" y="22" text-anchor="middle">omitempty</text>
+        <text class="sm" x="240" y="42" text-anchor="middle">看 Go 的零值</text>
+        <text class="sm" x="380" y="42" text-anchor="middle">看 JSON 是不是空的</text>
+        <rect class="soft" x="16" y="54" width="448" height="30" rx="6"/>
+        <text class="sm mono" x="90" y="74" text-anchor="middle">0</text>
+        <text class="sm" x="240" y="74" text-anchor="middle">省略</text>
+        <text class="sm t-hot" x="380" y="74" text-anchor="middle">輸出 0</text>
+        <rect class="soft" x="16" y="88" width="448" height="30" rx="6"/>
+        <text class="sm mono" x="90" y="108" text-anchor="middle">""</text>
+        <text class="sm" x="240" y="108" text-anchor="middle">省略</text>
+        <text class="sm" x="380" y="108" text-anchor="middle">省略</text>
+        <rect class="soft" x="16" y="122" width="448" height="30" rx="6"/>
+        <text class="sm mono" x="90" y="142" text-anchor="middle">nil slice</text>
+        <text class="sm" x="240" y="142" text-anchor="middle">省略</text>
+        <text class="sm" x="380" y="142" text-anchor="middle">省略</text>
+        <rect class="soft" x="16" y="156" width="448" height="30" rx="6"/>
+        <text class="sm mono" x="90" y="176" text-anchor="middle">[]string{}</text>
+        <text class="sm t-hot" x="240" y="176" text-anchor="middle">輸出 []</text>
+        <text class="sm" x="380" y="176" text-anchor="middle">省略</text>
+        <rect class="soft" x="16" y="190" width="448" height="30" rx="6"/>
+        <text class="sm mono" x="90" y="210" text-anchor="middle">time.Time{}</text>
+        <text class="sm" x="240" y="210" text-anchor="middle">省略</text>
+        <text class="sm t-hot" x="380" y="210" text-anchor="middle">輸出日期字串</text>
+      </svg>
+      <figcaption>omitzero 問的是「這是 Go 的零值嗎」，omitempty 問的是「編出來的 JSON 是空的嗎」（null、""、[]、{}）。數字和時間用 omitzero，字串、slice、map 兩個都可以。</figcaption>
+    </figure>
+    <p>tag 的第一段是 JSON 的名稱，後面用逗號接選項。外送訂單的每個欄位示範一種常用的寫法：</p>
+    <pre class="code" data-src="chapters/23-json/tags.go#Order,tagsDemo"><code>type Order struct {
+	ID       int64     `json:"id,string"`         // 很大的整數用字串傳，JavaScript 那邊才不會失真
+	Customer string    `json:"customer"`          // 一定會輸出
+	Items    []string  `json:"items,omitempty"`   // JSON 是空的（[]）就省略
+	Note     string    `json:"note,omitempty"`    // 空字串就省略
+	Discount int       `json:"discount,omitzero"` // Go 的零值（0）就省略
+	PaidAt   time.Time `json:"paid_at,omitzero"`  // 還沒付款（零值）就省略；time.Time 有 IsZero 方法
+	Phone    string    `json:"-"`                 // 個資，永遠不輸出
+}
+
+func tagsDemo() {
+	o := Order{ID: 2026111900000000123, Customer: "林小姐", Phone: "0912-345-678"}
+	b, err := json.Marshal(o)
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	fmt.Println(string(b))
+
+	o.Items = []string{"排骨飯", "滷蛋"}
+	o.Note = "不要香菜"
+	o.Discount = 10
+	o.PaidAt = time.Date(2026, time.November, 19, 12, 5, 0, 0, time.UTC)
+	b, err = json.Marshal(o)
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	fmt.Println(string(b))
+}</code></pre>
+    <pre class="out" data-example="chapters/23-json#Example_tagsDemo"><code>{"id":"2026111900000000123","customer":"林小姐"}
+{"id":"2026111900000000123","customer":"林小姐","items":["排骨飯","滷蛋"],"note":"不要香菜","discount":10,"paid_at":"2026-11-19T12:05:00Z"}</code></pre>
+    <ul class="notes">
+      <li><code>json:"-"</code>：這個欄位永遠不輸出，也不會被解碼寫入。電話、密碼雜湊這類欄位就算是大寫開頭也不該出現在 API 的回應裡。</li>
+      <li><code>string</code>：數字用字串包起來，例如 <code>"2026111900000000123"</code>。JavaScript 的數字是 float64，超過 2<sup>53</sup> 的整數會失真，很多 API 都把 64 位元的 ID 用字串傳。</li>
+      <li>time.Time 預設編成 RFC3339 的字串（<a href="22-time.html#layout">22 章</a>）。它有 <code>IsZero</code> 方法，omitzero 會用它判斷「還沒設定」。</li>
+    </ul>
+    <p>兩個省略選項的差別，用同一個 struct 實際跑一次：</p>
+    <pre class="code" data-src="chapters/23-json/tags.go#omitDemo"><code>func omitDemo() {
+	type flags struct {
+		CountZ int      `json:",omitzero"`
+		CountE int      `json:",omitempty"` // 0 編成 JSON 的 0，不是「空的」，所以不會省略
+		ListZ  []string `json:",omitzero"`  // 只有 nil 才省略
+		ListE  []string `json:",omitempty"` // nil 和長度 0 都編成 []，都省略
+	}
+	for _, f := range []flags{{}, {ListZ: []string{}, ListE: []string{}}} {
+		b, err := json.Marshal(f)
+		if err != nil {
+			fmt.Println(err)
+			return
+		}
+		fmt.Println(string(b))
+	}
+}</code></pre>
+    <pre class="out" data-example="chapters/23-json#Example_omitDemo"><code>{"CountE":0}
+{"CountE":0,"ListZ":[]}</code></pre>
+    <p>CountE 的 0 沒有被 omitempty 省略：v2 的 omitempty 只看編出來的 JSON，0 不是「空的」。這和 v1 不一樣，v1 的 omitempty 會省略 0；從 v1 搬過來的程式碼，數字欄位上的 omitempty 要改成 omitzero。omitzero 在 v1 也能用（Go 1.24 起）。</p>
+  </section>
+
+  <section aria-labelledby="decode">
+    <h2 id="decode">3. 解碼的規則與錯誤</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 234" role="img" aria-label="解碼到 any 時：JSON 物件變成 map[string]any，陣列變成 []any，字串變成 string，數字一律變成 float64，true 或 false 變成 bool，null 變成 nil">
+        <title>解碼到 any 時的對應</title>
+        <rect class="soft" x="40" y="16" width="150" height="28" rx="6"/>
+        <text class="sm" x="115" y="35" text-anchor="middle">物件 { }</text>
+        <rect class="soft" x="40" y="52" width="150" height="28" rx="6"/>
+        <text class="sm" x="115" y="71" text-anchor="middle">陣列 [ ]</text>
+        <rect class="soft" x="40" y="88" width="150" height="28" rx="6"/>
+        <text class="sm" x="115" y="107" text-anchor="middle">字串</text>
+        <rect class="hot" x="40" y="124" width="150" height="28" rx="6"/>
+        <text class="sm" x="115" y="143" text-anchor="middle">數字</text>
+        <rect class="soft" x="40" y="160" width="150" height="28" rx="6"/>
+        <text class="sm" x="115" y="179" text-anchor="middle">true、false</text>
+        <rect class="soft" x="40" y="196" width="150" height="28" rx="6"/>
+        <text class="sm" x="115" y="215" text-anchor="middle">null</text>
+        <path class="wire" d="M190 30 H278"/>
+        <path class="tip" d="M290 30 L278 24 L278 36 Z"/>
+        <path class="wire" d="M190 66 H278"/>
+        <path class="tip" d="M290 66 L278 60 L278 72 Z"/>
+        <path class="wire" d="M190 102 H278"/>
+        <path class="tip" d="M290 102 L278 96 L278 108 Z"/>
+        <path class="wire hot-ln" d="M190 138 H278"/>
+        <path class="tip hot-tip" d="M290 138 L278 132 L278 144 Z"/>
+        <path class="wire" d="M190 174 H278"/>
+        <path class="tip" d="M290 174 L278 168 L278 180 Z"/>
+        <path class="wire" d="M190 210 H278"/>
+        <path class="tip" d="M290 210 L278 204 L278 216 Z"/>
+        <rect class="acc" x="290" y="16" width="170" height="28" rx="6"/>
+        <text class="sm mono" x="375" y="35" text-anchor="middle">map[string]any</text>
+        <rect class="acc" x="290" y="52" width="170" height="28" rx="6"/>
+        <text class="sm mono" x="375" y="71" text-anchor="middle">[]any</text>
+        <rect class="acc" x="290" y="88" width="170" height="28" rx="6"/>
+        <text class="sm mono" x="375" y="107" text-anchor="middle">string</text>
+        <rect class="hot" x="290" y="124" width="170" height="28" rx="6"/>
+        <text class="sm mono" x="375" y="143" text-anchor="middle">float64</text>
+        <rect class="acc" x="290" y="160" width="170" height="28" rx="6"/>
+        <text class="sm mono" x="375" y="179" text-anchor="middle">bool</text>
+        <rect class="acc" x="290" y="196" width="170" height="28" rx="6"/>
+        <text class="sm mono" x="375" y="215" text-anchor="middle">nil</text>
+      </svg>
+      <figcaption>解到具體的型別（struct、int）時，型別決定怎麼解；解到 any 時就照這張表。數字一律是 float64，整數也一樣。</figcaption>
+    </figure>
+    <p>JSON 只有六種值。解碼到 struct 時，欄位的型別決定 JSON 的值要變成什麼；解碼到 <code>any</code> 時沒有型別可以參考，json 套件就照上圖選一個：</p>
+    <pre class="code" data-src="chapters/23-json/decode.go#anyDemo"><code>func anyDemo() {
+	data := []byte(`{"name":"滷肉飯","price":35,"tags":["古早味"],"vegan":false,"note":null,"shop":{"id":7}}`)
+	var v any
+	if err := json.Unmarshal(data, &amp;v); err != nil {
+		fmt.Println(err)
+		return
+	}
+	m := v.(map[string]any)
+	for _, k := range slices.Sorted(maps.Keys(m)) {
+		fmt.Printf("%-5s %T\n", k, m[k])
+	}
+
+	var big map[string]any
+	if err := json.Unmarshal([]byte(`{"id":2026111900000000123}`), &amp;big); err != nil {
+		fmt.Println(err)
+		return
+	}
+	fmt.Printf("%.0f\n", big["id"]) // float64 只有 15 到 17 位有效數字，後面的位數變了
+}</code></pre>
+    <pre class="out" data-example="chapters/23-json#Example_anyDemo"><code>name  string
+note  &lt;nil&gt;
+price float64
+shop  map[string]interface {}
+tags  []interface {}
+vegan bool
+2026111900000000000</code></pre>
+    <p>最後一行：JSON 裡的整數是 2026111900000000123，解到 any 變成 float64，後面三位就沒了。這種 ID 要解到 int64 的欄位，或照第 2 節用 <code>string</code> 選項傳。</p>
+    <p>接著是兩個預設的寬鬆行為：大小寫不同的名稱、不認得的欄位，都會被<strong>安靜地略過</strong>。客戶端把 <code>name</code> 打成 <code>Name</code>，你收到的是空字串，卻沒有任何錯誤：</p>
+    <pre class="code" data-src="chapters/23-json/decode.go#strictDemo"><code>func strictDemo() {
+	data := []byte(`{"Name":"雞腿飯","price":100,"spicy":true}`)
+
+	var item MenuItem
+	err := json.Unmarshal(data, &amp;item)
+	fmt.Printf("%q %d %v\n", item.Name, item.Price, err)
+
+	err = json.Unmarshal(data, &amp;item, json.RejectUnknownMembers(true))
+	fmt.Println(explain(err), errors.Is(err, json.ErrUnknownName))
+}</code></pre>
+    <pre class="out" data-example="chapters/23-json#Example_strictDemo"><code>"" 100 &lt;nil&gt;
+[位置 /Name，JSON string，Go main.MenuItem，原因 unknown object member name] true</code></pre>
+    <ul class="notes">
+      <li>v2 比對名稱時分大小寫，<code>Name</code> 對不到 <code>name</code>，被當成不認得的欄位。</li>
+      <li>從外部收進來的 JSON（API 的請求、設定檔），通常加上 <code>json.RejectUnknownMembers(true)</code>，打錯的欄位名稱才會變成錯誤，而不是一個默默變成零值的欄位（練習 1）。</li>
+      <li>要判斷是不是「不認得的欄位」，用 <code>errors.Is(err, json.ErrUnknownName)</code>。</li>
+    </ul>
+    <p>解碼失敗分兩種。<strong>語法錯誤</strong>是 JSON 本身寫錯，例如多一個逗號、名稱重複，錯誤來自 jsontext 套件，會說在第幾個位元組。<strong>語意錯誤</strong>是 JSON 沒錯，但放不進 Go 的型別，例如字串要放進 int，錯誤的型別是 <code>*json.SemanticError</code>，用 JSON Pointer（<code>/1/price</code>：第 1 個元素的 price）指出是哪一個值：</p>
+    <pre class="code" data-src="chapters/23-json/decode.go#decodeErrorsDemo"><code>func decodeErrorsDemo() {
+	inputs := []string{
+		`[{"name":"排骨飯","price":90},{"name":"雞腿飯","price":"一百"}]`, // 型別不對
+		`[{"name":"排骨飯","price":90.5}]`,                           // int 放不下小數
+		`[{"name":"排骨飯","price":90},]`,                            // 語法錯誤：多一個逗號
+		`[{"name":"排骨飯","name":"雞腿飯"}]`,                           // 名稱重複
+	}
+	for _, in := range inputs {
+		var menu []MenuItem
+		fmt.Println(explain(json.Unmarshal([]byte(in), &amp;menu)))
+	}
+}</code></pre>
+    <pre class="out" data-example="chapters/23-json#Example_decodeErrorsDemo"><code>[位置 /1/price，JSON string，Go int]
+[位置 /0/price，JSON number，Go int，原因 invalid syntax]
+jsontext: invalid character ',' at start of value after offset 32
+jsontext: duplicate object member name "name" within "/0"</code></pre>
+    <p>輸出裡方括號的部分是本章的 explain 函式整理出來的：</p>
+    <pre class="code" data-src="chapters/23-json/decode.go#explain"><code>func explain(err error) string {
+	se, ok := errors.AsType[*json.SemanticError](err)
+	if !ok {
+		return fmt.Sprint(err)
+	}
+	var parts []string
+	if se.JSONPointer != "" {
+		parts = append(parts, "位置 "+string(se.JSONPointer))
+	}
+	if se.JSONKind != 0 {
+		parts = append(parts, "JSON "+se.JSONKind.String())
+	}
+	if se.GoType != nil {
+		parts = append(parts, "Go "+se.GoType.String())
+	}
+	if se.Err != nil {
+		parts = append(parts, "原因 "+se.Err.Error())
+	}
+	return strings.Replace(err.Error(), se.Error(), "["+strings.Join(parts, "，")+"]", 1)
+}</code></pre>
+    <p>為什麼不直接印錯誤訊息？因為 v2 是故意的：同一個語意錯誤，這次執行可能寫成 <code>json: cannot unmarshal JSON string into Go int within "/1/price"</code>，下次執行可能把 cannot 換成 unable to。標準庫的原始碼註解說明這是為了讓沒有人能依賴訊息的文字。程式要判斷錯誤時，用 <code>errors.AsType[*json.SemanticError]</code> 取出它，看 JSONPointer、GoType 這些欄位，或用 errors.Is 比對 <code>json.ErrUnknownName</code> 這類錯誤值（<a href="11-errors.html#types">11 章</a>）；訊息文字只給人看。</p>
+  </section>
+
+  <section aria-labelledby="dynamic">
+    <h2 id="dynamic">4. 結構未知的 JSON</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 222" role="img" aria-label="一則通知有 type 和 data。第一次解碼只讀出 type，data 先原封不動留成 jsontext.Value；看了 type 之後，第二次解碼把 data 解成 OrderPlaced 或 RiderAssigned">
+        <title>分兩次解碼</title>
+        <rect class="soft" x="40" y="12" width="400" height="34" rx="8"/>
+        <text class="sm mono" x="240" y="34" text-anchor="middle">{"type":"order.placed","data":{…}}</text>
+        <path class="wire" d="M240 46 V58"/>
+        <path class="tip" d="M240 70 L234 58 L246 58 Z"/>
+        <rect class="acc" x="40" y="70" width="400" height="48" rx="8"/>
+        <text class="sm" x="240" y="90" text-anchor="middle">第一次解碼到 Event</text>
+        <text class="sm" x="240" y="109" text-anchor="middle">Type 讀出來，Data 先原封不動</text>
+        <path class="wire" d="M240 118 V132 H130 V150"/>
+        <path class="wire" d="M240 132 H350 V150"/>
+        <path class="tip" d="M130 162 L124 150 L136 150 Z"/>
+        <path class="tip" d="M350 162 L344 150 L356 150 Z"/>
+        <text class="sm" x="240" y="152" text-anchor="middle">看 Type 決定</text>
+        <rect class="soft" x="40" y="162" width="180" height="48" rx="8"/>
+        <text class="sm" x="130" y="182" text-anchor="middle">第二次解碼</text>
+        <text class="sm mono" x="130" y="201" text-anchor="middle">OrderPlaced</text>
+        <rect class="soft" x="260" y="162" width="180" height="48" rx="8"/>
+        <text class="sm" x="350" y="182" text-anchor="middle">第二次解碼</text>
+        <text class="sm mono" x="350" y="201" text-anchor="middle">RiderAssigned</text>
+      </svg>
+      <figcaption>jsontext.Value 就是一段還沒解的 JSON。先解外層、看清楚是哪一種，再把裡面那段解成對的型別。</figcaption>
+    </figure>
+    <p>不知道 JSON 的結構時，可以解到 <code>map[string]any</code>，再一層一層用型別斷言取值（<a href="10-interfaces.html#assert">10 章</a>）。每往下一層都要用 comma-ok 的寫法，欄位不存在或型別不對時才不會 panic：</p>
+    <pre class="code" data-src="chapters/23-json/dynamic.go#lookupDemo"><code>func lookupDemo() {
+	data := []byte(`{"shop":{"name":"阿嬤便當","rating":4.7},"open":true}`)
+	var v map[string]any
+	if err := json.Unmarshal(data, &amp;v); err != nil {
+		fmt.Println(err)
+		return
+	}
+
+	shop, ok1 := v["shop"].(map[string]any)
+	name, ok2 := shop["name"].(string)
+	rating, ok3 := shop["rating"].(float64)
+	fmt.Println(name, rating, ok1 &amp;&amp; ok2 &amp;&amp; ok3)
+
+	_, ok := v["closed_on"].(string)
+	fmt.Println("沒有的欄位：", ok)
+}</code></pre>
+    <pre class="out" data-example="chapters/23-json#Example_lookupDemo"><code>阿嬤便當 4.7 true
+沒有的欄位： false</code></pre>
+    <p>這種寫法又長又容易出錯，只適合真的不知道結構、或只要其中一兩個值的情況（練習 3）。更常見的是「結構有好幾種，外層的某個欄位說明是哪一種」，例如外送平台的通知：type 不同，data 的欄位就不同。這時讓 data 的型別是 <code>jsontext.Value</code>，它會原封不動地保留那一段 JSON，看了 type 再解第二次：</p>
+    <pre class="code" data-src="chapters/23-json/dynamic.go#Event,OrderPlaced,RiderAssigned,describe"><code>type Event struct {
+	Type string         `json:"type"`
+	Data jsontext.Value `json:"data"` // 先原封不動留著，看了 type 再決定怎麼解
+}
+
+type OrderPlaced struct {
+	OrderID string `json:"order_id"`
+	Total   int    `json:"total"`
+}
+
+type RiderAssigned struct {
+	OrderID string `json:"order_id"`
+	Rider   string `json:"rider"`
+	ETA     int    `json:"eta_minutes"`
+}
+
+func describe(msg []byte) (string, error) {
+	var ev Event
+	if err := json.Unmarshal(msg, &amp;ev); err != nil {
+		return "", err
+	}
+	switch ev.Type {
+	case "order.placed":
+		var p OrderPlaced
+		if err := json.Unmarshal(ev.Data, &amp;p); err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("新訂單 %s，共 %d 元", p.OrderID, p.Total), nil
+	case "rider.assigned":
+		var r RiderAssigned
+		if err := json.Unmarshal(ev.Data, &amp;r); err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("%s 由 %s 外送，約 %d 分鐘", r.OrderID, r.Rider, r.ETA), nil
+	default:
+		return "", fmt.Errorf("不認得的通知類型 %q", ev.Type)
+	}
+}</code></pre>
+    <pre class="out" data-example="chapters/23-json#Example_eventDemo"><code>新訂單 A-1024，共 280 元
+A-1024 由 王大哥 外送，約 25 分鐘
+錯誤： 不認得的通知類型 "order.refunded"</code></pre>
+    <ul class="notes">
+      <li>每一種通知都有自己的 struct，第二次解碼一樣能用 RejectUnknownMembers 等選項檢查。</li>
+      <li>不認得的 type 要回傳錯誤，不要默默略過：平台加了新的通知類型時，你才會知道。</li>
+      <li>通知類型一多，switch 會越來越長。練習 6 用 Go 1.27 的 generic method 做一個可以登記處理函式的 Router。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="custom">
+    <h2 id="custom">5. 自訂編碼</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 200" role="img" aria-label="json 決定怎麼編碼一個值的順序：第一，呼叫的一方用 WithMarshalers 指定的函式；第二，型別自己的 MarshalJSONTo 或 MarshalJSON；第三，型別的 AppendText 或 MarshalText，結果當成字串；第四，依照型別的預設規則。前面有的就用，沒有才往下">
+        <title>誰決定 JSON 長什麼樣子</title>
+        <rect class="acc" x="40" y="16" width="370" height="36" rx="8"/>
+        <text class="sm" x="56" y="39">1. WithMarshalers：呼叫的一方指定</text>
+        <rect class="soft" x="40" y="60" width="370" height="36" rx="8"/>
+        <text class="sm" x="56" y="83">2. MarshalJSONTo、MarshalJSON：整個 JSON 自己寫</text>
+        <rect class="soft" x="40" y="104" width="370" height="36" rx="8"/>
+        <text class="sm" x="56" y="127">3. AppendText、MarshalText：變成一個字串</text>
+        <rect class="soft" x="40" y="148" width="370" height="36" rx="8"/>
+        <text class="sm" x="56" y="171">4. 預設規則：依照型別</text>
+        <path class="wire" d="M434 30 V158"/>
+        <path class="tip" d="M434 170 L428 158 L440 158 Z"/>
+        <text class="sm" x="446" y="104">沒</text>
+        <text class="sm" x="446" y="122">有</text>
+        <text class="sm" x="446" y="140">才</text>
+        <text class="sm" x="446" y="158">往</text>
+        <text class="sm" x="446" y="176">下</text>
+      </svg>
+      <figcaption>由上往下找，第一個符合的就用。解碼也是同樣的順序，對應的方法是 UnmarshalJSONFrom、UnmarshalJSON、UnmarshalText。</figcaption>
+    </figure>
+    <p>型別在 JSON 裡應該是一個字串的時候（辣度、杯型、金額、ID），實作 <code>encoding.TextMarshaler</code> 和 <code>encoding.TextUnmarshaler</code> 最簡單：回傳文字就好，json 套件負責加引號、跳脫。程式裡的辣度是可以比大小的整數，JSON 裡是看得懂的中文：</p>
+    <pre class="code" data-src="chapters/23-json/custom.go#Spice,NotSpicy,spiceNames,Spice.MarshalText,Spice.UnmarshalText,Bowl,textDemo"><code>type Spice int
+
+const (
+	NotSpicy Spice = iota
+	Mild
+	Medium
+	Hot
+)
+
+var spiceNames = [...]string{"不辣", "小辣", "中辣", "大辣"}
+
+func (s Spice) MarshalText() ([]byte, error) {
+	if s &lt; NotSpicy || s &gt; Hot {
+		return nil, fmt.Errorf("辣度 %d 超出範圍", int(s))
+	}
+	return []byte(spiceNames[s]), nil
+}
+
+func (s *Spice) UnmarshalText(b []byte) error {
+	i := slices.Index(spiceNames[:], string(b))
+	if i &lt; 0 {
+		return fmt.Errorf("不認得的辣度 %q", b)
+	}
+	*s = Spice(i)
+	return nil
+}
+
+type Bowl struct {
+	Dish  string `json:"dish"`
+	Spice Spice  `json:"spice"`
+}
+
+func textDemo() {
+	b, err := json.Marshal([]Bowl{{"麻辣鴨血", Hot}, {"清燉牛肉麵", NotSpicy}})
+	fmt.Println(string(b), err)
+
+	var bowl Bowl
+	err = json.Unmarshal([]byte(`{"dish":"酸辣湯","spice":"中辣"}`), &amp;bowl)
+	fmt.Println(bowl.Dish, int(bowl.Spice), bowl.Spice &gt; Mild, err)
+
+	err = json.Unmarshal([]byte(`{"dish":"酸辣湯","spice":"超辣"}`), &amp;bowl)
+	fmt.Println(explain(err))
+
+	sold := map[Spice]int{Hot: 3, Mild: 5}
+	b, err = json.Marshal(sold, json.Deterministic(true))
+	fmt.Println(string(b), err)
+}</code></pre>
+    <pre class="out" data-example="chapters/23-json#Example_textDemo"><code>[{"dish":"麻辣鴨血","spice":"大辣"},{"dish":"清燉牛肉麵","spice":"不辣"}] &lt;nil&gt;
+酸辣湯 2 true &lt;nil&gt;
+[位置 /spice，JSON string，Go main.Spice，原因 不認得的辣度 "超辣"]
+{"大辣":3,"小辣":5} &lt;nil&gt;</code></pre>
+    <ul class="notes">
+      <li>UnmarshalText 的 receiver 一定要是指標，才改得到呼叫者的值（<a href="09-structs-methods.html#receivers">09 章</a>）。寫成值 receiver 不會有任何錯誤，只是解完的值永遠是零值（練習 7）。</li>
+      <li>UnmarshalText 回傳的錯誤會被包進 SemanticError，位置和型別自動填好。</li>
+      <li>TextMarshaler 也讓型別可以當 map 的 key：key 一定是字串，json 套件就用 MarshalText 的結果。</li>
+      <li>需要輸出數字、物件、陣列時，實作 <code>MarshalJSON() ([]byte, error)</code>，v1、v2 都認得；v2 另外有效率較好的 <code>MarshalJSONTo(*jsontext.Encoder) error</code>。</li>
+    </ul>
+    <p>標準庫裡很多型別已經實作了這些方法，例如 time.Time 和 Go 1.27 新增的 <code>uuid</code> 套件。uuid.UUID 在 JSON 裡就是標準格式的字串：</p>
+    <pre class="code" data-src="chapters/23-json/custom.go#Ticket,uuidDemo"><code>type Ticket struct {
+	ID    uuid.UUID `json:"id"`
+	Table int       `json:"table"`
+}
+
+func uuidDemo() {
+	t := Ticket{ID: uuid.MustParse("019a9b1c-3f00-7d2e-8a41-5c6d7e8f9012"), Table: 7}
+	b, err := json.Marshal(t)
+	fmt.Println(string(b), err)
+
+	var back Ticket
+	err = json.Unmarshal(b, &amp;back)
+	fmt.Println(back.ID == t.ID, err)
+
+	err = json.Unmarshal([]byte(`{"id":"A-1024","table":7}`), &amp;back)
+	fmt.Println(explain(err))
+
+	fmt.Println(len(uuid.New().String())) // 每次都不一樣，這裡只印長度
+}</code></pre>
+    <pre class="out" data-example="chapters/23-json#Example_uuidDemo"><code>{"id":"019a9b1c-3f00-7d2e-8a41-5c6d7e8f9012","table":7} &lt;nil&gt;
+true &lt;nil&gt;
+[位置 /id，JSON string，Go uuid.UUID，原因 invalid uuid]
+36</code></pre>
+    <ul class="notes">
+      <li><code>uuid.New()</code> 產生一個新的 UUID，用的是適合大多數用途的演算法；需要指定版本時用 <code>NewV4</code>（隨機）或 <code>NewV7</code>（開頭是時間，依產生的順序遞增，適合當資料庫的主鍵）。</li>
+      <li>格式不對的字串解碼時就會被擋下來，不用另外檢查。</li>
+    </ul>
+    <p>別人的型別不能加方法。v2 讓<strong>呼叫的一方</strong>指定某個型別怎麼編碼：<code>json.WithMarshalers</code>。time.Duration 在 v2 沒有預設的 JSON 格式（v1 編成奈秒數，很少是對方想要的），直接編碼會失敗；可以指定把它寫成 <code>"3h30m0s"</code>：</p>
+    <pre class="code" data-src="chapters/23-json/custom.go#Recipe,durationDemo"><code>type Recipe struct {
+	Dish string        `json:"dish"`
+	Prep time.Duration `json:"prep"`
+}
+
+func durationDemo() {
+	r := Recipe{Dish: "紅燒牛肉", Prep: 3*time.Hour + 30*time.Minute}
+	_, err := json.Marshal(r)
+	fmt.Println(explain(err))
+
+	asText := json.MarshalFunc(func(d time.Duration) ([]byte, error) {
+		return json.Marshal(d.String())
+	})
+	b, err := json.Marshal(r, json.WithMarshalers(asText))
+	fmt.Println(string(b), err)
+}</code></pre>
+    <pre class="out" data-example="chapters/23-json#Example_durationDemo"><code>[位置 /prep，Go time.Duration，原因 no default representation]
+{"dish":"紅燒牛肉","prep":"3h30m0s"} &lt;nil&gt;</code></pre>
+    <ul class="notes">
+      <li><code>json.MarshalFunc</code> 用泛型推論出它處理的是 time.Duration，所有 Duration 欄位都會用這個函式，不管在第幾層。</li>
+      <li>解碼對應的是 <code>json.WithUnmarshalers</code> 和 <code>json.UnmarshalFunc</code>。</li>
+      <li>如果 Duration 是你自己 struct 的欄位，也可以換成一個實作 MarshalText 的自訂型別，讓所有呼叫的人都不用記得加選項。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="stream">
+    <h2 id="stream">6. 串流：一次一筆</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 196" role="img" aria-label="資料從 io.Reader 流進 jsontext.Decoder，每次解出一筆 Sale 再加總。前面的筆已經處理完，可以丟掉；這一筆正在處理；後面的還在 Reader 裡沒讀。讀到結尾回傳 io.EOF">
+        <title>一次只解一筆</title>
+        <rect class="soft" x="16" y="30" width="90" height="44" rx="8"/>
+        <text class="sm mono" x="61" y="57" text-anchor="middle">io.Reader</text>
+        <path class="wire" d="M106 52 H118"/>
+        <path class="tip" d="M130 52 L118 46 L118 58 Z"/>
+        <rect class="acc" x="130" y="30" width="140" height="44" rx="8"/>
+        <text class="sm mono" x="200" y="57" text-anchor="middle">jsontext.Decoder</text>
+        <path class="wire" d="M270 52 H282"/>
+        <path class="tip" d="M294 52 L282 46 L282 58 Z"/>
+        <rect class="soft" x="294" y="30" width="80" height="44" rx="8"/>
+        <text class="sm" x="334" y="57" text-anchor="middle">一筆 Sale</text>
+        <path class="wire" d="M374 52 H386"/>
+        <path class="tip" d="M398 52 L386 46 L386 58 Z"/>
+        <rect class="soft" x="398" y="30" width="66" height="44" rx="8"/>
+        <text class="sm" x="431" y="57" text-anchor="middle">加總</text>
+        <rect class="soft dash" x="60" y="104" width="54" height="26" rx="4"/>
+        <rect class="soft dash" x="122" y="104" width="54" height="26" rx="4"/>
+        <rect class="acc" x="184" y="104" width="54" height="26" rx="4"/>
+        <rect class="soft" x="246" y="104" width="54" height="26" rx="4"/>
+        <rect class="soft" x="308" y="104" width="54" height="26" rx="4"/>
+        <rect class="soft" x="370" y="104" width="54" height="26" rx="4"/>
+        <text class="sm" x="118" y="150" text-anchor="middle">處理完</text>
+        <text class="sm t-acc" x="211" y="150" text-anchor="middle">這一筆</text>
+        <text class="sm" x="335" y="150" text-anchor="middle">還沒讀</text>
+        <text class="sm" x="240" y="182" text-anchor="middle">UnmarshalDecode 每次只解下一個值，讀到結尾回傳 io.EOF</text>
+      </svg>
+      <figcaption>Unmarshal 要先把整份 JSON 讀進記憶體；Decoder 邊讀邊解，記憶體裡同時只有一筆，檔案再大都一樣。</figcaption>
+    </figure>
+    <p>log、匯出的資料常用 <strong>JSON Lines</strong> 格式：每一行是一筆完整的 JSON。這種檔案可能有好幾 GB，不能整個讀進來再 Unmarshal。<code>jsontext.NewDecoder(r)</code> 從 io.Reader 一邊讀一邊解，<code>json.UnmarshalDecode</code> 每次只解出下一個值：</p>
+    <pre class="code" data-src="chapters/23-json/stream.go#Sale,sumJSONLines,linesDemo"><code>type Sale struct {
+	Shop   string `json:"shop"`
+	Amount int    `json:"amount"`
+}
+
+func sumJSONLines(r io.Reader) (map[string]int, error) {
+	dec := jsontext.NewDecoder(r)
+	totals := map[string]int{}
+	for n := 1; ; n++ {
+		var s Sale
+		err := json.UnmarshalDecode(dec, &amp;s)
+		if errors.Is(err, io.EOF) {
+			return totals, nil
+		}
+		if err != nil {
+			return nil, fmt.Errorf("第 %d 筆：%w", n, err)
+		}
+		totals[s.Shop] += s.Amount
+	}
+}
+
+func linesDemo() {
+	const input = `{"shop":"台北店","amount":1280}
+{"shop":"台中店","amount":960}
+
+{"shop":"台北店","amount":450}
+`
+	totals, err := sumJSONLines(strings.NewReader(input))
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	for _, shop := range slices.Sorted(maps.Keys(totals)) {
+		fmt.Println(shop, totals[shop])
+	}
+
+	_, err = sumJSONLines(strings.NewReader(input + `{"shop":"高雄店","amount":"三百"}`))
+	fmt.Println(explain(err))
+}</code></pre>
+    <pre class="out" data-example="chapters/23-json#Example_linesDemo"><code>台中店 960
+台北店 1730
+第 4 筆：[位置 /amount，JSON string，Go int]</code></pre>
+    <ul class="notes">
+      <li>值和值之間的空白、空行都會被略過。讀到結尾時回傳 <code>io.EOF</code>，用 errors.Is 判斷。</li>
+      <li>錯誤加上「第幾筆」：JSON Pointer 只知道是那一筆裡的哪個欄位，不知道是第幾筆。</li>
+      <li>HTTP 的 request body 也是 io.Reader，<code>json.UnmarshalRead(r.Body, &amp;v)</code> 一行就能解一個值（「<a href="26-http.html">HTTP 服務</a>」那一章會用到）。</li>
+    </ul>
+    <p>另一種大檔案是一個很大的 JSON 陣列。用 <code>ReadToken</code> 先讀掉開頭的 <code>[</code>，再用 <code>PeekKind</code> 偷看下一個是不是 <code>]</code>，不是的話就解一個元素：</p>
+    <pre class="code" data-src="chapters/23-json/stream.go#countExpensive,arrayDemo"><code>func countExpensive(r io.Reader, limit int) (int, error) {
+	dec := jsontext.NewDecoder(r)
+	tok, err := dec.ReadToken() // 先讀掉開頭的 [
+	if err != nil {
+		return 0, err
+	}
+	if tok.Kind() != '[' {
+		return 0, fmt.Errorf("要的是陣列，開頭卻是 %v", tok.Kind())
+	}
+	n := 0
+	for dec.PeekKind() != ']' {
+		var item MenuItem
+		if err := json.UnmarshalDecode(dec, &amp;item); err != nil {
+			return 0, err
+		}
+		if item.Price &gt; limit {
+			n++
+		}
+	}
+	return n, nil
+}
+
+func arrayDemo() {
+	menu := `[{"name":"滷肉飯","price":35},{"name":"雞腿飯","price":100},{"name":"牛肉麵","price":180}]`
+	fmt.Println(countExpensive(strings.NewReader(menu), 90))
+	fmt.Println(countExpensive(strings.NewReader(`{"name":"滷肉飯"}`), 90))
+}</code></pre>
+    <pre class="out" data-example="chapters/23-json#Example_arrayDemo"><code>2 &lt;nil&gt;
+0 要的是陣列，開頭卻是 {</code></pre>
+    <p>寫的方向用 <code>jsontext.NewEncoder(w)</code> 加 <code>json.MarshalEncode</code>。Encoder 每寫完一個值就換行，剛好是 JSON Lines；只寫一個值時，用 <code>json.MarshalWrite(w, v)</code>，它不加換行：</p>
+    <pre class="code" data-src="chapters/23-json/stream.go#encodeDemo"><code>func encodeDemo() {
+	enc := jsontext.NewEncoder(os.Stdout)
+	for _, s := range []Sale{{"台北店", 1730}, {"台中店", 960}} {
+		if err := json.MarshalEncode(enc, s); err != nil {
+			fmt.Println(err)
+			return
+		}
+	}
+}</code></pre>
+    <pre class="out" data-example="chapters/23-json#Example_encodeDemo"><code>{"shop":"台北店","amount":1730}
+{"shop":"台中店","amount":960}</code></pre>
+  </section>
+
+  <section aria-labelledby="v1">
+    <h2 id="v1">7. 現有程式碼裡的 encoding/json</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 252" role="img" aria-label="v1 和 v2 的差別：nil slice 和 map，v1 是 null，v2 是空陣列和空物件；欄位名稱 v1 不分大小寫，v2 分；重複的名稱 v1 後面的蓋掉前面的，v2 是錯誤；omitempty 遇到 0，v1 省略，v2 輸出；小於、大於、和號，v1 跳脫，v2 原樣；time.Duration，v1 是奈秒數字，v2 是錯誤">
+        <title>v1 和 v2 不一樣的地方</title>
+        <text class="sm bold" x="255" y="22" text-anchor="middle">v1</text>
+        <text class="sm bold" x="395" y="22" text-anchor="middle">v2</text>
+        <text class="sm mono" x="255" y="42" text-anchor="middle">encoding/json</text>
+        <text class="sm mono" x="395" y="42" text-anchor="middle">encoding/json/v2</text>
+        <rect class="soft" x="16" y="56" width="448" height="28" rx="6"/>
+        <text class="sm" x="90" y="75" text-anchor="middle">nil slice、map</text>
+        <text class="sm mono" x="255" y="75" text-anchor="middle">null</text>
+        <text class="sm mono" x="395" y="75" text-anchor="middle">[]、{}</text>
+        <rect class="soft" x="16" y="88" width="448" height="28" rx="6"/>
+        <text class="sm" x="90" y="107" text-anchor="middle">欄位名稱</text>
+        <text class="sm" x="255" y="107" text-anchor="middle">不分大小寫</text>
+        <text class="sm" x="395" y="107" text-anchor="middle">分大小寫</text>
+        <rect class="soft" x="16" y="120" width="448" height="28" rx="6"/>
+        <text class="sm" x="90" y="139" text-anchor="middle">重複的名稱</text>
+        <text class="sm" x="255" y="139" text-anchor="middle">後面的蓋掉前面的</text>
+        <text class="sm t-hot" x="395" y="139" text-anchor="middle">錯誤</text>
+        <rect class="soft" x="16" y="152" width="448" height="28" rx="6"/>
+        <text class="sm" x="90" y="171" text-anchor="middle">omitempty 的 0</text>
+        <text class="sm" x="255" y="171" text-anchor="middle">省略</text>
+        <text class="sm" x="395" y="171" text-anchor="middle">輸出</text>
+        <rect class="soft" x="16" y="184" width="448" height="28" rx="6"/>
+        <text class="sm" x="90" y="203" text-anchor="middle">&lt; &gt; &amp;</text>
+        <text class="sm mono" x="255" y="203" text-anchor="middle"><</text>
+        <text class="sm" x="395" y="203" text-anchor="middle">原樣輸出</text>
+        <rect class="soft" x="16" y="216" width="448" height="28" rx="6"/>
+        <text class="sm mono" x="90" y="235" text-anchor="middle">time.Duration</text>
+        <text class="sm" x="255" y="235" text-anchor="middle">奈秒數字</text>
+        <text class="sm t-hot" x="395" y="235" text-anchor="middle">錯誤</text>
+      </svg>
+      <figcaption>常碰到的幾個差別。完整的清單在 encoding/json 套件文件的 Migrating to v2 一段。</figcaption>
+    </figure>
+    <p>你會在現有的程式碼裡看到大量的 <code>encoding/json</code>，也就是 v1。函式名稱和用法幾乎一樣，但有幾個預設的行為不同。同樣的 struct、同樣的輸入，兩邊各跑一次：</p>
+    <pre class="code" data-src="chapters/23-json/v1.go#Dish,v1v2Demo"><code>type Dish struct {
+	Name  string   `json:"name"`
+	Price int      `json:"price,omitempty"`
+	Tags  []string `json:"tags"`
+}
+
+func v1v2Demo() {
+	d := Dish{Name: "蚵仔煎&lt;招牌&gt;"}
+	b1, err1 := jsonv1.Marshal(d)
+	b2, err2 := json.Marshal(d)
+	fmt.Println("v1", string(b1), err1)
+	fmt.Println("v2", string(b2), err2)
+
+	b3, err3 := json.Marshal(d, jsonv1.DefaultOptionsV1()) // v2 的函式加上 v1 的選項，結果和 v1 一樣
+	fmt.Println("v2+V1選項", string(b3), err3)
+
+	in := []byte(`{"NAME":"大腸麵線","price":60}`)
+	var a, b Dish
+	err1 = jsonv1.Unmarshal(in, &amp;a)
+	err2 = json.Unmarshal(in, &amp;b)
+	fmt.Printf("v1 %q %v\n", a.Name, err1)
+	fmt.Printf("v2 %q %v\n", b.Name, err2)
+
+	dup := []byte(`{"name":"甲","name":"乙"}`)
+	err1 = jsonv1.Unmarshal(dup, &amp;a)
+	err2 = json.Unmarshal(dup, &amp;b)
+	fmt.Println("v1", a.Name, err1)
+	fmt.Println("v2", err2)
+}</code></pre>
+    <pre class="out" data-example="chapters/23-json#Example_v1v2Demo"><code>v1 {"name":"蚵仔煎\u003c招牌\u003e","tags":null} &lt;nil&gt;
+v2 {"name":"蚵仔煎&lt;招牌&gt;","price":0,"tags":[]} &lt;nil&gt;
+v2+V1選項 {"name":"蚵仔煎\u003c招牌\u003e","tags":null} &lt;nil&gt;
+v1 "大腸麵線" &lt;nil&gt;
+v2 "" &lt;nil&gt;
+v1 乙 &lt;nil&gt;
+v2 jsontext: duplicate object member name "name"</code></pre>
+    <ul class="notes">
+      <li>v1 把 <code>&lt;</code>、<code>&gt;</code>、<code>&amp;</code> 跳脫成 <code><</code> 這種格式，是為了 JSON 被直接嵌進 HTML 時的安全；v2 只跳脫 JSON 語法需要的字元。</li>
+      <li>v1 不分大小寫，<code>NAME</code> 也對得到 <code>name</code>；v2 對不到，要放寬時在欄位的 tag 加 <code>case:ignore</code>，或傳 <code>json.MatchCaseInsensitiveNames(true)</code>。</li>
+      <li>名稱重複時，v1 用後面那一個。不同的程式對重複名稱的處理不一樣，一邊檢查時看到「甲」、另一邊執行時用「乙」，就是安全漏洞的來源，所以 v2 直接拒絕。</li>
+      <li>第三行：v2 的函式加上 <code>jsonv1.DefaultOptionsV1()</code>，行為就和 v1 一樣。把 import 換成 v2 但想先保持原本的行為時，可以這樣一步一步改。</li>
+    </ul>
+    <p>v1 的串流和選項是另一套 API。看到這些寫法時，知道它們在做什麼：</p>
+    <pre class="code" data-src="chapters/23-json/v1.go#v1APIDemo"><code>func v1APIDemo() {
+	dec := jsonv1.NewDecoder(strings.NewReader(`{"name":"肉圓","price":50,"size":"大"}`))
+	dec.DisallowUnknownFields()
+	var d Dish
+	fmt.Println(dec.Decode(&amp;d))
+
+	b, err := jsonv1.MarshalIndent(Dish{Name: "肉圓", Price: 50, Tags: []string{"彰化"}}, "", "  ")
+	fmt.Println(string(b), err)
+}</code></pre>
+    <pre class="out" data-example="chapters/23-json#Example_v1APIDemo"><code>json: unknown field "size"
+{
+  "name": "肉圓",
+  "price": 50,
+  "tags": [
+    "彰化"
+  ]
+} &lt;nil&gt;</code></pre>
+    <div class="table-wrap">
+      <table class="vs">
+        <thead><tr><th scope="col">要做的事</th><th scope="col">v1 encoding/json</th><th scope="col">v2 encoding/json/v2</th></tr></thead>
+        <tbody>
+          <tr><th scope="row">從 io.Reader 解一個值</th><td><code>json.NewDecoder(r).Decode(&amp;v)</code></td><td><code>json.UnmarshalRead(r, &amp;v)</code></td></tr>
+          <tr><th scope="row">寫一個值到 io.Writer</th><td><code>json.NewEncoder(w).Encode(v)</code>（會換行）</td><td><code>json.MarshalWrite(w, v)</code>（不換行）</td></tr>
+          <tr><th scope="row">一次讀一筆</th><td><code>dec.Decode(&amp;v)</code> 迴圈</td><td><code>json.UnmarshalDecode(dec, &amp;v)</code> 迴圈</td></tr>
+          <tr><th scope="row">不認得的欄位算錯誤</th><td><code>dec.DisallowUnknownFields()</code></td><td><code>json.RejectUnknownMembers(true)</code></td></tr>
+          <tr><th scope="row">縮排</th><td><code>json.MarshalIndent(v, "", "  ")</code></td><td><code>json.Marshal(v, jsontext.WithIndent("  "))</code></td></tr>
+          <tr><th scope="row">保留一段原始的 JSON</th><td><code>json.RawMessage</code></td><td><code>jsontext.Value</code></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <ul class="notes">
+      <li>Go 1.27 起 v1 的底層就是 v2，行為維持不變，但錯誤訊息的文字可能和以前不同。遇到相容性問題，可以在編譯時設定 <code>GOEXPERIMENT=nojsonv2</code> 換回舊的實作，官方預計之後會拿掉這個選項。</li>
+      <li>v1 沒有被棄用，不必急著改寫。新的程式用 v2；改舊的程式時，先換 import 加上 DefaultOptionsV1，再逐一拿掉不需要的舊行為。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="csv">
+    <h2 id="csv">8. encoding/csv</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 192" role="img" aria-label="一行 CSV：AB-12345678 逗號 用雙引號包住的「珍珠奶茶, 微糖去冰」逗號 55，讀出來是三個欄位。欄位裡有逗號或換行時整個欄位用雙引號包起來，欄位裡的雙引號寫成兩個">
+        <title>一行 CSV，三個欄位</title>
+        <text class="sm mono" x="240" y="30" text-anchor="middle">AB-12345678,"珍珠奶茶, 微糖去冰",55</text>
+        <rect class="acc" x="40" y="52" width="120" height="36" rx="6"/>
+        <text class="sm mono" x="100" y="75" text-anchor="middle">AB-12345678</text>
+        <rect class="acc" x="176" y="52" width="170" height="36" rx="6"/>
+        <text class="sm" x="261" y="75" text-anchor="middle">珍珠奶茶, 微糖去冰</text>
+        <rect class="acc" x="362" y="52" width="78" height="36" rx="6"/>
+        <text class="sm mono" x="401" y="75" text-anchor="middle">55</text>
+        <text class="sm" x="240" y="124" text-anchor="middle">欄位裡有逗號或換行：整個欄位用雙引號包起來</text>
+        <text class="sm" x="240" y="148" text-anchor="middle">欄位裡的雙引號：寫成兩個 ""</text>
+        <text class="sm" x="240" y="172" text-anchor="middle">csv 套件寫的時候自動加上，讀的時候自動還原</text>
+      </svg>
+      <figcaption>CSV 不是「用逗號切開」這麼簡單。自己用 strings.Split 處理，碰到品項名稱裡的逗號就切錯了。</figcaption>
+    </figure>
+    <p>CSV 是和試算表交換資料最常見的格式：會計要的發票明細、從後台匯出的菜單。標準庫的 <code>encoding/csv</code> 處理引號、逗號、換行這些細節，你只要處理 <code>[]string</code>：</p>
+    <pre class="code" data-src="chapters/23-json/csv.go#InvoiceLine,writeInvoices,readInvoices"><code>type InvoiceLine struct {
+	Number string // 發票號碼
+	Item   string
+	Amount int
+}
+
+func writeInvoices(w io.Writer, lines []InvoiceLine) error {
+	cw := csv.NewWriter(w)
+	if err := cw.Write([]string{"發票號碼", "品項", "金額"}); err != nil {
+		return err
+	}
+	for _, l := range lines {
+		if err := cw.Write([]string{l.Number, l.Item, strconv.Itoa(l.Amount)}); err != nil {
+			return err
+		}
+	}
+	cw.Flush() // csv.Writer 有緩衝區，最後一定要 Flush，再用 Error 檢查寫入有沒有出錯
+	return cw.Error()
+}
+
+func readInvoices(r io.Reader) ([]InvoiceLine, error) {
+	cr := csv.NewReader(r)
+	cr.FieldsPerRecord = 3
+	if _, err := cr.Read(); err != nil { // 標題
+		return nil, err
+	}
+	var lines []InvoiceLine
+	for {
+		rec, err := cr.Read()
+		if errors.Is(err, io.EOF) {
+			return lines, nil
+		}
+		if err != nil {
+			return nil, err
+		}
+		amount, err := strconv.Atoi(rec[2])
+		if err != nil {
+			line, _ := cr.FieldPos(2)
+			return nil, fmt.Errorf("第 %d 行：金額 %q 不是整數", line, rec[2])
+		}
+		lines = append(lines, InvoiceLine{Number: rec[0], Item: rec[1], Amount: amount})
+	}
+}</code></pre>
+    <pre class="code" data-src="chapters/23-json/csv.go#csvDemo"><code>func csvDemo() {
+	var buf bytes.Buffer
+	err := writeInvoices(&amp;buf, []InvoiceLine{
+		{"AB-12345678", "排骨飯", 90},
+		{"AB-12345678", "珍珠奶茶, 微糖去冰", 55},
+		{"AB-12345679", `"招牌"滷肉飯`, 35},
+	})
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	fmt.Print(buf.String())
+
+	lines, err := readInvoices(&amp;buf)
+	fmt.Printf("%d 行 %q %v\n", len(lines), lines[1].Item, err)
+
+	_, err = readInvoices(strings.NewReader("發票號碼,品項,金額\nAB-1,紅茶,30\nAB-2,綠茶,二十\n"))
+	fmt.Println(err)
+	_, err = readInvoices(strings.NewReader("發票號碼,品項,金額\nAB-1,紅茶\n"))
+	fmt.Println(err)
+}</code></pre>
+    <pre class="out" data-example="chapters/23-json#Example_csvDemo"><code>發票號碼,品項,金額
+AB-12345678,排骨飯,90
+AB-12345678,"珍珠奶茶, 微糖去冰",55
+AB-12345679,"""招牌""滷肉飯",35
+3 行 "珍珠奶茶, 微糖去冰" &lt;nil&gt;
+第 3 行：金額 "二十" 不是整數
+record on line 2: wrong number of fields</code></pre>
+    <ul class="notes">
+      <li>csv.Writer 有緩衝區（和 <a href="20-files.html#stream">20 章</a>的 bufio.Writer 一樣），最後一定要 <code>Flush</code>，再用 <code>Error</code> 檢查有沒有寫入失敗。Write 本身不會回報緩衝區之後的錯誤。</li>
+      <li><code>FieldsPerRecord = 3</code> 要求每一行剛好 3 個欄位；預設值 0 的意思是「每一行都要和第一行一樣多」，設成負數則不檢查。</li>
+      <li>錯誤訊息裡的行號用 <code>FieldPos</code>（Go 1.17 起）取得：欄位裡有換行時，「第幾筆」和「檔案的第幾行」不一樣，FieldPos 給的是檔案的行號（練習 5）。</li>
+      <li>CSV 沒有型別，所有欄位都是字串，數字要自己用 strconv 轉、自己檢查。</li>
+      <li>欄位的分隔符號可以改：<code>cr.Comma = '\t'</code> 就能讀 TSV。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="pitfalls">
+    <h2 id="pitfalls">常見錯誤</h2>
+    <h3 id="pit-unexported">1. 欄位小寫開頭，輸出裡沒有它</h3>
+    <p>json 套件在另一個 package，看不到未匯出的欄位，加了 tag 也沒用。要輸出的欄位一定大寫開頭，JSON 的名稱用 tag 改（第 1 節）。</p>
+
+    <h3 id="pit-silent">2. 欄位名稱打錯，被安靜地略過</h3>
+    <p>大小寫不同、拼錯的欄位都不會報錯，你拿到的是零值。外部來的 JSON 加上 RejectUnknownMembers，再自己檢查必填的欄位（第 3 節、練習 1）。</p>
+
+    <h3 id="pit-error-text">3. 比對錯誤訊息的文字</h3>
+    <p>v2 故意讓同一個錯誤的訊息每次執行可能不同。判斷錯誤用 errors.Is 比對 ErrUnknownName 這類值，或用 errors.AsType 取出 SemanticError 看欄位（第 3 節）。</p>
+
+    <h3 id="pit-float">4. 大整數解到 any 或 float64</h3>
+    <p>float64 放不下 19 位數的 ID，後面的位數會變。解到 int64 欄位，或在雙方約定用字串傳（<code>string</code> 選項，第 2、3 節）。</p>
+
+    <h3 id="pit-omitempty-zero">5. 從 v1 搬過來，數字上的 omitempty 不再省略 0</h3>
+    <p>v2 的 omitempty 看的是 JSON 是不是空的，0 不算空的。數字、bool、time.Time 要省略零值，改用 omitzero，它在 v1、v2 的意思一樣（第 2 節）。</p>
+
+    <h3 id="pit-map-order">6. 依賴 map 的輸出順序</h3>
+    <p>v2 輸出 map 的順序每次都可能不同。測試要比對字串、或要計算雜湊時，加上 Deterministic(true)，或改用 struct（第 1 節）。</p>
+
+    <h3 id="pit-value-receiver">7. UnmarshalText、UnmarshalJSON 用值 receiver</h3>
+    <p>方法改到的是複本，解碼沒有錯誤，值卻還是零值。解碼的方法 receiver 一定是指標（第 5 節、練習 7）。</p>
+
+    <h3 id="pit-csv-flush">8. csv.Writer 沒有 Flush，或沒有檢查 Error</h3>
+    <p>最後幾行還在緩衝區裡，檔案少了一段；寫入失敗也不會有人知道（第 8 節）。</p>
+  </section>
+
+  <section aria-labelledby="java">
+    <h2 id="java">從 Java 來的你</h2>
+    <div class="table-wrap">
+      <table class="vs">
+        <thead><tr><th scope="col">主題</th><th scope="col">Java（Jackson）</th><th scope="col">Go</th></tr></thead>
+        <tbody>
+          <tr><th scope="row">函式庫</th><td class="java">第三方的 Jackson、Gson</td><td>標準庫的 <code>encoding/json/v2</code></td></tr>
+          <tr><th scope="row">欄位名稱</th><td class="java"><code>@JsonProperty("name")</code></td><td>struct tag <code>json:"name"</code></td></tr>
+          <tr><th scope="row">不輸出</th><td class="java"><code>@JsonIgnore</code></td><td><code>json:"-"</code></td></tr>
+          <tr><th scope="row">省略空值</th><td class="java"><code>@JsonInclude(NON_NULL)</code>、<code>NON_EMPTY</code></td><td><code>omitzero</code>、<code>omitempty</code></td></tr>
+          <tr><th scope="row">不認得的欄位</th><td class="java">Jackson 預設是錯誤（Spring Boot 把它關掉）</td><td>預設略過，<code>RejectUnknownMembers(true)</code> 變成錯誤</td></tr>
+          <tr><th scope="row">自訂格式</th><td class="java"><code>JsonSerializer</code>、<code>@JsonValue</code></td><td><code>MarshalText</code>、<code>MarshalJSON</code>、<code>WithMarshalers</code></td></tr>
+          <tr><th scope="row">結構未知</th><td class="java"><code>JsonNode</code></td><td><code>map[string]any</code>、<code>jsontext.Value</code></td></tr>
+          <tr><th scope="row">串流</th><td class="java"><code>JsonParser</code></td><td><code>jsontext.Decoder</code></td></tr>
+          <tr><th scope="row">CSV</th><td class="java">第三方的 OpenCSV、Commons CSV</td><td>標準庫的 <code>encoding/csv</code></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>Jackson 用 annotation 和執行時的設定物件（ObjectMapper）控制行為，Go 把大部分設定寫在 struct tag 上，其餘的用每次呼叫時傳入的選項。沒有全域的設定，同一個程式裡不同的呼叫可以用不同的規則。</p>
+  </section>
+
+  <section aria-labelledby="exercises">
+    <h2 id="exercises">練習</h2>
+    <p>題目在 <code>exercises/23-json/exercises.go</code>，共用的型別在 doc.go：</p>
+    <pre class="code" data-src="exercises/23-json/doc.go#Order,Line"><code>type Order struct {
+	ID       string `json:"id"`
+	Customer string `json:"customer"`
+	Items    []Line `json:"items"`
+	Note     string `json:"note,omitempty"`
+}
+
+type Line struct {
+	Dish string `json:"dish"`
+	Qty  int    `json:"qty"`
+}</code></pre>
+    <pre class="shell"><code>go test ./exercises/23-json/                   <span class="c"># 跑全部練習</span>
+go test ./exercises/23-json/ -run TestMoney    <span class="c"># 只跑一題</span>
+go test -tags solution ./exercises/23-json/    <span class="c"># 跑參考解答</span></code></pre>
+    <ol class="exercises">
+      <li>
+        <h3><span class="level l1">入門</span>練習 1：收單</h3>
+        <p>嚴格地解析一筆訂單。</p>
+        <pre class="code" data-src="exercises/23-json/exercises.go#DecodeOrder"><code>func DecodeOrder(data []byte) (Order, error) {
+	// TODO: 實作
+	return Order{}, nil
+}</code></pre>
+        <p>測試：<code>TestDecodeOrder</code>。</p>
+        <details><summary>提示</summary><p>Unmarshal 加上 <code>json.RejectUnknownMembers(true)</code>，解碼成功之後再一條一條檢查內容。有錯時回傳 <code>Order{}</code>，不要回傳檢查到一半的值。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l2">進階</span>練習 2：一整天的訂單</h3>
+        <p>JSON Lines，一筆壞了就停下來，並指出是第幾筆。</p>
+        <pre class="code" data-src="exercises/23-json/exercises.go#ReadOrders"><code>func ReadOrders(r io.Reader) ([]Order, error) {
+	// TODO: 實作
+	return nil, nil
+}</code></pre>
+        <p>測試：<code>TestReadOrders</code>。</p>
+        <details><summary>提示</summary><p>檢查的規則不要再寫一次。<code>dec.ReadValue()</code> 回傳下一個完整的 JSON 值（jsontext.Value，也就是 []byte），直接交給練習 1 的 DecodeOrder。讀到結尾時 ReadValue 回傳 io.EOF。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l2">進階</span>練習 3：所有價格加起來</h3>
+        <p>不知道結構，只知道要找 price。</p>
+        <pre class="code" data-src="exercises/23-json/exercises.go#SumPrices"><code>func SumPrices(data []byte) (int, error) {
+	// TODO: 實作
+	return 0, nil
+}</code></pre>
+        <p>測試：<code>TestSumPrices</code>。</p>
+        <details><summary>提示</summary><p>解到 any，寫一個遞迴函式，用 type switch 處理 <code>map[string]any</code> 和 <code>[]any</code>（<a href="10-interfaces.html#switch">10 章</a>）。price 的值斷言成 float64，再用 <code>f != math.Trunc(f)</code> 檢查有沒有小數。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l2">進階</span>練習 4：金額的格式</h3>
+        <p>讓 Money 在 JSON 裡寫成 "NT$1,280"。</p>
+        <pre class="code" data-src="exercises/23-json/doc.go#Money,Receipt"><code>type Money int
+
+type Receipt struct {
+	Order string `json:"order"`
+	Total Money  `json:"total"`
+}</code></pre>
+        <pre class="code" data-src="exercises/23-json/exercises.go#Money.MarshalText,Money.UnmarshalText"><code>func (m Money) MarshalText() ([]byte, error) {
+	// TODO: 實作
+	return nil, nil
+}
+
+func (m *Money) UnmarshalText(b []byte) error {
+	// TODO: 實作
+	return nil
+}</code></pre>
+        <p>測試：<code>TestMoney</code>。</p>
+        <details><summary>提示</summary><p>寫的時候先處理負號，再把 <code>strconv.FormatInt</code> 的結果從右邊每三位插一個逗號：第 i 個數字前面要不要逗號，看 <code>(len(digits)-i)%3 == 0</code>。讀的時候用 <code>strings.CutPrefix</code> 拿掉 NT$，去掉逗號後確認只剩數字，再用 Atoi。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l2">進階</span>練習 5：菜單的 CSV</h3>
+        <p>欄位順序不固定，行號要正確。</p>
+        <pre class="code" data-src="exercises/23-json/doc.go#MenuRow"><code>type MenuRow struct {
+	Name     string
+	Category string
+	Price    int
+}</code></pre>
+        <pre class="code" data-src="exercises/23-json/exercises.go#ReadMenu"><code>func ReadMenu(r io.Reader) ([]MenuRow, error) {
+	// TODO: 實作
+	return nil, nil
+}</code></pre>
+        <p>測試：<code>TestReadMenu</code>。測試裡有一個品名跨了兩行。</p>
+        <details><summary>提示</summary><p>讀完標題後，建一個「欄位名稱 → 第幾欄」的 map，之後都用名稱找欄位。行號不要自己數，用 <code>cr.FieldPos(第幾欄)</code>。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l3">挑戰</span>練習 6：通知的 Router</h3>
+        <p>登記「這種通知的 data 是什麼型別、交給誰處理」。</p>
+        <pre class="code" data-src="exercises/23-json/exercises.go#Router,NewRouter,Router.Handle,Router.Dispatch"><code>type Router struct {
+	// TODO: 加上需要的欄位
+}
+
+func NewRouter() *Router {
+	// TODO: 實作
+	return &amp;Router{}
+}
+
+func (r *Router) Handle[T any](typ string, fn func(T) error) {
+	// TODO: 實作
+}
+
+func (r *Router) Dispatch(msg []byte) error {
+	// TODO: 實作
+	return nil
+}</code></pre>
+        <p>測試：<code>TestRouter</code>。</p>
+        <details><summary>提示</summary><p>Handle 是 Go 1.27 的 generic method（<a href="12-generics.html#methods">12 章</a>），T 只在 Handle 裡知道。所以 Handle 不存 fn 本身，而是存一個 <code>func(jsontext.Value) error</code> 的 closure：它把 data 解成 T，再呼叫 fn。Router 只需要一個 type 對應這種 closure 的 map；Dispatch 照第 4 節先解外層。</p></details>
+      </li>
+      <li>
+        <h3><span class="level fix">找錯</span>練習 7：杯型永遠是空的</h3>
+        <p>解碼沒有錯誤，杯型卻沒有被設定。</p>
+        <pre class="code" data-src="exercises/23-json/doc.go#CupSize,UnknownSize,CupSize.MarshalText,Drink"><code>type CupSize int
+
+const (
+	UnknownSize CupSize = iota
+	MediumCup           // 中杯
+	LargeCup            // 大杯
+)
+
+func (c CupSize) MarshalText() ([]byte, error) {
+	switch c {
+	case MediumCup:
+		return []byte("中杯"), nil
+	case LargeCup:
+		return []byte("大杯"), nil
+	}
+	return nil, fmt.Errorf("杯型 %d 不正確", int(c))
+}
+
+type Drink struct {
+	Name string  `json:"name"`
+	Size CupSize `json:"size"`
+}</code></pre>
+        <pre class="code" data-src="exercises/23-json/exercises.go#CupSize.UnmarshalText"><code>func (c CupSize) UnmarshalText(b []byte) error {
+	switch string(b) {
+	case "中杯":
+		c = MediumCup
+	case "大杯":
+		c = LargeCup
+	default:
+		return fmt.Errorf("不認得的杯型 %q", b)
+	}
+	return nil
+}</code></pre>
+        <p>測試：<code>TestCupSize</code>。</p>
+        <details><summary>提示</summary><p>常見錯誤 7。c 是複本，改它不會改到 Drink 裡的欄位。</p></details>
+      </li>
+    </ol>
+    <p><a href="https://github.com/xinqilin/GO-Playground/blob/main/exercises/23-json/solution.go">參考解答</a>：先自己寫完再看。測試通過的寫法都是對的。</p>
+  </section>
+
+  <section aria-labelledby="recap">
+    <h2 id="recap">重點回顧</h2>
+    <ul class="recap">
+      <li>新的程式用 encoding/json/v2；現有程式碼裡的 encoding/json 是 v1，用法相近，預設行為有幾個不同。</li>
+      <li>只有匯出的欄位會變成 JSON，名稱用 struct tag 指定；Unmarshal 要傳指標。</li>
+      <li>omitzero 看 Go 的零值，omitempty 看 JSON 是不是空的；數字和時間用 omitzero。</li>
+      <li>大整數 ID 用 string 選項傳，解到 any 的數字一律是 float64。</li>
+      <li>不認得的欄位預設被略過，外部來的 JSON 加 RejectUnknownMembers，再檢查必填欄位。</li>
+      <li>判斷錯誤看 SemanticError 的欄位或 errors.Is，不要比對訊息文字。</li>
+      <li>結構有好幾種時，用 jsontext.Value 先保留一段，看了 type 再解。</li>
+      <li>字串型的自訂格式實作 MarshalText 和指標 receiver 的 UnmarshalText；別人的型別用 WithMarshalers。</li>
+      <li>大檔案用 jsontext.Decoder 一筆一筆解；JSON Lines 用 UnmarshalDecode，大陣列加上 ReadToken、PeekKind。</li>
+      <li>CSV 用 encoding/csv，不要自己切逗號；寫完 Flush 再檢查 Error。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="further">
+    <h2 id="further">延伸閱讀</h2>
+    <ul class="notes">
+      <li>套件文件：<a href="https://pkg.go.dev/encoding/json/v2">encoding/json/v2</a>、<a href="https://pkg.go.dev/encoding/json/jsontext">encoding/json/jsontext</a>、<a href="https://pkg.go.dev/encoding/json">encoding/json</a>（開頭的 Migrating to v2 列出所有差別）、<a href="https://pkg.go.dev/encoding/csv">encoding/csv</a>、<a href="https://pkg.go.dev/uuid">uuid</a>。</li>
+      <li>Go 1.27 版本說明：<a href="https://go.dev/doc/go1.27#jsonv2">encoding/json/v2</a>、<a href="https://go.dev/doc/go1.27#uuid">uuid</a>。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="run">
+    <h2 id="run">動手跑</h2>
+    <p class="label">在 repo 根目錄</p>
+    <pre class="shell"><code>go run ./chapters/23-json                <span class="c"># 依序執行本章所有示範</span>
+go test ./chapters/23-json               <span class="c"># 驗證頁面上的每一段輸出</span>
+go test ./exercises/23-json/             <span class="c"># 做練習</span></code></pre>
+    <p><a href="https://github.com/xinqilin/GO-Playground/tree/main/chapters/23-json">在 GitHub 看本章完整程式碼</a>，或看<a href="https://github.com/xinqilin/GO-Playground/tree/main/exercises/23-json">練習題</a>。</p>
+  </section>
+</main>
+
+<nav class="pager" aria-label="章節導覽">
+  <a class="prev" href="22-time.html">← 22 時間</a>
+  <a class="home" href="index.html">目錄</a>
+  <a class="next" href="24-text.html">24 文字處理 →</a>
+</nav>
+</body>
+</html>

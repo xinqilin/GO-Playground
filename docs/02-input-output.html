@@ -4,150 +4,718 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>輸入與輸出｜Go 圖解手冊</title>
-<meta name="description" content="用 io.Reader 與 io.Writer 寫出好測試的輸入輸出、bufio.Scanner 逐行讀取，以及 Printf 的格式化動詞。">
+<meta name="description" content="Print、Sprint、Fprint 三個家族，Printf 的格式化動詞、寬度與精度，用 Stringer 決定型別怎麼印，標準輸入輸出與錯誤，bufio.Scanner 逐行讀取，以及用 io.Reader 與 io.Writer 寫出好測試的程式。">
 <link rel="stylesheet" href="assets/style.css">
 </head>
 <body>
 <header class="site">
   <a href="index.html">Go 圖解手冊</a>
-  <span class="count">02 / 24</span>
+  <span class="count">02 / 33</span>
 </header>
 
-<main class="page">
+<main class="page long">
   <header class="hero">
     <div class="num" aria-hidden="true">02</div>
     <p class="eyebrow">Part 1 · 基礎 · 第 02 章</p>
     <h1>輸入與輸出</h1>
-    <p class="analogy">程式是一台果汁機：從 io.Reader 倒進原料，從 io.Writer 倒出結果。</p>
+    <p class="analogy">程式是一台果汁機：從 io.Reader 倒進原料，從 io.Writer 倒出結果。原料從哪裡來、果汁倒到哪裡去，果汁機本身不用管。</p>
   </header>
 
-  <section aria-labelledby="look">
-    <h2 id="look">看圖</h2>
-    <div class="figs">
-      <figure class="fig">
-        <svg viewBox="0 0 480 228" role="img" aria-label="run 函式左邊接 io.Reader，可以是 os.Stdin、檔案或測試用的 strings.NewReader；右邊接 io.Writer，可以是 os.Stdout、檔案或測試用的 strings.Builder">
-          <title>run 只認得 io.Reader 和 io.Writer</title>
-          <text class="bold mono" x="80" y="40" text-anchor="middle">io.Reader</text>
-          <text class="bold mono" x="400" y="40" text-anchor="middle">io.Writer</text>
-          <rect class="soft" x="8" y="56" width="144" height="40" rx="6"/>
-          <rect class="soft" x="8" y="106" width="144" height="40" rx="6"/>
-          <rect class="hot" x="8" y="156" width="144" height="40" rx="6"/>
-          <text class="small mono" x="80" y="81" text-anchor="middle">os.Stdin</text>
-          <text class="small mono" x="80" y="131" text-anchor="middle">os.Open(檔案)</text>
-          <text class="small mono" x="80" y="181" text-anchor="middle">strings.NewReader</text>
-          <path class="wire" d="M152 76 H164 M152 126 H164 M152 176 H164 M164 76 V176 M164 126 H184"/>
-          <path class="tip" d="M196 126 L183 119 L183 133 Z"/>
-          <rect class="acc" x="196" y="86" width="88" height="80" rx="10"/>
-          <text class="mono bold" x="240" y="132" text-anchor="middle">run</text>
-          <path class="wire" d="M284 126 H316 M316 76 V176"/>
-          <path class="tip" d="M328 76 L315 69 L315 83 Z"/>
-          <path class="tip" d="M328 126 L315 119 L315 133 Z"/>
-          <path class="tip" d="M328 176 L315 169 L315 183 Z"/>
-          <rect class="soft" x="328" y="56" width="144" height="40" rx="6"/>
-          <rect class="soft" x="328" y="106" width="144" height="40" rx="6"/>
-          <rect class="hot" x="328" y="156" width="144" height="40" rx="6"/>
-          <text class="small mono" x="400" y="81" text-anchor="middle">os.Stdout</text>
-          <text class="small mono" x="400" y="131" text-anchor="middle">os.Create(檔案)</text>
-          <text class="small mono" x="400" y="181" text-anchor="middle">strings.Builder</text>
-          <text class="sm t-hot" x="80" y="218" text-anchor="middle">測試時用這個</text>
-          <text class="sm t-hot" x="400" y="218" text-anchor="middle">測試時用這個</text>
-        </svg>
-        <figcaption><code>run</code> 只認得 <code>io.Reader</code> 和 <code>io.Writer</code>：平常接鍵盤和螢幕，測試時換成字串。</figcaption>
-      </figure>
+  <nav class="toc-inline" aria-labelledby="toc-title">
+    <p class="label" id="toc-title">本章內容</p>
+    <ol>
+      <li><a href="#goals">本章你會學到</a></li>
+      <li><a href="#print">Print 家族</a></li>
+      <li><a href="#verbs">格式化動詞</a></li>
+      <li><a href="#width">寬度、精度與對齊</a></li>
+      <li><a href="#stringer">Stringer：型別自己決定怎麼印</a></li>
+      <li><a href="#streams">標準輸入、輸出與錯誤</a></li>
+      <li><a href="#scanner">一行一行讀：bufio.Scanner</a></li>
+      <li><a href="#rw">io.Reader 與 io.Writer</a></li>
+      <li><a href="#pitfalls">常見錯誤</a></li>
+      <li><a href="#java">從 Java 來的你</a></li>
+      <li><a href="#exercises">練習</a></li>
+      <li><a href="#recap">重點回顧</a></li>
+      <li><a href="#further">延伸閱讀</a></li>
+    </ol>
+  </nav>
 
-      <figure class="fig">
-        <svg viewBox="0 0 480 196" role="img" aria-label="輸入 3、4、5 三行，Scanner 每次 Scan 切下一行，第四次 Scan 回傳 false 表示讀完">
-          <title>Scanner 一次切一行</title>
-          <rect class="soft" x="40" y="24" width="90" height="44" rx="4"/>
-          <rect class="soft" x="150" y="24" width="90" height="44" rx="4"/>
-          <rect class="soft" x="260" y="24" width="90" height="44" rx="4"/>
-          <rect class="soft dash" x="370" y="24" width="90" height="44" rx="4"/>
-          <text class="mono" x="85" y="52" text-anchor="middle">3\n</text>
-          <text class="mono" x="195" y="52" text-anchor="middle">4\n</text>
-          <text class="mono" x="305" y="52" text-anchor="middle">5\n</text>
-          <text class="sm" x="415" y="51" text-anchor="middle">沒有了</text>
-          <path class="wire" d="M85 72 V104 M195 72 V104 M305 72 V104 M415 72 V104"/>
-          <path class="tip" d="M85 116 L78 103 L92 103 Z"/>
-          <path class="tip" d="M195 116 L188 103 L202 103 Z"/>
-          <path class="tip" d="M305 116 L298 103 L312 103 Z"/>
-          <path class="tip" d="M415 116 L408 103 L422 103 Z"/>
-          <text class="sm mono" x="93" y="94">Scan()</text>
-          <rect class="acc" x="40" y="122" width="90" height="56" rx="6"/>
-          <rect class="acc" x="150" y="122" width="90" height="56" rx="6"/>
-          <rect class="acc" x="260" y="122" width="90" height="56" rx="6"/>
-          <rect class="hot" x="370" y="122" width="90" height="56" rx="6"/>
-          <text class="lg" x="85" y="161" text-anchor="middle">3</text>
-          <text class="lg" x="195" y="161" text-anchor="middle">4</text>
-          <text class="lg" x="305" y="161" text-anchor="middle">5</text>
-          <text class="mono bold t-hot" x="415" y="156" text-anchor="middle">false</text>
-        </svg>
-        <figcaption><code>bufio.Scanner</code> 每次 <code>Scan()</code> 切下一行；回傳 false 就是讀完了，記得再檢查 <code>sc.Err()</code>。</figcaption>
-      </figure>
+  <section aria-labelledby="goals">
+    <h2 id="goals">本章你會學到</h2>
+    <ul class="notes">
+      <li>分清楚 Print、Sprint、Fprint 三個家族，以及 Print 和 Println 補空白的規則。</li>
+      <li>常用的格式化動詞：<code>%v</code>、<code>%+v</code>、<code>%#v</code>、<code>%T</code>、<code>%d</code>、<code>%x</code>、<code>%f</code>、<code>%q</code> 等等。</li>
+      <li>用寬度、精度和旗標排出對齊的表格，並知道中文為什麼對不齊。</li>
+      <li>寫一個 <code>String()</code> 方法，讓自訂型別印出有意義的文字。</li>
+      <li>stdin、stdout、stderr 的分工，以及結束碼（exit code）。</li>
+      <li>用 <code>bufio.Scanner</code> 逐行或逐字讀取，處理太長的行和讀取錯誤。</li>
+      <li>函式改收 <code>io.Reader</code> 和 <code>io.Writer</code>，讓程式容易測試；用 <code>bufio.Writer</code> 時記得 Flush。</li>
+    </ul>
+    <p>先備：<a href="01-variables.html">01 變數與型別</a>。範例裡會先用到 <code>for</code>、<code>if</code> 和 slice，寫法和其他語言差不多，完整的介紹在第 <a href="03-control-flow.html">03 章</a>和第 <a href="06-arrays-slices.html">06 章</a>。</p>
+  </section>
 
-      <figure class="fig">
-        <svg viewBox="0 0 480 240" role="img" aria-label="格式字串「共 %d 個，平均 %.2f」像填空題，3 填進 %d、4.0 填進 %.2f，印出「共 3 個，平均 4.00」">
-          <title>Printf 是填空題</title>
-          <rect class="acc" x="137" y="16" width="56" height="40" rx="6"/>
-          <rect class="acc" x="329" y="16" width="64" height="40" rx="6"/>
-          <text class="bold" x="165" y="43" text-anchor="middle">3</text>
-          <text class="bold" x="361" y="43" text-anchor="middle">4.0</text>
-          <path class="wire" d="M165 56 V74 M361 56 V74"/>
-          <path class="tip" d="M165 84 L158 71 L172 71 Z"/>
-          <path class="tip" d="M361 84 L354 71 L368 71 Z"/>
-          <rect class="soft" x="77" y="88" width="50" height="46" rx="4"/>
-          <rect class="hot" x="133" y="88" width="64" height="46" rx="4"/>
-          <rect class="soft" x="203" y="88" width="110" height="46" rx="4"/>
-          <rect class="hot" x="319" y="88" width="84" height="46" rx="4"/>
-          <text x="102" y="117" text-anchor="middle">共</text>
-          <text class="mono bold t-hot" x="165" y="117" text-anchor="middle">%d</text>
-          <text x="258" y="117" text-anchor="middle">個，平均</text>
-          <text class="mono bold t-hot" x="361" y="117" text-anchor="middle">%.2f</text>
-          <path class="wire" d="M240 140 V164"/>
-          <path class="tip" d="M240 176 L233 163 L247 163 Z"/>
-          <text class="sm mono" x="250" y="160">Printf</text>
-          <rect class="acc" x="77" y="182" width="326" height="46" rx="6"/>
-          <text class="bold" x="240" y="211" text-anchor="middle">共 3 個，平均 4.00</text>
-        </svg>
-        <figcaption>格式字串是填空題：<code>%d</code>、<code>%.2f</code> 是空格，後面的值依序填進去。</figcaption>
-      </figure>
+  <section aria-labelledby="print">
+    <h2 id="print">1. Print 家族</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 232" role="img" aria-label="Print、Println、Printf 印在終端機；Sprint、Sprintln、Sprintf 回傳字串；Fprint、Fprintln、Fprintf 寫到任何 io.Writer">
+        <title>三個家族，三種去向</title>
+        <rect class="soft" x="16" y="16" width="220" height="56" rx="8"/>
+        <text class="small mono bold" x="28" y="38">Print</text>
+        <text class="sm mono" x="28" y="60">Print Println Printf</text>
+        <path class="wire" d="M240 44 H268"/>
+        <path class="tip" d="M280 44 L267 37 L267 51 Z"/>
+        <rect class="acc" x="282" y="16" width="182" height="56" rx="8"/>
+        <text class="small bold" x="296" y="38">標準輸出</text>
+        <text class="sm" x="296" y="60">直接印在終端機</text>
+        <rect class="soft" x="16" y="88" width="220" height="56" rx="8"/>
+        <text class="small mono bold" x="28" y="110">Sprint</text>
+        <text class="sm mono" x="28" y="132">Sprint Sprintln Sprintf</text>
+        <path class="wire" d="M240 116 H268"/>
+        <path class="tip" d="M280 116 L267 109 L267 123 Z"/>
+        <rect class="acc" x="282" y="88" width="182" height="56" rx="8"/>
+        <text class="small bold" x="296" y="110">回傳 string</text>
+        <text class="sm" x="296" y="132">自己決定怎麼用</text>
+        <rect class="soft" x="16" y="160" width="220" height="56" rx="8"/>
+        <text class="small mono bold" x="28" y="182">Fprint</text>
+        <text class="sm mono" x="28" y="204">Fprint Fprintln Fprintf</text>
+        <path class="wire" d="M240 188 H268"/>
+        <path class="tip" d="M280 188 L267 181 L267 195 Z"/>
+        <rect class="acc" x="282" y="160" width="182" height="56" rx="8"/>
+        <text class="small bold" x="296" y="182">任何 io.Writer</text>
+        <text class="sm" x="296" y="204">檔案、網路、Builder…</text>
+      </svg>
+      <figcaption>字首決定去向：沒有字首印到終端機，S 回傳字串，F 寫到你指定的地方。字尾 ln 會換行，f 可以用格式字串。</figcaption>
+    </figure>
+    <p><code>fmt</code> 套件的輸出函式有九個，但只要記兩件事：<strong>字首決定寫到哪裡，字尾決定怎麼排</strong>。字尾沒有東西的版本（Print）把參數接在一起；<code>ln</code> 版本在參數之間補空白、最後換行；<code>f</code> 版本第一個參數是格式字串，後面的值依序填進去。</p>
+
+    <h3>Print 和 Println 補空白的規則不同</h3>
+    <pre class="code" data-src="chapters/02-input-output/print.go#printSpacing"><code>func printSpacing() {
+	fmt.Print("便當", 3, 85, "元", "\n")
+	fmt.Println("便當", 3, 85, "元")
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/02-input-output#Example_printSpacing"><code>便當3 85元
+便當 3 85 元</code></pre>
+    <p><code>Println</code> 一律在參數之間補一個空白。<code>Print</code> 則只在「兩邊都不是字串」的時候補：「便當」和 3 之間沒有空白，3 和 85 之間有，85 和「元」之間又沒有。這個規則很容易忘，實務上要控制格式時直接用 <code>Printf</code>，最不會出錯。</p>
+
+    <h3>S 開頭：回傳字串</h3>
+    <pre class="code" data-src="chapters/02-input-output/print.go#sprintDemo"><code>func sprintDemo() {
+	label := fmt.Sprintf("%s x%d", "排骨飯", 2)
+	total := fmt.Sprint(170)
+	fmt.Println(label + "：" + total + " 元")
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/02-input-output#Example_sprintDemo"><code>排骨飯 x2：170 元</code></pre>
+    <p><code>Sprintf</code> 是 Go 最常用的「組字串」方法，相當於 Java 的 <code>String.format</code>。錯誤訊息也常用同樣的格式字串來組：<code>fmt.Errorf</code> 的用法和 <code>Sprintf</code> 一樣，只是回傳一個 error，第 <a href="11-errors.html">11 章</a>會細講。</p>
+
+    <h3>F 開頭：寫到指定的地方</h3>
+    <pre class="code" data-src="chapters/02-input-output/print.go#fprintDemo"><code>func fprintDemo() {
+	fmt.Fprintln(os.Stdout, "寫到標準輸出")
+
+	var sb strings.Builder
+	fmt.Fprintf(&amp;sb, "%d 號請到 %d 號櫃台", 42, 3)
+	fmt.Println("Builder 裡有：" + sb.String())
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/02-input-output#Example_fprintDemo"><code>寫到標準輸出
+Builder 裡有：42 號請到 3 號櫃台</code></pre>
+    <p><code>Fprintf</code> 的第一個參數是一個 <code>io.Writer</code>，任何「可以寫入」的東西都行：<code>os.Stdout</code>、打開的檔案、網路連線，或者存在記憶體裡的 <code>strings.Builder</code>。其實 <code>fmt.Println(x)</code> 就是 <code>fmt.Fprintln(os.Stdout, x)</code> 的簡寫。<code>&amp;sb</code> 的 <code>&amp;</code> 是取位址，讓 Fprintf 寫進的是 sb 本身而不是一份複本，第 <a href="05-pointers.html">05 章</a>介紹。io.Writer 是什麼，第 7 節會說明。</p>
+  </section>
+
+  <section aria-labelledby="verbs">
+    <h2 id="verbs">2. 格式化動詞</h2>
+    <p>格式字串裡 <code>%</code> 開頭的部分叫做<strong>動詞</strong>（verb），它決定對應的值要怎麼印。動詞很多，但最常用的只有十幾個。</p>
+    <h3>萬用的 %v 和印型別的 %T</h3>
+    <pre class="code" data-src="chapters/02-input-output/verbs.go#item,verbsGeneral"><code>type item struct {
+	Name  string
+	Price int
+}
+
+func verbsGeneral() {
+	it := item{"排骨飯", 85}
+	fmt.Printf("%v | %+v\n", it, it)
+	fmt.Printf("%#v\n", it)
+	fmt.Printf("%T\n", it)
+
+	menu := map[string]int{"雞腿": 90, "排骨": 85, "滷蛋": 15}
+	fmt.Printf("%v\n", menu)
+	queue := []string{"A01", "A02"}
+	fmt.Printf("%v %q\n", queue, queue)
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/02-input-output#Example_verbsGeneral"><code>{排骨飯 85} | {Name:排骨飯 Price:85}
+main.item{Name:"排骨飯", Price:85}
+main.item
+map[排骨:85 滷蛋:15 雞腿:90]
+[A01 A02] ["A01" "A02"]</code></pre>
+    <ul class="notes">
+      <li><code>%v</code>（value）用預設的格式印出任何值，<code>Println</code> 內部用的就是它。</li>
+      <li><code>%+v</code> 印 struct 時會加上欄位名稱，除錯時最好用。</li>
+      <li><code>%#v</code> 印出 Go 語法的寫法，貼回程式碼就能用；字串會加上引號，型別也寫出來。</li>
+      <li><code>%T</code> 印出值的型別。<code>main.item</code> 表示 main 這個 package 裡的 item 型別。</li>
+      <li>印 map 時，fmt 會<strong>先把 key 排序</strong>，所以每次印出來的順序都一樣。這是 fmt 特地做的；直接用 <code>for range</code> 走訪 map 時順序是隨機的（第 <a href="07-maps.html">07 章</a>）。</li>
+      <li><code>%q</code> 用在字串 slice 上，每個元素都加上引號，看得出空字串和前後的空白。</li>
+    </ul>
+    <p>fmt 印得出 struct 的所有欄位，不管大寫還是小寫開頭。這裡的欄位寫成大寫的 <code>Name</code>、<code>Price</code>，是先為之後的 JSON 編碼養成習慣：encoding/json 只看得到大寫開頭（匯出）的欄位。</p>
+
+    <h3>整數和字元</h3>
+    <pre class="code" data-src="chapters/02-input-output/verbs.go#verbsInt"><code>func verbsInt() {
+	n := 255
+	fmt.Printf("%d %+d %b %o %x %X %#x\n", n, n, n, n, n, n, n)
+	r := '飯'
+	fmt.Printf("%c %q %U %d\n", r, r, r, r)
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/02-input-output#Example_verbsInt"><code>255 +255 11111111 377 ff FF 0xff
+飯 '飯' U+98EF 39151</code></pre>
+    <p><code>%d</code> 十進位，<code>%+d</code> 一定帶正負號，<code>%b</code> 二進位，<code>%o</code> 八進位，<code>%x</code>、<code>%X</code> 十六進位（小寫、大寫），加上 <code>#</code> 旗標會帶前綴 <code>0x</code>。字元（rune）本質是整數，所以 <code>%d</code> 印出它的編號 39151；<code>%c</code> 印出字元本身，<code>%q</code> 加上單引號，<code>%U</code> 印出 Unicode 的標準寫法 U+98EF。</p>
+
+    <h3>浮點數</h3>
+    <pre class="code" data-src="chapters/02-input-output/verbs.go#verbsFloat"><code>func verbsFloat() {
+	f := 1234.5678
+	fmt.Printf("%f | %.2f | %.0f\n", f, f, f)
+	fmt.Printf("%e | %g\n", f, f)
+	fmt.Printf("%g | %g\n", 0.000012345, 1e21)
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/02-input-output#Example_verbsFloat"><code>1234.567800 | 1234.57 | 1235
+1.234568e+03 | 1234.5678
+1.2345e-05 | 1e+21</code></pre>
+    <p><code>%f</code> 預設印到小數第六位，<code>%.2f</code> 指定兩位（會四捨五入），<code>%.0f</code> 不要小數。<code>%e</code> 是科學記號。<code>%g</code> 是「看情況」：用最少的位數精確表示這個值，數字太大或太小時自動換成科學記號。<code>Println</code> 印浮點數時用的就是 <code>%g</code> 的規則，所以第 <a href="01-variables.html#floats">01 章</a>才會看到 0.30000000000000004 這種長尾巴。要給人看的數字，例如金額和百分比，用 <code>%.1f</code> 或 <code>%.2f</code> 固定位數。</p>
+
+    <h3>字串、布林與百分比符號</h3>
+    <pre class="code" data-src="chapters/02-input-output/verbs.go#verbsString"><code>func verbsString() {
+	s := "Go語"
+	fmt.Printf("%s | %q | %x | % x\n", s, s, s, s)
+	fmt.Printf("%t | %v\n", true, false)
+	fmt.Printf("%d%%\n", 85)
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/02-input-output#Example_verbsString"><code>Go語 | "Go語" | 476fe8aa9e | 47 6f e8 aa 9e
+true | false
+85%</code></pre>
+    <p><code>%s</code> 印字串本身，<code>%q</code> 加上雙引號並把特殊字元（換行、tab、不可見字元）寫成跳脫序列，除錯時很好用，看得出字串裡藏了什麼。<code>%x</code> 把字串的每個 byte 寫成十六進位，<code>% x</code>（中間有空白）會在 byte 之間加空白：「語」佔了 e8 aa 9e 三個 byte，這就是 UTF-8，第 <a href="08-strings-runes.html">08 章</a>會細講。<code>%t</code> 印布林值。要印出 <code>%</code> 本身，寫兩個 <code>%%</code>。</p>
+
+    <aside class="callout warn">
+      <span class="title">動詞和值對不上時</span>
+      <p>Printf 不會因為格式錯誤而停下來，而是把錯誤寫進輸出裡。下面三行分別是型別不對、參數不夠、參數太多：</p>
+      <pre class="code bad" data-vet-error><code>package main
+
+import "fmt"
+
+func main() {
+	fmt.Printf("%d 個便當\n", "三")
+	fmt.Printf("%s 點 %d 分\n", "十二")
+	fmt.Printf("合計 %d 元\n", 255, 15)
+}</code></pre>
+      <p class="label">執行結果</p>
+      <pre class="out err"><code>%!d(string=三) 個便當
+十二 點 %!d(MISSING) 分
+合計 255 元
+%!(EXTRA int=15)</code></pre>
+      <p>看到 <code>%!</code> 開頭的奇怪文字，就是格式字串寫錯了。好消息是這三個錯誤 <code>go vet</code> 全部抓得到，存檔時編輯器也會標出來：</p>
+      <pre class="out err"><code>main.go:6:14: fmt.Printf format %d has arg "三" of wrong type string
+main.go:7:21: fmt.Printf format %d reads arg #2, but call has 1 arg
+main.go:8:2: fmt.Printf call needs 1 arg but has 2 args</code></pre>
+    </aside>
+
+    <div class="table-wrap">
+      <table class="vs">
+        <thead><tr><th scope="col">動詞</th><th scope="col">用途</th><th scope="col">例子</th></tr></thead>
+        <tbody>
+          <tr><th scope="row"><code>%v</code> <code>%+v</code> <code>%#v</code></th><td>預設格式、加欄位名、Go 語法</td><td><code>{排骨飯 85}</code></td></tr>
+          <tr><th scope="row"><code>%T</code></th><td>型別</td><td><code>main.item</code></td></tr>
+          <tr><th scope="row"><code>%d</code> <code>%b</code> <code>%o</code> <code>%x</code></th><td>整數：十、二、八、十六進位</td><td><code>255 11111111 377 ff</code></td></tr>
+          <tr><th scope="row"><code>%c</code> <code>%U</code></th><td>字元、Unicode 編號</td><td><code>飯 U+98EF</code></td></tr>
+          <tr><th scope="row"><code>%f</code> <code>%.2f</code> <code>%e</code> <code>%g</code></th><td>浮點數</td><td><code>1234.57</code></td></tr>
+          <tr><th scope="row"><code>%s</code> <code>%q</code></th><td>字串、加引號的字串</td><td><code>"Go語"</code></td></tr>
+          <tr><th scope="row"><code>%t</code></th><td>布林</td><td><code>true</code></td></tr>
+          <tr><th scope="row"><code>%%</code></th><td>百分比符號本身</td><td><code>85%</code></td></tr>
+        </tbody>
+      </table>
     </div>
   </section>
 
-  <section aria-labelledby="code">
-    <h2 id="code">最小範例</h2>
-    <pre class="code"><code>func run(in io.Reader, out io.Writer) error {
-	sc := bufio.NewScanner(in)
-	sum := 0
-	for sc.Scan() {
-		n, err := strconv.Atoi(sc.Text())
-		if err != nil {
-			return err
-		}
-		sum += n
+  <section aria-labelledby="width">
+    <h2 id="width">3. 寬度、精度與對齊</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 186" role="img" aria-label="格式 %-8.2f 拆成五段：% 開頭、- 旗標代表靠左、8 是寬度、.2 是精度、f 是動詞">
+        <title>一個動詞的組成</title>
+        <rect class="soft" x="16" y="20" width="80" height="110" rx="8"/>
+        <rect class="acc" x="108" y="20" width="80" height="110" rx="8"/>
+        <rect class="acc" x="200" y="20" width="80" height="110" rx="8"/>
+        <rect class="acc" x="292" y="20" width="80" height="110" rx="8"/>
+        <rect class="hot" x="384" y="20" width="80" height="110" rx="8"/>
+        <text class="lg mono" x="56" y="66" text-anchor="middle">%</text>
+        <text class="lg mono t-acc" x="148" y="66" text-anchor="middle">-</text>
+        <text class="lg mono t-acc" x="240" y="66" text-anchor="middle">8</text>
+        <text class="lg mono t-acc" x="332" y="66" text-anchor="middle">.2</text>
+        <text class="lg mono t-hot" x="424" y="66" text-anchor="middle">f</text>
+        <text class="small" x="56" y="98" text-anchor="middle">開頭</text>
+        <text class="small" x="148" y="98" text-anchor="middle">旗標</text>
+        <text class="sm" x="148" y="118" text-anchor="middle">靠左對齊</text>
+        <text class="small" x="240" y="98" text-anchor="middle">寬度</text>
+        <text class="sm" x="240" y="118" text-anchor="middle">至少 8 格</text>
+        <text class="small" x="332" y="98" text-anchor="middle">精度</text>
+        <text class="sm" x="332" y="118" text-anchor="middle">小數 2 位</text>
+        <text class="small" x="424" y="98" text-anchor="middle">動詞</text>
+        <text class="sm" x="424" y="118" text-anchor="middle">浮點數</text>
+        <text class="small mono" x="240" y="168" text-anchor="middle">Printf("|%-8.2f|", 3.14159) → |3.14    |</text>
+      </svg>
+      <figcaption>旗標、寬度、精度都寫在 <code>%</code> 和動詞中間，三者都可以省略，但順序固定。</figcaption>
+    </figure>
+    <p>在 <code>%</code> 和動詞之間，可以加上寬度、精度和旗標，排出對齊的輸出：</p>
+    <pre class="code" data-src="chapters/02-input-output/width.go#widthBasics"><code>func widthBasics() {
+	fmt.Printf("|%6d|%-6d|%06d|\n", 85, 85, 85)
+	fmt.Printf("|%8.2f|%-8.2f|%.1f|\n", 3.14159, 3.14159, 3.14159)
+	fmt.Printf("|%6s|%-6s|%.2s|\n", "Go", "Go", "Golang")
+	fmt.Printf("|%*d|\n", 6, 85)
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/02-input-output#Example_widthBasics"><code>|    85|85    |000085|
+|    3.14|3.14    |3.1|
+|    Go|Go    |Go|
+|    85|</code></pre>
+    <ul class="notes">
+      <li><strong>寬度</strong>：<code>%6d</code> 至少佔 6 格，不夠就在左邊補空白，也就是靠右對齊。值比寬度長時照樣完整印出，不會被截斷。</li>
+      <li><strong>旗標 <code>-</code></strong>：改成靠左對齊，空白補在右邊。</li>
+      <li><strong>旗標 <code>0</code></strong>：用 0 取代空白來補，常用在編號，例如 <code>%03d</code> 印出 007。</li>
+      <li><strong>精度</strong>：對浮點數是小數位數；對字串是「最多印幾個字元」，所以 <code>%.2s</code> 把 Golang 截成 Go。</li>
+      <li><strong><code>*</code></strong>：寬度或精度要執行時才知道時，寫成 <code>*</code>，再多傳一個整數參數。</li>
+    </ul>
+
+    <h3>排一張表</h3>
+    <pre class="code" data-src="chapters/02-input-output/width.go#fareTable"><code>func fareTable() {
+	fmt.Println("票價  目的地")
+	fmt.Printf("%4d  %s\n", 20, "台北車站")
+	fmt.Printf("%4d  %s\n", 35, "南港展覽館")
+	fmt.Printf("%4d  %s\n", 65, "淡水")
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/02-input-output#Example_fareTable"><code>票價  目的地
+  20  台北車站
+  35  南港展覽館
+  65  淡水</code></pre>
+    <p>數字靠右對齊，個位數就會對在同一欄，比較大小一目了然。中文站名長短不一，所以放在最後一欄，讓它自由延伸，前面的欄位就不受影響。</p>
+
+    <section class="deep" aria-labelledby="cjk-width">
+      <p class="tag">深入：第一次讀可以先跳過</p>
+      <h3 id="cjk-width">3.1 中文為什麼對不齊</h3>
+      <pre class="code" data-src="chapters/02-input-output/width.go#widthCJK"><code>func widthCJK() {
+	fmt.Printf("|%-6s|\n", "Go")
+	fmt.Printf("|%-6s|\n", "排骨飯")
+}</code></pre>
+      <p class="label">輸出</p>
+      <pre class="out" data-example="chapters/02-input-output#Example_widthCJK"><code>|Go    |
+|排骨飯   |</code></pre>
+      <p>兩行都補到 6 個字元：Go 後面補 4 個空白，排骨飯後面補 3 個。但在終端機和大部分等寬字型裡，一個中文字佔兩個英文字母的寬度，所以排骨飯那一行實際上是 9 格，右邊的 <code>|</code> 就歪了。fmt 只會數「字元」（rune），不知道每個字顯示出來有多寬。</p>
+      <p>簡單的解法就是上面票價表的做法：中文放最後一欄。真的需要對齊中文時，要自己算顯示寬度，再用 <code>strings.Repeat(" ", n)</code> 補空白，第 <a href="08-strings-runes.html">08 章</a>會實作這件事。</p>
+    </section>
+  </section>
+
+  <section aria-labelledby="stringer">
+    <h2 id="stringer">4. Stringer：型別自己決定怎麼印</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 206" role="img" aria-label="fmt 印出 Size 型別的 Large 時，先檢查它有沒有 String 方法；%v、%s、Println 會印出 String 的結果「大份」，%d 則印出底層的數字 2">
+        <title>fmt 會先找 String 方法</title>
+        <rect class="acc" x="16" y="72" width="110" height="60" rx="8"/>
+        <text class="mono bold" x="71" y="98" text-anchor="middle">Large</text>
+        <text class="sm mono" x="71" y="120" text-anchor="middle">Size(2)</text>
+        <path class="wire" d="M130 102 H158"/>
+        <path class="tip" d="M170 102 L157 95 L157 109 Z"/>
+        <rect class="soft" x="174" y="56" width="148" height="92" rx="8"/>
+        <text class="small" x="248" y="92" text-anchor="middle">fmt 檢查：</text>
+        <text class="small mono" x="248" y="118" text-anchor="middle">有 String()？</text>
+        <path class="wire" d="M326 86 H340 V50 H350"/>
+        <path class="tip" d="M362 50 L349 43 L349 57 Z"/>
+        <path class="wire" d="M326 118 H340 V152 H350"/>
+        <path class="tip" d="M362 152 L349 145 L349 159 Z"/>
+        <rect class="acc" x="364" y="24" width="100" height="52" rx="8"/>
+        <text class="bold t-acc" x="414" y="57" text-anchor="middle">大份</text>
+        <text class="sm" x="414" y="96" text-anchor="middle">%v、%s、Println</text>
+        <rect class="soft" x="364" y="126" width="100" height="52" rx="8"/>
+        <text class="mono bold" x="414" y="159" text-anchor="middle">2</text>
+        <text class="sm" x="414" y="198" text-anchor="middle">%d 印底層數字</text>
+      </svg>
+      <figcaption>型別有 <code>String() string</code> 方法，fmt 印它時就會呼叫這個方法；用 <code>%d</code> 明確要求數字時才不會。</figcaption>
+    </figure>
+    <p>第 01 章用 <code>iota</code> 定義的列舉，印出來只是數字。只要替型別加上一個 <code>String() string</code> <strong>方法</strong>，fmt 就會改印這個方法回傳的文字：</p>
+    <pre class="code" data-src="chapters/02-input-output/stringer.go#Size,Small,Size.String,stringerDemo"><code>type Size int
+
+const (
+	Small Size = iota
+	Medium
+	Large
+)
+
+func (s Size) String() string {
+	switch s {
+	case Small:
+		return "小份"
+	case Medium:
+		return "中份"
+	case Large:
+		return "大份"
 	}
-	fmt.Fprintf(out, "總和 %d\n", sum)
-	return sc.Err()
+	return "Size(" + strconv.Itoa(int(s)) + ")"
+}
+
+func stringerDemo() {
+	s := Large
+	fmt.Println(s)
+	fmt.Printf("%v %s %d\n", s, s, s)
+	fmt.Println(Size(7))
+	fmt.Println([]Size{Small, Large})
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/02-input-output#Example_stringerDemo"><code>大份
+大份 大份 2
+Size(7)
+[小份 大份]</code></pre>
+    <p><code>func (s Size) String() string</code> 是方法的寫法：函式名稱前面多了一個 <code>(s Size)</code>，叫做 receiver，表示這個函式屬於 <code>Size</code> 型別，呼叫時寫成 <code>s.String()</code>。方法在第 <a href="09-structs-methods.html">09 章</a>正式介紹，這裡只要會照著寫就好。<code>switch</code> 依序比對 case，第 <a href="03-control-flow.html#switch">03 章</a>會細講。</p>
+    <p>fmt 印每個值之前，都會檢查它有沒有 <code>String() string</code> 方法，有的話就呼叫它。這個「有某個方法」的條件，在 Go 裡叫做實作了 <code>fmt.Stringer</code> 這個 interface（第 <a href="10-interfaces.html">10 章</a>）。所以 <code>Println</code>、<code>%v</code>、<code>%s</code> 都印出「大份」，連印 slice 時裡面的每個元素也一樣。只有 <code>%d</code> 這種明確要求數字格式的動詞，才會印出底層的 2。</p>
+    <p>注意最後的 <code>return</code>：份量不在三個合法值裡時，印出 <code>Size(7)</code> 這種形式，看到就知道是哪個值出了問題。這裡用 <code>strconv.Itoa(int(s))</code> 而不是 <code>fmt.Sprint(s)</code>，原因在下面。</p>
+
+    <section class="deep" aria-labelledby="stringer-recursion">
+      <p class="tag">深入：第一次讀可以先跳過</p>
+      <h3 id="stringer-recursion">4.1 String 裡面不能再用 %v 印自己</h3>
+      <pre class="code bad" data-vet-error><code>package main
+
+import "fmt"
+
+type Size int
+
+func (s Size) String() string {
+	return fmt.Sprintf("Size(%v)", s)
 }
 
 func main() {
-	err := run(strings.NewReader("3\n4\n5\n"), os.Stdout)
-	fmt.Println("err:", err)
+	fmt.Println(Size(2))
 }</code></pre>
-    <p class="label">輸出</p>
-    <pre class="out"><code>總和 12
-err: &lt;nil&gt;</code></pre>
+      <p class="label">go vet 的輸出</p>
+      <pre class="out err"><code>main.go:8:27: fmt.Sprintf format %v with arg s causes recursive (example.com/size.Size).String method call</code></pre>
+      <p><code>%v</code> 印 <code>s</code> 時，fmt 發現它有 String 方法，就去呼叫 String；String 裡又用 <code>%v</code> 印 <code>s</code>……無限遞迴，直到程式的堆疊用完而當掉。解法是先把值轉成底層型別：<code>int(s)</code> 沒有 String 方法，fmt 就會乖乖印數字。所以寫成 <code>fmt.Sprintf("Size(%d)", int(s))</code> 或上面的 <code>strconv.Itoa(int(s))</code> 都可以。</p>
+      <p>另一個常見的坑是把 String 寫在指標上：<code>func (s *Size) String() string</code>。這時只有 <code>*Size</code> 有這個方法，直接印 <code>Size</code> 的值不會用到它。方法的 receiver 該用值還是指標，第 <a href="09-structs-methods.html">09 章</a>會說明；String 這種不修改內容的方法，一般用值。</p>
+    </section>
   </section>
 
-  <section aria-labelledby="notes">
-    <h2 id="notes">工程師筆記</h2>
+  <section aria-labelledby="streams">
+    <h2 id="streams">5. 標準輸入、輸出與錯誤</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 236" role="img" aria-label="程式有一個入口 stdin，來源可以是鍵盤、管線或檔案；兩個出口：stdout 放結果，stderr 放提示和錯誤">
+        <title>一個入口，兩個出口</title>
+        <rect class="soft" x="16" y="92" width="134" height="60" rx="8"/>
+        <text class="small mono bold" x="83" y="116" text-anchor="middle">stdin</text>
+        <text class="sm" x="83" y="138" text-anchor="middle">鍵盤、管線、檔案</text>
+        <path class="wire" d="M154 122 H164"/>
+        <path class="tip" d="M176 122 L163 115 L163 129 Z"/>
+        <rect class="acc" x="180" y="82" width="120" height="80" rx="10"/>
+        <text class="bold" x="240" y="128" text-anchor="middle">程式</text>
+        <path class="wire" d="M300 102 H316 V64 H322"/>
+        <path class="tip" d="M334 64 L321 57 L321 71 Z"/>
+        <path class="wire hot-ln" d="M300 142 H316 V176 H322"/>
+        <path class="tip hot-tip" d="M334 176 L321 169 L321 183 Z"/>
+        <rect class="soft" x="336" y="36" width="128" height="56" rx="8"/>
+        <text class="small mono bold" x="400" y="58" text-anchor="middle">stdout</text>
+        <text class="sm" x="400" y="80" text-anchor="middle">結果</text>
+        <rect class="hot" x="336" y="148" width="128" height="56" rx="8"/>
+        <text class="small mono bold" x="400" y="170" text-anchor="middle">stderr</text>
+        <text class="sm" x="400" y="192" text-anchor="middle">提示、錯誤</text>
+        <text class="sm mono" x="240" y="228" text-anchor="middle">&gt; 只導走 stdout　2&gt; 導走 stderr</text>
+      </svg>
+      <figcaption>每支程式啟動時就有三條管道。結果寫 stdout，給人看的提示和錯誤寫 stderr，兩者才能分開處理。</figcaption>
+    </figure>
+    <p>每支程式一啟動，作業系統就幫它接好三條管道，在 Go 裡是 <code>os</code> 套件的三個變數：</p>
     <ul class="notes">
-      <li>函式收 <code>io.Reader</code> / <code>io.Writer</code>，不要直接用 <code>os.Stdin</code> / <code>os.Stdout</code>：測試時就能餵字串進去，把結果收進 <code>strings.Builder</code>。</li>
-      <li><code>Scan()</code> 回傳 false 之後要檢查 <code>sc.Err()</code>，才知道是讀完了還是出錯。</li>
-      <li><code>bufio.Scanner</code> 預設一行最多 64KB，超過要用 <code>sc.Buffer</code> 調大。</li>
-      <li>提示訊息寫到 <code>os.Stderr</code>，<code>os.Stdout</code> 只放結果，接 pipe 時比較乾淨。</li>
-      <li>常用動詞：<code>%v</code> 預設格式、<code>%+v</code> 加上欄位名、<code>%#v</code> Go 語法、<code>%T</code> 型別、<code>%q</code> 加引號。</li>
-      <li>命令列參數在 <code>os.Args</code>，<code>os.Args[0]</code> 是程式本身；要解析參數用標準庫的 <code>flag</code>。</li>
+      <li><code>os.Stdin</code>：標準輸入。預設是鍵盤，也可以是管線（<code>|</code>）或檔案（<code>&lt;</code>）。</li>
+      <li><code>os.Stdout</code>：標準輸出，放程式的<strong>結果</strong>。<code>fmt.Println</code> 寫的就是這裡。</li>
+      <li><code>os.Stderr</code>：標準錯誤，放<strong>給人看的訊息</strong>：提示、進度、警告、錯誤。</li>
     </ul>
+    <p>兩個出口預設都印在終端機上，看起來沒有差別，但它們可以分開導向：</p>
+    <pre class="code" data-src="chapters/02-input-output/streams.go#streams"><code>func streams() {
+	fmt.Fprintln(os.Stderr, "提示：這一行寫到 stderr")
+	fmt.Fprintln(os.Stdout, "結果：這一行寫到 stdout")
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/02-input-output#Example_streams"><code>結果：這一行寫到 stdout</code></pre>
+    <p>終端機上會看到兩行，但測試只比對 stdout，所以 Example 的輸出只有一行。用一支完整的程式來看分工：<code>chapters/02-input-output/sum</code> 從 stdin 讀整數，算出總和與平均。它的主體是一個收 <code>io.Reader</code> 和 <code>io.Writer</code> 的 <code>run</code> 函式（第 7 節會說明為什麼這樣寫），<code>main</code> 只負責把真正的 stdin、stdout 接上去：</p>
+    <pre class="code" data-src="chapters/02-input-output/sum/main.go#main"><code>func main() {
+	fmt.Fprintln(os.Stderr, "請輸入整數，每行一個，Ctrl-D 結束：")
+	if err := run(os.Stdin, os.Stdout); err != nil {
+		fmt.Fprintln(os.Stderr, "錯誤：", err)
+		os.Exit(1)
+	}
+}</code></pre>
+    <p>先編譯，再用 <code>printf</code> 和管線餵資料給它（Windows 的 PowerShell 寫法不同，可以改成直接執行、用鍵盤輸入，最後按 Ctrl-Z 再按 Enter 結束）：</p>
+    <pre class="shell"><code>go build -o sum ./chapters/02-input-output/sum
+printf '3\n4\n5\n' | ./sum</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out"><code>請輸入整數，每行一個，Ctrl-D 結束：
+共 3 個數字，總和 12，平均 4.00</code></pre>
+    <p>提示和結果都出現了。把 stderr 丟掉（<code>2&gt;/dev/null</code>），就只剩結果；把 stdout 導到檔案（<code>&gt; result.txt</code>），終端機上就只剩提示，檔案裡只有乾淨的結果，可以直接交給下一支程式處理：</p>
+    <pre class="shell"><code>printf '3\n4\n5\n' | ./sum 2&gt;/dev/null
+printf '3\n4\n5\n' | ./sum &gt; result.txt
+cat result.txt</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out"><code>共 3 個數字，總和 12，平均 4.00
+請輸入整數，每行一個，Ctrl-D 結束：
+共 3 個數字，總和 12，平均 4.00</code></pre>
+    <p>第一行來自第一個指令；第二行是第二個指令的提示（stderr 還是印在終端機上）；第三行是 <code>cat</code> 印出檔案的內容。如果提示也寫到 stdout，result.txt 的第一行就會混進「請輸入整數」，下一支程式讀到它就壞了。</p>
+
+    <h3>結束碼</h3>
+    <p>程式結束時會回傳一個整數給作業系統，叫做結束碼：0 代表成功，其他值代表失敗。<code>main</code> 正常跑完就是 0；要回報失敗，呼叫 <code>os.Exit(1)</code>：</p>
+    <pre class="shell"><code>printf '1\nabc\n' | ./sum
+echo "exit=$?"</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out err"><code>請輸入整數，每行一個，Ctrl-D 結束：
+錯誤： 第 2 行 "abc" 不是整數
+exit=1</code></pre>
+    <p><code>$?</code> 是 shell 裡「上一個指令的結束碼」。shell 腳本、Makefile 和 CI 都靠它判斷有沒有成功，所以出錯時一定要回傳非 0 的值。注意 <code>os.Exit</code> 會立刻結束程式，連 <code>defer</code> 都不會執行（第 <a href="04-functions.html">04 章</a>）；習慣的寫法是像這裡一樣，只在 main 的最後呼叫它，其他函式一律回傳 error。</p>
+  </section>
+
+  <section aria-labelledby="scanner">
+    <h2 id="scanner">6. 一行一行讀：bufio.Scanner</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 204" role="img" aria-label="輸入是一長串 byte，bufio.Scanner 用緩衝區一次讀一段，在換行的地方切開，每次 Scan 交出一行">
+        <title>Scanner 把資料切成一段一段</title>
+        <rect class="soft" x="16" y="16" width="448" height="40" rx="6"/>
+        <text class="small mono" x="30" y="42">排骨飯 85\n雞腿飯 90\n滷蛋 15\n…</text>
+        <path class="wire" d="M240 60 V72"/>
+        <path class="tip" d="M240 84 L233 71 L247 71 Z"/>
+        <rect class="acc" x="150" y="86" width="180" height="56" rx="8"/>
+        <text class="small mono bold" x="240" y="110" text-anchor="middle">bufio.Scanner</text>
+        <text class="sm" x="240" y="130" text-anchor="middle">每次 Scan 交出一行</text>
+        <path class="wire faint" d="M190 142 L86 160 M240 142 V160 M290 142 L394 160"/>
+        <rect class="soft" x="16" y="160" width="140" height="36" rx="6"/>
+        <rect class="soft" x="170" y="160" width="140" height="36" rx="6"/>
+        <rect class="soft" x="324" y="160" width="140" height="36" rx="6"/>
+        <text class="small mono" x="86" y="184" text-anchor="middle">排骨飯 85</text>
+        <text class="small mono" x="240" y="184" text-anchor="middle">雞腿飯 90</text>
+        <text class="small mono" x="394" y="184" text-anchor="middle">滷蛋 15</text>
+      </svg>
+      <figcaption>Scanner 從來源讀進一段資料放進緩衝區，在換行處切開，每呼叫一次 <code>Scan</code> 交出一行，不含換行字元。</figcaption>
+    </figure>
+    <p>讀輸入最常用的工具是 <code>bufio.Scanner</code>。它包住一個 io.Reader，每呼叫一次 <code>Scan</code> 就往下讀一行，讀到了回傳 true，讀完或出錯時回傳 false：</p>
+    <pre class="code" data-src="chapters/02-input-output/scanner.go#scanLines"><code>func scanLines() {
+	input := "排骨飯 85\n雞腿飯 90\n\n滷蛋 15\n"
+	sc := bufio.NewScanner(strings.NewReader(input))
+	n := 0
+	for sc.Scan() {
+		n++
+		fmt.Printf("第 %d 行：%q\n", n, sc.Text())
+	}
+	if err := sc.Err(); err != nil {
+		fmt.Println("讀取失敗：", err)
+	}
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/02-input-output#Example_scanLines"><code>第 1 行："排骨飯 85"
+第 2 行："雞腿飯 90"
+第 3 行：""
+第 4 行："滷蛋 15"</code></pre>
+    <p>這是讀取的標準寫法，三個部分缺一不可：</p>
+    <ol class="notes">
+      <li><code>for sc.Scan()</code>：迴圈條件就是「還有沒有下一行」。</li>
+      <li><code>sc.Text()</code>：取出這一行，<strong>不含</strong>換行字元。Windows 的 <code>\r\n</code> 也會一起去掉，空白行則得到空字串。</li>
+      <li><code>sc.Err()</code>：迴圈結束後一定要檢查。Scan 回傳 false 有兩種可能：正常讀完，或者讀取出錯。只看 Scan 分不出來，要問 Err；正常讀完時它回傳 nil。</li>
+    </ol>
+    <p><code>strings.NewReader</code> 把一個字串包成 io.Reader，示範和測試時用它取代真正的 stdin 或檔案。換成 <code>bufio.NewScanner(os.Stdin)</code>，同樣的迴圈就能讀鍵盤或管線。</p>
+
+    <h3>改成一個字一個字讀</h3>
+    <pre class="code" data-src="chapters/02-input-output/scanner.go#scanWords"><code>func scanWords() {
+	sc := bufio.NewScanner(strings.NewReader("  排骨飯   2\n滷蛋 3 "))
+	sc.Split(bufio.ScanWords)
+	var words []string
+	for sc.Scan() {
+		words = append(words, sc.Text())
+	}
+	if err := sc.Err(); err != nil {
+		fmt.Println("讀取失敗：", err)
+	}
+	fmt.Println(len(words), words)
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/02-input-output#Example_scanWords"><code>4 [排骨飯 2 滷蛋 3]</code></pre>
+    <p><code>Split</code> 可以換掉切割的方式。<code>bufio.ScanWords</code> 以空白為界，連續的空白、tab、換行都算一個分隔，頭尾的空白也會略過。另外還有 <code>ScanRunes</code>（一個字元一個字元）和 <code>ScanBytes</code>。要讀的資料是「一行一筆紀錄」時，通常還是用預設的逐行讀，再用 <code>strings.Fields</code> 把一行切成欄位，這樣才知道每個欄位屬於哪一行。</p>
+
+    <h3>太長的行</h3>
+    <pre class="code" data-src="chapters/02-input-output/scanner.go#scanTooLong"><code>func scanTooLong() {
+	long := strings.Repeat("x", 70_000)
+	sc := bufio.NewScanner(strings.NewReader("短的一行\n" + long + "\n最後一行\n"))
+	for sc.Scan() {
+		fmt.Println("讀到", len(sc.Text()), "bytes")
+	}
+	fmt.Println("Err:", sc.Err())
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/02-input-output#Example_scanTooLong"><code>讀到 12 bytes
+Err: bufio.Scanner: token too long</code></pre>
+    <p>Scanner 的緩衝區預設最大 64 KB（<code>bufio.MaxScanTokenSize</code>），一行超過這個長度時，Scan 回傳 false，Err 回傳 <code>token too long</code>，後面的「最後一行」再也讀不到了。如果沒有檢查 Err，程式會以為輸入只有一行，而且不會有任何警告。一般的文字檔很少有這麼長的行，但壓縮過的 JSON、log 或 CSV 一整行好幾 MB 並不少見。需要時用 <code>Buffer</code> 放寬上限：</p>
+    <pre class="code" data-src="chapters/02-input-output/scanner.go#scanBigBuffer"><code>func scanBigBuffer() {
+	long := strings.Repeat("x", 70_000)
+	sc := bufio.NewScanner(strings.NewReader(long + "\n最後一行\n"))
+	sc.Buffer(make([]byte, 0, 64*1024), 1024*1024) // 一行最多 1 MB
+	for sc.Scan() {
+		fmt.Println("讀到", len(sc.Text()), "bytes")
+	}
+	fmt.Println("Err:", sc.Err())
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/02-input-output#Example_scanBigBuffer"><code>讀到 70000 bytes
+讀到 12 bytes
+Err: &lt;nil&gt;</code></pre>
+    <p><code>Buffer</code> 的第一個參數是一開始用的緩衝區，第二個是上限。要在第一次 Scan 之前呼叫。上限是整個緩衝區的大小，換行字元也要放得下，所以設定時要比預期最長的一行再多一點：上限設成剛好 1 MB，遇到剛好 1 MB 的一行仍然會失敗。如果資料根本沒有「行」的概念，或者一行可能無限長，就不要用 Scanner，改用 <code>bufio.Reader</code> 或直接處理串流。</p>
+
+    <h3>fmt.Sscan：用空白切開再轉型</h3>
+    <pre class="code" data-src="chapters/02-input-output/scanner.go#sscanDemo"><code>func sscanDemo() {
+	var name string
+	var qty, price int
+	n, err := fmt.Sscan("排骨飯 2 85", &amp;name, &amp;qty, &amp;price)
+	fmt.Println(n, err, name, qty*price)
+
+	n, err = fmt.Sscan("滷蛋 三 15", &amp;name, &amp;qty, &amp;price)
+	fmt.Println(n, err)
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/02-input-output#Example_sscanDemo"><code>3 &lt;nil&gt; 排骨飯 170
+1 expected integer</code></pre>
+    <p>fmt 也有一組讀取函式：<code>Scan</code> 從 stdin 讀、<code>Sscan</code> 從字串讀、<code>Fscan</code> 從 io.Reader 讀。它們用空白切開輸入，依照變數的型別自動轉換，回傳成功填了幾個。第二次呼叫時「三」不是整數，所以只填了 name 一個，錯誤是 <code>expected integer</code>。它們用在格式很固定的小工具很方便，但錯誤訊息不夠清楚，也不容易知道錯在第幾行。一般的程式建議用 Scanner 逐行讀，再用 <code>strings.Fields</code> 和 <code>strconv.Atoi</code> 自己處理每一行，像上面的 sum 程式一樣。</p>
+  </section>
+
+  <section aria-labelledby="rw">
+    <h2 id="rw">7. io.Reader 與 io.Writer</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 214" role="img" aria-label="左邊三種 io.Reader：os.Stdin、檔案、strings.Reader；中間是 numberLines 函式；右邊三種 io.Writer：os.Stdout、檔案、strings.Builder。同一個函式可以接任何組合">
+        <title>函式只看介面，不管來源和去處</title>
+        <text class="sm mono" x="81" y="18" text-anchor="middle">io.Reader</text>
+        <text class="sm mono" x="399" y="18" text-anchor="middle">io.Writer</text>
+        <rect class="soft" x="16" y="30" width="130" height="40" rx="6"/>
+        <rect class="soft" x="16" y="95" width="130" height="40" rx="6"/>
+        <rect class="soft" x="16" y="160" width="130" height="40" rx="6"/>
+        <text class="small mono" x="81" y="55" text-anchor="middle">os.Stdin</text>
+        <text class="small mono" x="81" y="120" text-anchor="middle">*os.File</text>
+        <text class="small mono" x="81" y="185" text-anchor="middle">strings.Reader</text>
+        <path class="wire faint" d="M146 50 L180 108 M146 115 H180 M146 180 L180 122"/>
+        <rect class="acc" x="180" y="80" width="120" height="70" rx="10"/>
+        <text class="small mono bold" x="240" y="110" text-anchor="middle">numberLines</text>
+        <text class="sm mono" x="240" y="132" text-anchor="middle">(r, w)</text>
+        <path class="wire faint" d="M300 108 L334 50 M300 115 H334 M300 122 L334 180"/>
+        <rect class="soft" x="334" y="30" width="130" height="40" rx="6"/>
+        <rect class="soft" x="334" y="95" width="130" height="40" rx="6"/>
+        <rect class="soft" x="334" y="160" width="130" height="40" rx="6"/>
+        <text class="small mono" x="399" y="55" text-anchor="middle">os.Stdout</text>
+        <text class="small mono" x="399" y="120" text-anchor="middle">*os.File</text>
+        <text class="small mono" x="399" y="185" text-anchor="middle">strings.Builder</text>
+      </svg>
+      <figcaption>函式只要求「可以讀」和「可以寫」，資料從鍵盤、檔案還是字串來，寫到螢幕、檔案還是記憶體，它都不用管。</figcaption>
+    </figure>
+    <p>前面已經用了好幾次 <code>io.Reader</code> 和 <code>io.Writer</code>。它們是 Go 標準庫裡最重要的兩個 interface，定義非常小：</p>
+    <ul class="notes">
+      <li><strong>io.Reader</strong>：有一個 <code>Read(p []byte) (n int, err error)</code> 方法，意思是「把資料讀進 p，告訴我讀了幾個 byte」。讀完時回傳 <code>io.EOF</code> 這個錯誤。</li>
+      <li><strong>io.Writer</strong>：有一個 <code>Write(p []byte) (n int, err error)</code> 方法，意思是「把 p 寫出去，告訴我寫了幾個 byte」。</li>
+    </ul>
+    <p>任何型別只要有這個方法，就「是」一個 Reader 或 Writer，不用特別宣告（第 <a href="10-interfaces.html">10 章</a>）。所以 <code>os.Stdin</code>、檔案、網路連線、<code>strings.Reader</code>、壓縮串流都是 Reader；<code>os.Stdout</code>、檔案、HTTP 回應、<code>strings.Builder</code>、<code>bytes.Buffer</code> 都是 Writer。你幾乎不會自己呼叫 Read 和 Write，而是把它們交給 Scanner、Fprintf、<code>io.Copy</code> 這些工具去用。</p>
+
+    <h3>讓函式收 Reader 和 Writer</h3>
+    <pre class="code" data-src="chapters/02-input-output/readwrite.go#numberLines,numberLinesDemo"><code>func numberLines(r io.Reader, w io.Writer) error {
+	sc := bufio.NewScanner(r)
+	n := 0
+	for sc.Scan() {
+		n++
+		if _, err := fmt.Fprintf(w, "%02d %s\n", n, sc.Text()); err != nil {
+			return err
+		}
+	}
+	return sc.Err()
+}
+
+func numberLinesDemo() {
+	if err := numberLines(strings.NewReader("排骨飯\n雞腿飯\n滷蛋\n"), os.Stdout); err != nil {
+		fmt.Println("錯誤：", err)
+	}
+
+	var sb strings.Builder
+	if err := numberLines(strings.NewReader("紅茶\n綠茶\n"), &amp;sb); err != nil {
+		fmt.Println("錯誤：", err)
+	}
+	fmt.Printf("%q\n", sb.String())
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/02-input-output#Example_numberLinesDemo"><code>01 排骨飯
+02 雞腿飯
+03 滷蛋
+"01 紅茶\n02 綠茶\n"</code></pre>
+    <p>同一個 <code>numberLines</code>，一次寫到 stdout，一次寫進記憶體裡的 Builder。如果它直接寫死 <code>os.Stdin</code> 和 <code>os.Stdout</code>，要測試就得真的打字或接管線；改收 interface 之後，測試只要準備一個字串，再檢查 Builder 裡的結果就好。這就是 sum 程式把邏輯放在 <code>run(in, out)</code>、main 只負責接線的原因，本書後面的命令列程式和 HTTP 程式都會照這個模式寫。</p>
+    <p>注意 <code>Fprintf</code> 也會回傳錯誤：寫到檔案或網路時，磁碟可能滿了、連線可能斷了。印到終端機的小程式通常忽略它，但寫檔案或寫網路的函式應該把錯誤傳回去，練習 4 會要求你這樣做。</p>
+
+    <h3>bufio.Writer：記得 Flush</h3>
+    <pre class="code" data-src="chapters/02-input-output/readwrite.go#bufferedWriter"><code>func bufferedWriter() {
+	var sb strings.Builder
+	bw := bufio.NewWriter(&amp;sb)
+	fmt.Fprint(bw, "叫號：A01")
+	fmt.Printf("Flush 前：%q\n", sb.String())
+	if err := bw.Flush(); err != nil {
+		fmt.Println("錯誤：", err)
+	}
+	fmt.Printf("Flush 後：%q\n", sb.String())
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/02-input-output#Example_bufferedWriter"><code>Flush 前：""
+Flush 後："叫號：A01"</code></pre>
+    <p>每次 Write 都直接寫到檔案或網路，代價很高。<code>bufio.Writer</code> 先把資料累積在記憶體裡（預設 4 KB），滿了才一次寫出去，大量的小寫入會快很多。代價是：還沒滿的資料會一直待在緩衝區裡，<strong>一定要在最後呼叫 Flush</strong>，並檢查它回傳的錯誤，不然最後一段資料就消失了。另外，用了 bufio.Writer 之後，所有的輸出都要經過它，直接寫到底層 Writer 的資料會「插隊」跑到前面，練習 6 就是這個 bug。</p>
+
+    <h3>io.Copy</h3>
+    <pre class="code" data-src="chapters/02-input-output/readwrite.go#copyDemo"><code>func copyDemo() {
+	n, err := io.Copy(os.Stdout, strings.NewReader("整份菜單原封不動地複製過去\n"))
+	fmt.Println(n, err)
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/02-input-output#Example_copyDemo"><code>整份菜單原封不動地複製過去
+40 &lt;nil&gt;</code></pre>
+    <p><code>io.Copy(dst, src)</code> 把 Reader 的內容全部搬到 Writer，回傳搬了多少 byte。13 個中文字各 3 個 byte，加上換行，共 40 個。它內部會分批搬，不會把整個來源一次讀進記憶體，所以複製一個好幾 GB 的檔案也沒問題。檔案的讀寫在之後的「檔案與 I/O」那一章會細講。</p>
+  </section>
+
+  <section aria-labelledby="pitfalls">
+    <h2 id="pitfalls">常見錯誤</h2>
+    <h3 id="pit-err">1. 沒有檢查 Scanner 的 Err</h3>
+    <p>只寫 <code>for sc.Scan() { … }</code> 就結束，遇到太長的行或讀取錯誤時，程式會安靜地少讀資料，沒有任何訊息（第 6 節的 scanTooLong）。迴圈後面一定要接 <code>if err := sc.Err(); err != nil</code>。</p>
+
+    <h3 id="pit-flush">2. 忘了 Flush，或繞過了 bufio.Writer</h3>
+    <div class="compare">
+      <p class="label bad">錯誤寫法：結尾直接寫到 w，會跑到最前面</p>
+      <pre class="code bad" data-src="exercises/02-input-output/exercises.go#CallNumbers"><code>func CallNumbers(w io.Writer, names []string) error {
+	bw := bufio.NewWriter(w)
+	for _, name := range names {
+		fmt.Fprintf(bw, "請 %s 到櫃台\n", name)
+	}
+	fmt.Fprintln(w, "== 以上 ==")
+	return bw.Flush()
+}</code></pre>
+      <p class="label good">正確寫法：所有輸出都經過 bw，最後 Flush 並回傳錯誤</p>
+      <pre class="code good" data-src="chapters/02-input-output/readwrite.go#bufferedWriter"><code>func bufferedWriter() {
+	var sb strings.Builder
+	bw := bufio.NewWriter(&amp;sb)
+	fmt.Fprint(bw, "叫號：A01")
+	fmt.Printf("Flush 前：%q\n", sb.String())
+	if err := bw.Flush(); err != nil {
+		fmt.Println("錯誤：", err)
+	}
+	fmt.Printf("Flush 後：%q\n", sb.String())
+}</code></pre>
+    </div>
+    <p>左邊是練習 6 的題目：名字還在 bw 的緩衝區裡排隊，「== 以上 ==」卻直接寫進了 w，所以最先出現。修法留給你。</p>
+
+    <h3 id="pit-verbs">3. 格式動詞和參數對不上</h3>
+    <p>輸出裡出現 <code>%!d(string=…)</code>、<code>%!d(MISSING)</code>、<code>%!(EXTRA …)</code>，就是動詞和值不合、參數太少或太多（第 2 節）。執行 <code>go vet</code>，或讓編輯器幫你檢查。</p>
+
+    <h3 id="pit-stderr">4. 把提示和錯誤寫到 stdout</h3>
+    <p>「請輸入…」「處理中…」「錯誤：…」這些訊息寫到 stdout，結果導到檔案或接到下一支程式時就會混在一起。給人看的訊息寫 <code>os.Stderr</code>，stdout 只放結果（第 5 節）。</p>
+
+    <h3 id="pit-stringer">5. String 方法裡印自己</h3>
+    <p>在 String 裡寫 <code>fmt.Sprintf("%v", s)</code> 會無限遞迴。先轉成底層型別再印：<code>int(s)</code>（第 4.1 節）。</p>
+
+    <h3 id="pit-exit">6. 出錯了卻回傳結束碼 0</h3>
+    <p>只把錯誤印出來就讓 main 結束，shell 和 CI 會以為成功了。失敗時呼叫 <code>os.Exit(1)</code>（或其他非 0 的值），而且只在 main 裡呼叫。</p>
   </section>
 
   <section aria-labelledby="java">
@@ -156,23 +724,151 @@ err: &lt;nil&gt;</code></pre>
       <table class="vs">
         <thead><tr><th scope="col">主題</th><th scope="col">Java</th><th scope="col">Go</th></tr></thead>
         <tbody>
-          <tr><th scope="row">印出</th><td class="java"><code>System.out.println</code> / <code>printf</code></td><td><code>fmt.Println</code> / <code>fmt.Printf</code></td></tr>
-          <tr><th scope="row">讀一行</th><td class="java"><code>BufferedReader.readLine()</code></td><td><code>bufio.Scanner</code></td></tr>
-          <tr><th scope="row">串流抽象</th><td class="java"><code>InputStream</code> / <code>OutputStream</code> 類別階層</td><td><code>io.Reader</code> / <code>io.Writer</code>，各只有一個方法</td></tr>
-          <tr><th scope="row">格式化成字串</th><td class="java"><code>String.format</code></td><td><code>fmt.Sprintf</code></td></tr>
-          <tr><th scope="row">讀取失敗</th><td class="java">丟 <code>IOException</code></td><td><code>Scan()</code> 回傳 false，再看 <code>Err()</code></td></tr>
+          <tr><th scope="row">印一行</th><td class="java"><code>System.out.println(x)</code></td><td><code>fmt.Println(x)</code></td></tr>
+          <tr><th scope="row">組字串</th><td class="java"><code>String.format("%d 元", n)</code></td><td><code>fmt.Sprintf("%d 元", n)</code></td></tr>
+          <tr><th scope="row">萬用格式</th><td class="java"><code>%s</code> 會呼叫 <code>toString()</code></td><td><code>%v</code>，還有 <code>%+v</code>、<code>%#v</code>、<code>%T</code></td></tr>
+          <tr><th scope="row">自訂顯示</th><td class="java">覆寫 <code>toString()</code></td><td>寫一個 <code>String() string</code> 方法</td></tr>
+          <tr><th scope="row">錯誤輸出</th><td class="java"><code>System.err</code></td><td><code>os.Stderr</code>，搭配 <code>fmt.Fprintln</code></td></tr>
+          <tr><th scope="row">讀一行</th><td class="java"><code>Scanner.nextLine()</code>、<code>BufferedReader.readLine()</code></td><td><code>bufio.Scanner</code> 的 <code>Scan</code> 加 <code>Text</code></td></tr>
+          <tr><th scope="row">串流抽象</th><td class="java"><code>InputStream</code>、<code>OutputStream</code>、<code>Reader</code>、<code>Writer</code> 四套抽象類別</td><td><code>io.Reader</code>、<code>io.Writer</code> 兩個只有一個方法的 interface</td></tr>
+          <tr><th scope="row">緩衝輸出</th><td class="java"><code>BufferedWriter</code>，<code>close()</code> 時會 flush</td><td><code>bufio.Writer</code>，沒有 close，一定要自己 <code>Flush</code></td></tr>
+          <tr><th scope="row">讀取錯誤</th><td class="java">丟 <code>IOException</code></td><td>Scan 回傳 false，錯誤從 <code>Err()</code> 拿</td></tr>
+          <tr><th scope="row">結束程式</th><td class="java"><code>System.exit(1)</code></td><td><code>os.Exit(1)</code>，不會執行 defer</td></tr>
         </tbody>
       </table>
     </div>
   </section>
 
+  <section aria-labelledby="exercises">
+    <h2 id="exercises">練習</h2>
+    <p>題目在 <code>exercises/02-input-output/exercises.go</code>。後面幾題會用到 <code>for</code> 迴圈和 slice，寫法和其他語言類似，完整介紹在第 <a href="03-control-flow.html">03 章</a>和第 <a href="06-arrays-slices.html">06 章</a>。</p>
+    <pre class="shell"><code>go test ./exercises/02-input-output/                    <span class="c"># 跑全部練習</span>
+go test ./exercises/02-input-output/ -run TestPercent   <span class="c"># 只跑一題</span>
+go test -tags solution ./exercises/02-input-output/     <span class="c"># 跑參考解答</span></code></pre>
+    <ol class="exercises">
+      <li>
+        <h3><span class="level l1">入門</span>練習 1：百分比</h3>
+        <p>回傳 part 佔 total 的百分比，取到小數第一位並加上 %。total 小於 1 時回傳 <code>"0.0%"</code>。</p>
+        <pre class="code" data-src="exercises/02-input-output/exercises.go#Percent"><code>func Percent(part, total int) string {
+	// TODO: 實作
+	return ""
+}</code></pre>
+        <p>例如 <code>Percent(1, 3)</code> 是 <code>"33.3%"</code>，<code>Percent(3, 3)</code> 是 <code>"100.0%"</code>。測試：<code>TestPercent</code>。</p>
+        <details><summary>提示</summary><p>先轉成 <code>float64</code> 再算（第 01 章練習 3 的教訓），格式是 <code>%.1f</code>，百分比符號要寫成 <code>%%</code>。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l1">入門</span>練習 2：網頁色碼</h3>
+        <p>把紅、綠、藍三個 0–255 的值寫成 <code>#RRGGBB</code>，每個顏色固定兩位，字母大寫。</p>
+        <pre class="code" data-src="exercises/02-input-output/exercises.go#HexColor"><code>func HexColor(r, g, b uint8) string {
+	// TODO: 實作
+	return ""
+}</code></pre>
+        <p>例如 <code>HexColor(255, 136, 0)</code> 是 <code>"#FF8800"</code>，<code>HexColor(10, 11, 12)</code> 是 <code>"#0A0B0C"</code>。測試：<code>TestHexColor</code>。</p>
+        <details><summary>提示</summary><p>一個 <code>Sprintf</code> 就能完成。十六進位大寫是 <code>%X</code>，寬度 2、不足補 0 是 <code>%02X</code>。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l2">進階</span>練習 3：千分位金額</h3>
+        <p><code>doc.go</code> 定義了 <code>type Money int</code>。替它寫 String 方法，印成有千分位的台幣：<code>1234567</code> 是 <code>"NT$1,234,567"</code>，<code>-1500</code> 是 <code>"-NT$1,500"</code>，<code>0</code> 是 <code>"NT$0"</code>。</p>
+        <pre class="code" data-src="exercises/02-input-output/exercises.go#Money.String"><code>func (m Money) String() string {
+	// TODO: 實作
+	return ""
+}</code></pre>
+        <p>測試用 <code>fmt.Sprint</code> 和 <code>%v</code>、<code>%s</code> 印 Money，確認 fmt 真的會呼叫你的方法。測試：<code>TestMoneyString</code>。</p>
+        <details><summary>提示</summary><p>先處理負號，把數字變成正的；再用 <code>strconv.Itoa(n)</code> 轉成一串數字（不要用 <code>fmt.Sprint(m)</code>，原因見第 4.1 節）。接著從左到右走過每個字元，位置 i 和字串長度的差是 3 的倍數、而且 i 不是 0 時，先加一個逗號。用 <code>strings.Builder</code> 組結果。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l2">進階</span>練習 4：印明細</h3>
+        <p>把品項清單寫成明細：每個品項一行，金額（數量乘單價）靠右對齊佔 5 格，空兩格接品名，空一格接 x 和數量；最後是一條 <code>-----</code> 和合計。寫入失敗時立刻回傳那個錯誤。</p>
+        <pre class="code" data-src="exercises/02-input-output/doc.go#Item"><code>type Item struct {
+	Name  string
+	Qty   int
+	Price int
+}</code></pre>
+        <pre class="code" data-src="exercises/02-input-output/exercises.go#WriteReceipt"><code>func WriteReceipt(w io.Writer, items []Item) error {
+	// TODO: 實作
+	return nil
+}</code></pre>
+        <p>三個品項 <code>{排骨飯 2 85}</code>、<code>{滷蛋 3 15}</code>、<code>{紅茶 1 25}</code> 要寫出：</p>
+        <pre class="out"><code>  170  排骨飯 x2
+   45  滷蛋 x3
+   25  紅茶 x1
+-----
+  240  合計</code></pre>
+        <p>測試會用一個寫到第幾次就失敗的 Writer，檢查你有沒有把錯誤傳回來。測試：<code>TestWriteReceipt</code>。</p>
+        <details><summary>提示</summary><p>金額欄是 <code>%5d</code>，和第 3 節的票價表同一招。每一次 <code>fmt.Fprintf</code> 都會回傳 <code>(n int, err error)</code>，寫成 <code>if _, err := fmt.Fprintf(…); err != nil { return err }</code>。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l2">進階</span>練習 5：讀訂單</h3>
+        <p>從 Reader 讀訂單，每行是「品名 數量 單價」，回傳總金額。空白行和 <code>#</code> 開頭的註解行略過。格式不對的行要回傳錯誤，訊息是 <code>fmt.Errorf("第 %d 行格式錯誤：%q", 行號, 原始內容)</code>。</p>
+        <pre class="code" data-src="exercises/02-input-output/exercises.go#ParseOrders"><code>func ParseOrders(r io.Reader) (int, error) {
+	// TODO: 實作
+	return 0, nil
+}</code></pre>
+        <p>例如 <code>"排骨飯 2 85\n滷蛋 3 15\n"</code> 是 215；<code>"排骨飯 2\n"</code> 要回傳 <code>第 1 行格式錯誤："排骨飯 2"</code>。讀取本身失敗時，也要把錯誤傳回來。測試：<code>TestParseOrders</code>。</p>
+        <details><summary>提示</summary><p>照第 6 節的標準寫法逐行讀，自己數行號。<code>strings.TrimSpace</code> 去掉頭尾空白後判斷是不是空行，<code>strings.HasPrefix(line, "#")</code> 判斷註解。<code>strings.Fields</code> 用空白切開欄位，欄位數不是 3 就是格式錯誤。最後別忘了 <code>sc.Err()</code>。</p></details>
+      </li>
+      <li>
+        <h3><span class="level fix">找錯</span>練習 6：叫號清單</h3>
+        <p>應該先列出每個名字，最後一行是「== 以上 ==」，測試卻發現「== 以上 ==」跑到最前面。找出原因並修好它。</p>
+        <pre class="code" data-src="exercises/02-input-output/exercises.go#CallNumbers"><code>func CallNumbers(w io.Writer, names []string) error {
+	bw := bufio.NewWriter(w)
+	for _, name := range names {
+		fmt.Fprintf(bw, "請 %s 到櫃台\n", name)
+	}
+	fmt.Fprintln(w, "== 以上 ==")
+	return bw.Flush()
+}</code></pre>
+        <p>測試：<code>TestCallNumbers</code>。</p>
+        <details><summary>提示</summary><p>數一數這個函式寫到了幾個不同的 Writer。名字在 Flush 之前都還在哪裡？</p></details>
+      </li>
+      <li>
+        <h3><span class="level l3">挑戰</span>練習 7：最長的一行</h3>
+        <p>回傳 Reader 裡最長一行的長度（以 byte 計，不含換行）。一行最長可能到 1 MB。讀取失敗時回傳 0 和那個錯誤。</p>
+        <pre class="code" data-src="exercises/02-input-output/exercises.go#LongestLine"><code>func LongestLine(r io.Reader) (int, error) {
+	// TODO: 實作
+	return 0, nil
+}</code></pre>
+        <p>測試會餵一行 20 萬個字元和一行剛好 1 MB 的資料，還有一個會讀取失敗的 Reader。測試：<code>TestLongestLine</code>。</p>
+        <details><summary>提示</summary><p>預設的 Scanner 讀不了超過 64 KB 的行，要用 <code>sc.Buffer</code> 放寬上限，而且上限要比 1 MB 再大一點（第 6 節）。長度用 <code>len(sc.Bytes())</code>，不用另外產生字串。比大小可以用內建的 <code>max</code> 函式。最後一定要檢查 <code>sc.Err()</code>，不然讀取失敗會被當成「沒有資料」。</p></details>
+      </li>
+    </ol>
+    <p><a href="https://github.com/xinqilin/GO-Playground/blob/main/exercises/02-input-output/solution.go">參考解答</a>：先自己寫完再看。測試通過的寫法都是對的。</p>
+  </section>
+
+  <section aria-labelledby="recap">
+    <h2 id="recap">重點回顧</h2>
+    <ul class="recap">
+      <li>字首決定去向：Print 印到 stdout，Sprint 回傳字串，Fprint 寫到任何 io.Writer。</li>
+      <li>Println 一律補空白；Print 只在兩邊都不是字串時補；要控制格式就用 Printf。</li>
+      <li><code>%v</code> 萬用，<code>%+v</code> 加欄位名，<code>%#v</code> 印 Go 語法，<code>%T</code> 印型別，<code>%q</code> 看得出字串裡藏了什麼。</li>
+      <li>寬度靠右、<code>-</code> 靠左、<code>0</code> 補零、<code>.n</code> 是精度；fmt 用字元數補空白，中文會對不齊。</li>
+      <li>有 <code>String() string</code> 方法的型別，fmt 會用它來印；String 裡要先轉成底層型別再印自己。</li>
+      <li>結果寫 stdout，提示和錯誤寫 stderr；失敗時用 <code>os.Exit(1)</code> 回傳非 0 的結束碼。</li>
+      <li>讀取的標準寫法：<code>for sc.Scan()</code>、<code>sc.Text()</code>、迴圈後檢查 <code>sc.Err()</code>。</li>
+      <li>Scanner 一行預設最多 64 KB，用 <code>Buffer</code> 放寬，上限要比最長一行再大一點。</li>
+      <li>函式收 io.Reader 和 io.Writer，測試時就能用 strings.NewReader 和 strings.Builder 取代 stdin、stdout。</li>
+      <li>bufio.Writer 用完一定要 Flush 並檢查錯誤，而且所有輸出都要經過它。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="further">
+    <h2 id="further">延伸閱讀</h2>
+    <ul class="notes">
+      <li>fmt 套件文件：<a href="https://pkg.go.dev/fmt#hdr-Printing">Printing</a>（所有動詞和旗標的完整規則）、<a href="https://pkg.go.dev/fmt#hdr-Scanning">Scanning</a>、<a href="https://pkg.go.dev/fmt#Stringer">Stringer</a>。</li>
+      <li>bufio 套件文件：<a href="https://pkg.go.dev/bufio#Scanner">Scanner</a>、<a href="https://pkg.go.dev/bufio#Scanner.Buffer">Scanner.Buffer</a>、<a href="https://pkg.go.dev/bufio#MaxScanTokenSize">MaxScanTokenSize</a>、<a href="https://pkg.go.dev/bufio#Writer">Writer</a>。</li>
+      <li>io 套件文件：<a href="https://pkg.go.dev/io#Reader">Reader</a>、<a href="https://pkg.go.dev/io#Writer">Writer</a>、<a href="https://pkg.go.dev/io#Copy">Copy</a>。</li>
+      <li>os 套件文件：<a href="https://pkg.go.dev/os#pkg-variables">Stdin、Stdout、Stderr</a>、<a href="https://pkg.go.dev/os#Exit">Exit</a>。</li>
+    </ul>
+  </section>
+
   <section aria-labelledby="run">
     <h2 id="run">動手跑</h2>
     <p class="label">在 repo 根目錄</p>
-    <pre class="shell"><code>printf '3\n4\n5\n' | go run ./chapters/02-input-output
-go run ./chapters/02-input-output   <span class="c"># 自己輸入，每行一個數字，Ctrl-D 結束</span>
-go test ./chapters/02-input-output</code></pre>
-    <p><a href="https://github.com/xinqilin/GO-Playground/tree/main/chapters/02-input-output">在 GitHub 看完整程式碼</a></p>
+    <pre class="shell"><code>go run ./chapters/02-input-output                           <span class="c"># 執行本章所有示範</span>
+printf '3\n4\n5\n' | go run ./chapters/02-input-output/sum  <span class="c"># 從 stdin 讀數字</span>
+go test ./chapters/02-input-output/...                      <span class="c"># 驗證頁面上的每一段輸出</span>
+go test ./exercises/02-input-output/                        <span class="c"># 做練習</span></code></pre>
+    <p><a href="https://github.com/xinqilin/GO-Playground/tree/main/chapters/02-input-output">在 GitHub 看本章完整程式碼</a>，或看<a href="https://github.com/xinqilin/GO-Playground/tree/main/exercises/02-input-output">練習題</a>。</p>
   </section>
 </main>
 

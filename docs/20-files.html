@@ -1,0 +1,1029 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>檔案與 I/O｜Go 圖解手冊</title>
+<meta name="description" content="Go 的檔案與 I/O：ReadFile 與 WriteFile、Open 與 OpenFile 的旗標、什麼時候要檢查 Close 的錯誤、io.Copy 與 Reader 的組合、filepath 與 os.Root 擋住路徑穿越、WalkDir 走訪目錄、fs.FS、embed 與 MapFS 測試、暫存檔與 Rename 安全覆寫，附可執行的練習題。">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<header class="site">
+  <a href="index.html">Go 圖解手冊</a>
+  <span class="count">20 / 33</span>
+</header>
+
+<main class="page long">
+  <header class="hero">
+    <div class="num" aria-hidden="true">20</div>
+    <p class="eyebrow">Part 4 · 標準庫實戰 · 第 20 章</p>
+    <h1>檔案與 I/O</h1>
+    <p class="analogy">便當店的檔案櫃：今天的菜單只有一張紙，整張拿出來看就好；一整年的流水帳很厚，只能一頁一頁翻；客人寄來的照片只能放進指定的抽屜；換新價目表時，先把新的寫好，再一次把舊的換下來。</p>
+  </header>
+
+  <nav class="toc-inline" aria-labelledby="toc-title">
+    <p class="label" id="toc-title">本章內容</p>
+    <ol>
+      <li><a href="#goals">本章你會學到</a></li>
+      <li><a href="#whole">一次讀寫整個檔案</a></li>
+      <li><a href="#open">開檔與關檔</a></li>
+      <li><a href="#stream">串流：一塊一塊處理</a></li>
+      <li><a href="#paths">路徑與 os.Root</a></li>
+      <li><a href="#walk">走訪目錄</a></li>
+      <li><a href="#fs">fs.FS 與 embed</a></li>
+      <li><a href="#atomic">暫存檔與安全覆寫</a></li>
+      <li><a href="#pitfalls">常見錯誤</a></li>
+      <li><a href="#java">從 Java 來的你</a></li>
+      <li><a href="#exercises">練習</a></li>
+      <li><a href="#recap">重點回顧</a></li>
+      <li><a href="#further">延伸閱讀</a></li>
+    </ol>
+  </nav>
+
+  <section aria-labelledby="goals">
+    <h2 id="goals">本章你會學到</h2>
+    <ul class="notes">
+      <li>用 os.ReadFile、os.WriteFile 一次讀寫整個檔案，並正確判斷「檔案不存在」。</li>
+      <li>用 os.Open、os.Create、os.OpenFile 開檔，知道什麼時候一定要檢查 Close 的錯誤。</li>
+      <li>用 io.Copy 和幾個 Reader 的組合處理大檔案，記憶體用量固定。</li>
+      <li>用 filepath 組路徑，用 os.Root 擋住「../」這類跑出目錄的檔名。</li>
+      <li>用 filepath.WalkDir 走訪整棵目錄樹，跳過不要的目錄。</li>
+      <li>讓函式收 fs.FS：同一段程式可以讀磁碟、讀 embed 進執行檔的檔案，測試時讀記憶體裡的假檔案。</li>
+      <li>用暫存檔加 Rename 覆寫檔案，寫到一半出錯也不會弄壞舊檔。</li>
+    </ul>
+    <p>先備：<a href="02-input-output.html#rw">02 章的 io.Reader 與 io.Writer</a>、<a href="02-input-output.html#scanner">bufio.Scanner</a>、<a href="04-functions.html#defer">04 章的 defer</a>、<a href="11-errors.html#sentinel">11 章的 errors.Is</a> 與 <a href="11-errors.html#close">Close 的錯誤</a>。</p>
+  </section>
+
+  <section aria-labelledby="whole">
+    <h2 id="whole">1. 一次讀寫整個檔案</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 184" role="img" aria-label="左邊是磁碟上的 menu.txt，右邊是記憶體裡的 []byte；os.ReadFile 把整個檔案讀進來，os.WriteFile 把整個 []byte 寫出去，檔案已經存在就先清空">
+        <title>整個檔案一次進出</title>
+        <rect class="soft" x="16" y="44" width="130" height="92" rx="8"/>
+        <text class="sm mono" x="81" y="84" text-anchor="middle">menu.txt</text>
+        <text class="sm" x="81" y="108" text-anchor="middle">磁碟上的檔案</text>
+        <rect class="acc" x="334" y="44" width="130" height="92" rx="8"/>
+        <text class="sm mono" x="399" y="84" text-anchor="middle">[]byte</text>
+        <text class="sm" x="399" y="108" text-anchor="middle">記憶體</text>
+        <text class="sm mono" x="240" y="60" text-anchor="middle">os.ReadFile</text>
+        <path class="wire" d="M146 72 H322"/>
+        <path class="tip" d="M334 72 L322 66 L322 78 Z"/>
+        <path class="wire" d="M334 112 H158"/>
+        <path class="tip" d="M146 112 L158 106 L158 118 Z"/>
+        <text class="sm mono" x="240" y="132" text-anchor="middle">os.WriteFile</text>
+        <text class="sm t-hot" x="240" y="152" text-anchor="middle">已經存在就先清空</text>
+        <text class="sm" x="240" y="176" text-anchor="middle">一次全部進出：適合菜單、設定檔這種小檔案</text>
+      </svg>
+      <figcaption>ReadFile 和 WriteFile 自己開檔、讀寫、關檔，一行就做完；代價是整個檔案都要放得進記憶體。</figcaption>
+    </figure>
+    <p>最簡單的檔案操作只有兩個函式：<code>os.ReadFile(name)</code> 把整個檔案讀成 <code>[]byte</code>，<code>os.WriteFile(name, data, perm)</code> 把整個 <code>[]byte</code> 寫成一個檔案。開檔、關檔它們都幫你做好了：</p>
+    <pre class="code" data-src="chapters/20-files/whole.go#wholeDemo"><code>func wholeDemo() {
+	dir, done := scratch()
+	defer done()
+
+	path := filepath.Join(dir, "menu.txt")
+	err := os.WriteFile(path, []byte("排骨飯 90\n雞腿飯 100\n"), 0o644)
+	if err != nil {
+		fmt.Println("寫入失敗：", err)
+		return
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		fmt.Println("讀取失敗：", err)
+		return
+	}
+	fmt.Printf("讀回 %d byte：\n%s", len(data), data)
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/20-files#Example_wholeDemo"><code>讀回 27 byte：
+排骨飯 90
+雞腿飯 100</code></pre>
+    <ul class="notes">
+      <li><code>0o644</code> 是檔案權限，只在<strong>建立</strong>新檔時用到：擁有者可讀寫（6），同群組和其他人只能讀（4、4）。實際的權限還會被系統的 umask 拿掉一些位元。一般資料檔用 0o644，只有自己能看的（例如含密碼的設定檔）用 0o600。</li>
+      <li>WriteFile 遇到已經存在的檔案，會先清空再寫。寫到一半出錯，舊內容已經沒了，新內容只有一半（第 7 節教你怎麼避免）。</li>
+      <li>byte 數是 27 不是 13 個字：中文字在 UTF-8 裡一個字 3 個 byte（<a href="08-strings-runes.html#basics">08 章</a>）。</li>
+    </ul>
+    <p>讀檔最常見的錯誤是檔案不存在。os 回傳的錯誤是 <code>*fs.PathError</code>，裡面記著做什麼（Op）、哪個檔案（Path）、作業系統給的原因（Err）。要判斷「是不是不存在」，用 <code>errors.Is(err, fs.ErrNotExist)</code>，不要比對錯誤訊息的字串：</p>
+    <pre class="code" data-src="chapters/20-files/whole.go#loadNotice,missingDemo"><code>func loadNotice(path string) (string, error) {
+	data, err := os.ReadFile(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return "（今天沒有公告）", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
+}
+
+func missingDemo() {
+	dir, done := scratch()
+	defer done()
+
+	path := filepath.Join(dir, "notice.txt")
+	_, err := os.ReadFile(path)
+	fmt.Println("不存在？", errors.Is(err, fs.ErrNotExist))
+
+	if pe, ok := errors.AsType[*fs.PathError](err); ok {
+		fmt.Printf("Op=%s 檔名=%s Err=%v\n", pe.Op, filepath.Base(pe.Path), pe.Err)
+	}
+
+	notice, err := loadNotice(path)
+	fmt.Println(notice, err)
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/20-files#Example_missingDemo"><code>不存在？ true
+Op=open 檔名=notice.txt Err=no such file or directory
+（今天沒有公告） &lt;nil&gt;</code></pre>
+    <ul class="notes">
+      <li>錯誤訊息裡的 <code>no such file or directory</code> 是作業系統給的，Windows 上寫法不一樣；<code>fs.ErrNotExist</code> 在每個系統上都一樣，所以判斷要用它。</li>
+      <li>舊程式常寫 <code>os.IsNotExist(err)</code>，它出現在 errors.Is 之前，不會拆開用 <code>%w</code> 包過的錯誤（<a href="11-errors.html#wrap">11 章</a>）。新程式一律用 errors.Is。同一組還有 <code>fs.ErrExist</code>（已經存在）和 <code>fs.ErrPermission</code>（沒有權限）。</li>
+      <li>loadNotice 把「不存在」當成正常情況處理，其他錯誤（沒有權限、其實是目錄）照樣回傳。只處理你預期的那一種，其他的往上交。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="open">
+    <h2 id="open">2. 開檔與關檔</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 248" role="img" aria-label="三個開檔函式：os.Open 只讀；os.Create 是讀寫、不存在就建立、存在就清空；os.OpenFile 自己組旗標。下方列出四個常用旗標：O_APPEND 每次寫在最後面，O_CREATE 不存在就建立，O_EXCL 搭配 O_CREATE 已經存在就失敗，O_TRUNC 打開時先清空">
+        <title>三個開檔函式與旗標</title>
+        <rect class="soft" x="16" y="16" width="150" height="34" rx="6"/>
+        <text class="sm mono" x="91" y="38" text-anchor="middle">os.Open(name)</text>
+        <text class="sm mono" x="186" y="38">O_RDONLY</text>
+        <text class="sm" x="270" y="38">只能讀</text>
+        <rect class="soft" x="16" y="58" width="150" height="34" rx="6"/>
+        <text class="sm mono" x="91" y="80" text-anchor="middle">os.Create(name)</text>
+        <text class="sm mono" x="186" y="80">O_RDWR|O_CREATE|O_TRUNC</text>
+        <rect class="acc" x="16" y="100" width="150" height="34" rx="6"/>
+        <text class="sm mono" x="91" y="122" text-anchor="middle">os.OpenFile</text>
+        <text class="sm" x="186" y="122">自己組合旗標，再給建立時的權限</text>
+        <path class="wire faint" d="M16 150 H464"/>
+        <text class="sm mono t-acc" x="24" y="176">O_APPEND</text>
+        <text class="sm" x="120" y="176">每次寫入都先移到檔尾</text>
+        <text class="sm mono t-acc" x="24" y="198">O_CREATE</text>
+        <text class="sm" x="120" y="198">檔案不存在就建立</text>
+        <text class="sm mono t-acc" x="24" y="220">O_EXCL</text>
+        <text class="sm" x="120" y="220">搭配 O_CREATE：已經存在就失敗</text>
+        <text class="sm mono t-acc" x="24" y="242">O_TRUNC</text>
+        <text class="sm" x="120" y="242">打開時先清空</text>
+      </svg>
+      <figcaption>Open 和 Create 是 OpenFile 的捷徑。旗標用 | 組合：O_RDONLY、O_WRONLY、O_RDWR 三選一，再加上需要的其他旗標。</figcaption>
+    </figure>
+    <p>要一行一行讀、或是一筆一筆往後加，就要自己開檔。三個函式都回傳 <code>*os.File</code>，它同時是 io.Reader、io.Writer 和 io.Closer，所以 <a href="02-input-output.html#rw">02 章</a>學過的工具（Scanner、Fprintf、io.Copy）全部能用在檔案上。開了就要關：作業系統對一個程式同時開著的檔案數量有上限，忘了關的檔案會一直佔著名額。</p>
+    <pre class="code" data-src="chapters/20-files/open.go#appendCall,countCalls,openDemo"><code>func appendCall(path, line string) (err error) {
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0o644)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		err = errors.Join(err, f.Close())
+	}()
+
+	_, err = fmt.Fprintln(f, line)
+	return err
+}
+
+func countCalls(path string) (int, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return 0, err
+	}
+	defer f.Close()
+
+	n := 0
+	sc := bufio.NewScanner(f)
+	for sc.Scan() {
+		if strings.TrimSpace(sc.Text()) != "" {
+			n++
+		}
+	}
+	return n, sc.Err()
+}
+
+func openDemo() {
+	dir, done := scratch()
+	defer done()
+
+	path := filepath.Join(dir, "calls.log")
+	for _, line := range []string{"A01 排骨飯", "A02 雞腿飯", "", "A03 魚排飯"} {
+		if err := appendCall(path, line); err != nil {
+			fmt.Println("寫入失敗：", err)
+			return
+		}
+	}
+
+	n, err := countCalls(path)
+	fmt.Println("叫了", n, "號", err)
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/20-files#Example_openDemo"><code>叫了 3 號 &lt;nil&gt;</code></pre>
+    <ul class="notes">
+      <li><strong>寫入的檔案</strong>：Close 可能才是真正把資料交出去的時候，它的錯誤一定要回傳。做法和 <a href="11-errors.html#close">11 章</a>一樣：回傳值取名 <code>err</code>，在 defer 裡 <code>err = errors.Join(err, f.Close())</code>。</li>
+      <li><strong>只讀的檔案</strong>：Close 失敗不會讓任何資料不見，<code>defer f.Close()</code> 就夠了。</li>
+      <li><code>O_WRONLY|O_CREATE|O_APPEND</code> 是寫日誌的標準組合：不存在就建立，每次寫入前都先移到檔尾，不會蓋掉前面的紀錄。</li>
+      <li>defer 要寫在檢查 err <strong>之後</strong>。開檔失敗時 f 是 nil，先 defer 再檢查，會在 nil 上呼叫 Close。</li>
+      <li>countCalls 用的 Scanner 一行最多 64 KB，超過要放寬（<a href="02-input-output.html#scanner">02 章</a>）。</li>
+    </ul>
+    <section class="deep" aria-labelledby="sync">
+      <p class="tag">深入：第一次讀可以先跳過</p>
+      <h3 id="sync">寫進去了，就在磁碟上了嗎？</h3>
+      <p>不一定。Write 成功只代表資料交給了作業系統，作業系統通常先放在記憶體裡的快取，稍後才真的寫到磁碟。程式結束沒關係，作業系統還在，資料遲早會寫出去；但如果是整台機器斷電，快取裡的資料就沒了。Close 也不保證資料已經落地。</p>
+      <p>真的需要「確定寫到儲存裝置上了」的時候（例如帳務、或第 7 節換檔之前），呼叫 <code>f.Sync()</code>，它會等作業系統把這個檔案的資料寫到儲存裝置才回傳。Sync 很慢，不要每寫一行就呼叫一次；在「這一批資料一定要保住」的時間點呼叫一次就好。</p>
+    </section>
+  </section>
+
+  <section aria-labelledby="stream">
+    <h2 id="stream">3. 串流：一塊一塊處理</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 204" role="img" aria-label="週一、週二、週三三個 Reader 接進 MultiReader，變成一個 Reader；再經過 TeeReader，讀出來的資料一份寫到目的地，一份送進 sha256 算指紋；io.Copy 每次只搬一塊">
+        <title>把 Reader 接起來</title>
+        <rect class="soft" x="16" y="24" width="70" height="28" rx="6"/>
+        <text class="sm" x="51" y="43" text-anchor="middle">週一</text>
+        <rect class="soft" x="16" y="62" width="70" height="28" rx="6"/>
+        <text class="sm" x="51" y="81" text-anchor="middle">週二</text>
+        <rect class="soft" x="16" y="100" width="70" height="28" rx="6"/>
+        <text class="sm" x="51" y="119" text-anchor="middle">週三</text>
+        <path class="wire" d="M86 38 H100 V114 H86"/>
+        <path class="wire" d="M86 76 H106"/>
+        <path class="tip" d="M118 76 L106 70 L106 82 Z"/>
+        <rect class="box" x="118" y="56" width="110" height="40" rx="8"/>
+        <text class="sm mono" x="173" y="81" text-anchor="middle">MultiReader</text>
+        <path class="wire" d="M228 76 H246"/>
+        <path class="tip" d="M258 76 L246 70 L246 82 Z"/>
+        <rect class="acc" x="258" y="56" width="96" height="40" rx="8"/>
+        <text class="sm mono" x="306" y="81" text-anchor="middle">TeeReader</text>
+        <path class="wire" d="M354 76 H372"/>
+        <path class="tip" d="M384 76 L372 70 L372 82 Z"/>
+        <rect class="soft" x="384" y="56" width="80" height="40" rx="8"/>
+        <text class="sm" x="424" y="81" text-anchor="middle">目的地</text>
+        <path class="wire acc-ln" d="M306 96 V122"/>
+        <path class="tip acc-tip" d="M306 134 L300 122 L312 122 Z"/>
+        <rect class="soft" x="258" y="134" width="96" height="32" rx="6"/>
+        <text class="sm mono" x="306" y="155" text-anchor="middle">sha256</text>
+        <text class="sm t-acc" x="370" y="155">順便算指紋</text>
+        <text class="sm" x="240" y="194" text-anchor="middle">io.Copy 每次只搬一塊（預設 32 KB），檔案再大記憶體用量也固定</text>
+      </svg>
+      <figcaption>Reader 可以像水管一樣接起來：MultiReader 把幾個接成一個，TeeReader 讓流過的資料分一份出去，LimitReader 只放前面一段過去。</figcaption>
+    </figure>
+    <p>一整年的流水帳可能有好幾 GB，ReadFile 會把它整個搬進記憶體。大檔案要用串流處理：每次讀一小塊、處理完、再讀下一塊。<code>io.Copy(dst, src)</code> 就是這樣做的，它內部只有一塊固定大小的緩衝區，不管檔案多大都夠用：</p>
+    <pre class="code" data-src="chapters/20-files/stream.go#copyFile,copyFileDemo"><code>func copyFile(dst, src string) (n int64, err error) {
+	in, err := os.Open(src)
+	if err != nil {
+		return 0, err
+	}
+	defer in.Close()
+
+	out, err := os.Create(dst)
+	if err != nil {
+		return 0, err
+	}
+	defer func() {
+		err = errors.Join(err, out.Close())
+	}()
+
+	return io.Copy(out, in)
+}
+
+func copyFileDemo() {
+	dir, done := scratch()
+	defer done()
+
+	src := filepath.Join(dir, "menu.txt")
+	if err := os.WriteFile(src, []byte("排骨飯 90\n雞腿飯 100\n"), 0o644); err != nil {
+		fmt.Println("寫入失敗：", err)
+		return
+	}
+	n, err := copyFile(filepath.Join(dir, "menu.bak"), src)
+	fmt.Println("複製了", n, "byte", err)
+
+	dst := filepath.Join(dir, "lost.bak")
+	_, err = copyFile(dst, filepath.Join(dir, "lost.txt"))
+	fmt.Println("來源不存在？", errors.Is(err, fs.ErrNotExist))
+	_, err = os.Stat(dst)
+	fmt.Println("目的檔不存在？", errors.Is(err, fs.ErrNotExist))
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/20-files#Example_copyFileDemo"><code>複製了 27 byte &lt;nil&gt;
+來源不存在？ true
+目的檔不存在？ true</code></pre>
+    <p>順序很重要：先打開來源，成功了才建立目的檔。反過來寫，來源不存在時會留下一個空的目的檔，下次還以為備份成功過。</p>
+    <p>io 套件有一組小工具，接收 Reader 再回傳 Reader，可以自由組合。把三天的營業額接成一份，同時算出內容的 SHA-256 指紋，資料只要走過一次：</p>
+    <pre class="code" data-src="chapters/20-files/stream.go#copyWithSum,mergeDemo"><code>func copyWithSum(dst io.Writer, src io.Reader) (int64, string, error) {
+	h := sha256.New()
+	n, err := io.Copy(dst, io.TeeReader(src, h))
+	return n, hex.EncodeToString(h.Sum(nil)), err
+}
+
+func mergeDemo() {
+	days := io.MultiReader(
+		strings.NewReader("週一 12800\n"),
+		strings.NewReader("週二 9650\n"),
+		strings.NewReader("週三 15020\n"),
+	)
+
+	var merged strings.Builder
+	n, sum, err := copyWithSum(&amp;merged, days)
+	fmt.Print(merged.String())
+	fmt.Println(n, "byte，SHA-256 開頭", sum[:12], err)
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/20-files#Example_mergeDemo"><code>週一 12800
+週二 9650
+週三 15020
+38 byte，SHA-256 開頭 36699ab88405 &lt;nil&gt;</code></pre>
+    <p>只想看檔案開頭（例如判斷檔案格式、顯示預覽）時，用 LimitReader 限制最多讀多少：</p>
+    <pre class="code" data-src="chapters/20-files/stream.go#previewDemo"><code>func previewDemo() {
+	const calls = "A01 排骨飯\nA02 雞腿飯\n"
+	for _, n := range []int64{14, 12} {
+		b, err := io.ReadAll(io.LimitReader(strings.NewReader(calls), n))
+		fmt.Printf("前 %d byte：%q %v\n", n, b, err)
+	}
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/20-files#Example_previewDemo"><code>前 14 byte："A01 排骨飯\n" &lt;nil&gt;
+前 12 byte："A01 排骨\xe9\xa3" &lt;nil&gt;</code></pre>
+    <ul class="notes">
+      <li>LimitReader 數的是 byte。限制在 12 byte，剛好切在「飯」的 3 個 byte 中間，拿到兩個不完整的 byte（<code>\xe9\xa3</code>）。要顯示給人看的預覽，切完還要處理半個字（<a href="08-strings-runes.html#basics">08 章</a>）。</li>
+      <li>另外兩個常用的：<code>io.MultiWriter(w1, w2)</code> 把寫進來的資料同時寫到好幾個地方（例如同時寫檔和印到畫面）；<code>io.ReadAll(r)</code> 把 Reader 剩下的全部讀完，和 ReadFile 一樣要小心大小，通常搭配 LimitReader 用。</li>
+      <li>很多小筆的寫入，包一層 <code>bufio.NewWriter</code> 可以減少系統呼叫，記得最後要 Flush（<a href="02-input-output.html#pit-flush">02 章</a>）。</li>
+    </ul>
+    <section class="deep" aria-labelledby="copy-fast">
+      <p class="tag">深入：第一次讀可以先跳過</p>
+      <h3 id="copy-fast">io.Copy 的捷徑</h3>
+      <p>io.Copy 不一定真的用自己的緩衝區搬。來源如果有 <code>WriteTo</code> 方法，或目的地有 <code>ReadFrom</code> 方法，它會直接交給它們處理。<code>*os.File</code> 兩個都有：在 Linux 上，檔案到檔案、檔案到網路連線的複製，可能用 copy_file_range、sendfile、splice 這類系統呼叫，資料不必先搬進你的程式再搬出去。</p>
+      <p>所以用 TeeReader、LimitReader 包住 *os.File，除了多做的事，還會讓這條捷徑失效：io.Copy 只看得到外面那一層，只好退回一般的緩衝區。多數程式感覺不出差別；在搬大量檔案的服務裡，這是 profiling 時值得注意的地方。需要自己提供緩衝區時，用 <code>io.CopyBuffer</code>。</p>
+    </section>
+  </section>
+
+  <section aria-labelledby="paths">
+    <h2 id="paths">4. 路徑與 os.Root</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 214" role="img" aria-label="左邊：filepath.Join 把 uploads 和 ../config.json 接起來，結果跑出 uploads 目錄；右邊：透過 os.Root 開 ../config.json，在目錄的邊界就被擋下，錯誤是 path escapes from parent">
+        <title>Join 擋不住，os.Root 擋得住</title>
+        <text class="sm mono" x="124" y="20" text-anchor="middle">filepath.Join</text>
+        <text class="sm mono t-hot" x="170" y="46" text-anchor="middle">config.json</text>
+        <rect class="soft" x="40" y="74" width="168" height="84" rx="10"/>
+        <text class="sm mono" x="56" y="96">uploads/</text>
+        <path class="wire hot-ln dash" d="M170 146 V66"/>
+        <path class="tip hot-tip" d="M170 54 L164 66 L176 66 Z"/>
+        <text class="sm mono" x="124" y="184" text-anchor="middle">"../config.json"</text>
+        <text class="sm t-hot" x="124" y="204" text-anchor="middle">Join 之後跑出去了</text>
+        <text class="sm mono" x="356" y="20" text-anchor="middle">os.Root</text>
+        <text class="sm mono t-hot" x="356" y="50" text-anchor="middle">path escapes from parent</text>
+        <rect class="acc" x="272" y="74" width="168" height="84" rx="10"/>
+        <text class="sm mono" x="288" y="96">uploads/</text>
+        <path class="wire acc-ln" d="M400 146 V92"/>
+        <path class="tip acc-tip" d="M400 80 L394 92 L406 92 Z"/>
+        <path class="wire hot-ln" d="M384 74 H416"/>
+        <text class="sm mono" x="356" y="184" text-anchor="middle">root.Open("../config.json")</text>
+        <text class="sm t-acc" x="356" y="204" text-anchor="middle">名稱想跑出去就失敗</text>
+      </svg>
+      <figcaption>filepath.Join 只是在處理字串，「..」照樣往上走；os.Root 把一個目錄當成根，經由它的所有操作都出不去。</figcaption>
+    </figure>
+    <p>路徑不要用字串相加。Windows 的分隔符號是 <code>\</code>，macOS 和 Linux 是 <code>/</code>；<code>path/filepath</code> 套件知道現在在哪個系統，組出來、拆開來都用對的符號，還會順便整理多餘的 <code>/</code>、<code>.</code> 和 <code>..</code>：</p>
+    <pre class="code" data-src="chapters/20-files/paths.go#receiptPath,receiptNumber,pathsDemo"><code>func receiptPath(base, month, number string) string {
+	return filepath.Join(base, month, number+".txt")
+}
+
+func receiptNumber(p string) string {
+	return strings.TrimSuffix(filepath.Base(p), filepath.Ext(p))
+}
+
+func pathsDemo() {
+	p := receiptPath("receipts", "2026-11", "A03")
+	fmt.Println(filepath.ToSlash(p), "號碼", receiptNumber(p))
+	fmt.Println("同一個月的放在", filepath.ToSlash(filepath.Dir(p)))
+
+	// 設定檔裡的目錄常常寫得不乾淨，Join 會順便整理好
+	messy := receiptPath("./receipts/", "2026-11/../2026-10", "A01")
+	fmt.Println(filepath.ToSlash(messy), "號碼", receiptNumber(messy))
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/20-files#Example_pathsDemo"><code>receipts/2026-11/A03.txt 號碼 A03
+同一個月的放在 receipts/2026-11
+receipts/2026-10/A01.txt 號碼 A01</code></pre>
+    <ul class="notes">
+      <li>Join 會呼叫 <code>filepath.Clean</code>：重複的分隔符號合成一個，<code>.</code> 去掉，<code>..</code> 和前一段抵銷。所以 <code>"./receipts/"</code> 和 <code>"2026-11/../2026-10"</code> 組出來還是乾淨的路徑。</li>
+      <li>拆路徑用 <code>Dir</code>（最後一段之前）、<code>Base</code>（最後一段）、<code>Ext</code>（副檔名，包含點）。</li>
+      <li><code>filepath.ToSlash</code> 把分隔符號換成 /，示範裡用它讓輸出在每個系統上都一樣。真正拿去開檔的路徑不需要換。</li>
+      <li>還有一個 <code>path</code> 套件，永遠用 / 分隔，給網址、fs.FS（第 6 節）這種「不管作業系統」的路徑用。處理磁碟上的路徑一律用 filepath。</li>
+    </ul>
+    <p>危險的是檔名來自使用者：上傳的檔案、網址裡的參數、壓縮檔裡的路徑。Clean 會讓 <code>..</code> 往上走，接在 uploads 後面就可能跑出去，這叫<strong>路徑穿越</strong>（path traversal）：</p>
+    <pre class="code" data-src="chapters/20-files/paths.go#traversalDemo"><code>func traversalDemo() {
+	for _, name := range []string{"A01.jpg", "../config.json", "photos/../../../etc/passwd"} {
+		p := filepath.Join("uploads", name)
+		fmt.Printf("%s → %s，IsLocal=%v\n", name, filepath.ToSlash(p), filepath.IsLocal(name))
+	}
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/20-files#Example_traversalDemo"><code>A01.jpg → uploads/A01.jpg，IsLocal=true
+../config.json → config.json，IsLocal=false
+photos/../../../etc/passwd → ../etc/passwd，IsLocal=false</code></pre>
+    <p><code>filepath.IsLocal(name)</code>（Go 1.20 起）可以先檢查名稱是不是「留在原地」的相對路徑。但它只看字串：uploads 裡如果有一個指向外面的符號連結，名稱完全合法，打開的卻是外面的檔案。Go 1.24 起有更徹底的做法 <code>os.Root</code>：先把目錄打開成一個根，之後所有操作都透過它，名稱用 <code>..</code>、絕對路徑或符號連結想跑出去，都會失敗：</p>
+    <pre class="code" data-src="chapters/20-files/paths.go#rootDemo"><code>func rootDemo() {
+	dir, done := scratch()
+	defer done()
+
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		fmt.Println("開不了目錄：", err)
+		return
+	}
+	defer root.Close()
+
+	if err := root.WriteFile("A01.jpg", []byte("照片"), 0o644); err != nil {
+		fmt.Println("寫入失敗：", err)
+		return
+	}
+	data, err := root.ReadFile("A01.jpg")
+	fmt.Println(string(data), err)
+
+	for _, name := range []string{"../config.json", "/etc/passwd"} {
+		_, err := root.Open(name)
+		fmt.Println(err)
+	}
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/20-files#Example_rootDemo"><code>照片 &lt;nil&gt;
+openat ../config.json: path escapes from parent
+openat /etc/passwd: path escapes from parent</code></pre>
+    <p>符號連結的情況用測試證明：同一個檔案，直接開打得開，透過 os.Root 就打不開：</p>
+    <pre class="code" data-src="chapters/20-files/main_test.go#TestRootSymlink"><code>func TestRootSymlink(t *testing.T) {
+	outside := t.TempDir()
+	if err := os.WriteFile(filepath.Join(outside, "secret.txt"), []byte("密碼"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	if err := os.Symlink(outside, filepath.Join(dir, "link")); err != nil {
+		t.Skip("這個系統不能建立符號連結：", err)
+	}
+
+	if _, err := os.ReadFile(filepath.Join(dir, "link", "secret.txt")); err != nil {
+		t.Fatalf("直接開應該打得開：%v", err)
+	}
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer root.Close()
+	if _, err := root.ReadFile("link/secret.txt"); err == nil {
+		t.Error("透過 os.Root 不應該讀得到目錄外面的檔案")
+	}
+}</code></pre>
+    <ul class="notes">
+      <li>Root 有 Open、Create、OpenFile、Mkdir、Remove、Stat；ReadFile、WriteFile、MkdirAll、RemoveAll、Rename 是 Go 1.25 加的。只開一個檔案的話，可以用 <code>os.OpenInRoot(dir, name)</code>。</li>
+      <li>需要 fs.FS 的地方，用 <code>root.FS()</code>，它一樣出不去。</li>
+      <li>錯誤訊息的 <code>openat</code> 是底層的系統呼叫名稱。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="walk">
+    <h2 id="walk">5. 走訪目錄</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 236" role="img" aria-label="目錄樹依照字典順序走訪：先是根目錄，接著 2026-10 和它的 A01、A02，再來 2026-11 和 A03；draft 目錄回傳 SkipDir，裡面的 A04 不會被走到；最後是 notes.md">
+        <title>照字典順序，一路往下</title>
+        <text class="sm mono t-acc" x="20" y="28" text-anchor="middle">1</text>
+        <text class="sm mono" x="40" y="28">./</text>
+        <text class="sm mono t-acc" x="20" y="52" text-anchor="middle">2</text>
+        <text class="sm mono" x="64" y="52">2026-10/</text>
+        <text class="sm mono t-acc" x="20" y="76" text-anchor="middle">3</text>
+        <text class="sm mono" x="88" y="76">A01.txt</text>
+        <text class="sm mono t-acc" x="20" y="100" text-anchor="middle">4</text>
+        <text class="sm mono" x="88" y="100">A02.txt</text>
+        <text class="sm mono t-acc" x="20" y="124" text-anchor="middle">5</text>
+        <text class="sm mono" x="64" y="124">2026-11/</text>
+        <text class="sm mono t-acc" x="20" y="148" text-anchor="middle">6</text>
+        <text class="sm mono" x="88" y="148">A03.txt</text>
+        <text class="sm mono t-acc" x="20" y="172" text-anchor="middle">7</text>
+        <text class="sm mono t-hot" x="88" y="172">draft/</text>
+        <text class="sm mono mute" x="112" y="196">A04.txt</text>
+        <text class="sm mono t-acc" x="20" y="220" text-anchor="middle">8</text>
+        <text class="sm mono" x="64" y="220">notes.md</text>
+        <path class="wire faint" d="M46 34 V214"/>
+        <path class="wire faint" d="M70 58 V96"/>
+        <path class="wire faint" d="M70 130 V168"/>
+        <rect class="box" x="228" y="20" width="236" height="68" rx="8"/>
+        <text class="sm" x="242" y="46">照字典順序：每個目錄先輪到</text>
+        <text class="sm" x="242" y="70">自己，再進去走裡面的東西</text>
+        <path class="wire hot-ln dash" d="M140 168 H214"/>
+        <path class="tip hot-tip" d="M228 168 L216 162 L216 174 Z"/>
+        <rect class="hot" x="228" y="146" width="236" height="44" rx="8"/>
+        <text class="sm mono" x="242" y="173">return SkipDir</text>
+        <text class="sm" x="368" y="173">裡面不走</text>
+      </svg>
+      <figcaption>WalkDir 對每個目錄和檔案各呼叫一次你的函式。在目錄上回傳 SkipDir，整個目錄跳過；回傳其他錯誤，整個走訪就停下來。</figcaption>
+    </figure>
+    <p>只要列出一個目錄裡有什麼，用 <code>os.ReadDir(dir)</code>，它回傳依檔名排好的 <code>[]fs.DirEntry</code>。要連子目錄一路走下去，用 <code>filepath.WalkDir</code>。先建一棵發票目錄樹：</p>
+    <pre class="code" data-src="chapters/20-files/walk.go#makeTree,walkDemo"><code>func makeTree(dir string) error {
+	files := map[string]string{
+		"2026-10/A01.txt":       "90",
+		"2026-10/A02.txt":       "100",
+		"2026-11/A03.txt":       "85",
+		"2026-11/draft/A04.txt": "120",
+		"notes.md":              "月底對帳\n",
+	}
+	for name, body := range files {
+		p := filepath.Join(dir, filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			return err
+		}
+		if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func walkDemo() {
+	dir, done := scratch()
+	defer done()
+	if err := makeTree(dir); err != nil {
+		fmt.Println("建立失敗：", err)
+		return
+	}
+
+	err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err // 這個目錄讀不了：回傳錯誤，整個走訪就停下來
+		}
+		rel, err := filepath.Rel(dir, path)
+		if err != nil {
+			return err
+		}
+		rel = filepath.ToSlash(rel)
+
+		if d.IsDir() {
+			if d.Name() == "draft" {
+				fmt.Println("跳過", rel+"/")
+				return filepath.SkipDir
+			}
+			fmt.Println(rel + "/")
+			return nil
+		}
+		info, err := d.Info()
+		if err != nil {
+			return err
+		}
+		fmt.Println(rel, info.Size(), "byte")
+		return nil
+	})
+	fmt.Println("錯誤：", err)
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/20-files#Example_walkDemo"><code>./
+2026-10/
+2026-10/A01.txt 2 byte
+2026-10/A02.txt 3 byte
+2026-11/
+2026-11/A03.txt 2 byte
+跳過 2026-11/draft/
+notes.md 13 byte
+錯誤： &lt;nil&gt;</code></pre>
+    <ul class="notes">
+      <li>走訪的順序是字典順序，每次都一樣，輸出也就固定。代價是 WalkDir 要先把一整個目錄讀進記憶體，再往下走。</li>
+      <li>函式收到的 err 一定先檢查：根目錄不存在、某個目錄讀不了的時候，WalkDir 會帶著錯誤呼叫你，這時 d 可能是 nil。回傳 err 就停止，回傳 nil 就略過這個目錄繼續走。</li>
+      <li><code>fs.DirEntry</code> 是讀目錄時順便拿到的資料，Name、IsDir 不用再問作業系統；要大小、修改時間才呼叫 <code>d.Info()</code>，那會多一次系統呼叫。舊的 <code>filepath.Walk</code> 對每個檔案都先拿完整資訊，所以比較慢，新程式用 WalkDir。</li>
+      <li>找到要的東西就想整個停下來，回傳 <code>filepath.SkipAll</code>（Go 1.20 起）。WalkDir 不會跟著指向目錄的符號連結走進去。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="fs">
+    <h2 id="fs">6. fs.FS 與 embed</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 206" role="img" aria-label="os.DirFS、embed.FS、fstest.MapFS 三種東西都實作 fs.FS 介面，都可以傳給只認得 fs.FS 的 receiptTotal">
+        <title>三種來源，同一個介面</title>
+        <rect class="soft" x="16" y="16" width="124" height="44" rx="6"/>
+        <text class="sm mono" x="78" y="34" text-anchor="middle">os.DirFS(dir)</text>
+        <text class="sm" x="78" y="52" text-anchor="middle">磁碟上的目錄</text>
+        <rect class="soft" x="16" y="76" width="124" height="44" rx="6"/>
+        <text class="sm mono" x="78" y="94" text-anchor="middle">embed.FS</text>
+        <text class="sm" x="78" y="112" text-anchor="middle">編進執行檔</text>
+        <rect class="soft" x="16" y="136" width="124" height="44" rx="6"/>
+        <text class="sm mono" x="78" y="154" text-anchor="middle">fstest.MapFS</text>
+        <text class="sm" x="78" y="172" text-anchor="middle">測試用的假檔案</text>
+        <path class="wire" d="M140 38 H155 V158 H140"/>
+        <path class="wire" d="M140 98 H158"/>
+        <path class="tip" d="M170 98 L158 92 L158 104 Z"/>
+        <rect class="acc" x="170" y="70" width="140" height="56" rx="10"/>
+        <text class="small mono bold" x="240" y="94" text-anchor="middle">fs.FS</text>
+        <text class="sm mono" x="240" y="114" text-anchor="middle">Open(name)</text>
+        <path class="wire" d="M310 98 H334"/>
+        <path class="tip" d="M346 98 L334 92 L334 104 Z"/>
+        <rect class="box" x="346" y="70" width="118" height="56" rx="10"/>
+        <text class="sm mono" x="405" y="94" text-anchor="middle">receiptTotal</text>
+        <text class="sm" x="405" y="114" text-anchor="middle">只認得 fs.FS</text>
+        <text class="sm" x="240" y="198" text-anchor="middle">函式收介面，呼叫的人決定資料從哪裡來</text>
+      </svg>
+      <figcaption>fs.FS 只有一個方法 Open。函式收 fs.FS 而不是目錄路徑，就能讀磁碟、讀 embed 進來的檔案，測試時讀記憶體裡的假檔案。</figcaption>
+    </figure>
+    <p>收目錄路徑的函式很難測試：每個測試都得真的建目錄、寫檔案。<code>io/fs</code> 套件定義了一個唯讀檔案系統的介面 <code>fs.FS</code>，只有一個方法 <code>Open(name string) (fs.File, error)</code>，再搭配一組用它做事的函式：<code>fs.ReadFile</code>、<code>fs.ReadDir</code>、<code>fs.WalkDir</code>、<code>fs.Glob</code>、<code>fs.Sub</code>。把第 5 節的走訪改成收 fs.FS，順便加總發票金額：</p>
+    <pre class="code" data-src="chapters/20-files/fsys.go#receiptTotal,fsDemo"><code>func receiptTotal(fsys fs.FS) (int, error) {
+	total := 0
+	err := fs.WalkDir(fsys, ".", func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() &amp;&amp; d.Name() == "draft" {
+			return fs.SkipDir
+		}
+		if d.IsDir() || path.Ext(p) != ".txt" {
+			return nil
+		}
+
+		data, err := fs.ReadFile(fsys, p)
+		if err != nil {
+			return err
+		}
+		n, err := strconv.Atoi(strings.TrimSpace(string(data)))
+		if err != nil {
+			return fmt.Errorf("%s：%w", p, err)
+		}
+		total += n
+		return nil
+	})
+	return total, err
+}
+
+func fsDemo() {
+	dir, done := scratch()
+	defer done()
+	if err := makeTree(dir); err != nil {
+		fmt.Println("建立失敗：", err)
+		return
+	}
+
+	total, err := receiptTotal(os.DirFS(dir))
+	fmt.Println("磁碟上的發票合計：", total, err)
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/20-files#Example_fsDemo"><code>磁碟上的發票合計： 275 &lt;nil&gt;</code></pre>
+    <ul class="notes">
+      <li>fs.FS 裡的路徑在每個系統上都用 / 分隔、不能用 / 開頭、不能有 <code>.</code> 或 <code>..</code>，根目錄寫成 <code>"."</code>。所以這裡用 <code>path.Ext</code>，不用 filepath。</li>
+      <li>走訪的 callback 拿到的就是相對路徑，不用再 Rel、ToSlash，比第 5 節乾淨。</li>
+      <li>錯誤用 <code>%w</code> 包上檔名，呼叫的人知道是哪一張發票有問題，也還能用 errors.Is 判斷原因。</li>
+    </ul>
+    <p>測試時不必碰磁碟，<code>testing/fstest</code> 的 MapFS 就是一個用 map 做的檔案系統，key 是路徑、value 是內容：</p>
+    <pre class="code" data-src="chapters/20-files/main_test.go#TestReceiptTotal"><code>func TestReceiptTotal(t *testing.T) {
+	fsys := fstest.MapFS{
+		"2026-10/A01.txt":       {Data: []byte("90\n")},
+		"2026-10/notes.md":      {Data: []byte("不是發票")},
+		"2026-11/A02.txt":       {Data: []byte("100")},
+		"2026-11/draft/A03.txt": {Data: []byte("999")},
+	}
+	if got, err := receiptTotal(fsys); got != 190 || err != nil {
+		t.Errorf("receiptTotal = %d, %v；want 190, nil", got, err)
+	}
+
+	fsys["2026-12/A04.txt"] = &amp;fstest.MapFile{Data: []byte("九十")}
+	if _, err := receiptTotal(fsys); err == nil || !strings.Contains(err.Error(), "2026-12/A04.txt") {
+		t.Errorf("金額不是數字時 err = %v；want 錯誤訊息裡有檔名", err)
+	}
+}</code></pre>
+    <p>第三種來源是 <strong>embed</strong>：用 <code>//go:embed</code> 指示，在編譯時把檔案內容放進執行檔。部署時只要帶一個執行檔，網頁範本、預設設定、SQL migration 都跟著走。單一檔案可以放進 string 或 []byte，整個目錄放進 <code>embed.FS</code>，而 embed.FS 也是一個 fs.FS：</p>
+    <pre class="code" data-src="chapters/20-files/embed.go"><code>package main
+
+import (
+	"embed"
+	"fmt"
+	"io/fs"
+)
+
+// 下面兩個變數的內容在編譯時就放進執行檔：部署時只要帶一個執行檔，不用另外帶資料夾。
+// //go:embed 寫在變數的正上方，路徑相對於這個 .go 檔所在的目錄。
+
+//go:embed welcome.txt
+var welcome string
+
+//go:embed receipts
+var receipts embed.FS
+
+// embedDemo 讀 embed 進來的檔案。receipts 是一個 fs.FS，可以直接交給 receiptTotal。
+func embedDemo() {
+	fmt.Print(welcome)
+
+	total, err := receiptTotal(receipts)
+	fmt.Println("embed 進來的發票合計：", total, err)
+
+	names, err := fs.Glob(receipts, "receipts/*/*.txt")
+	fmt.Println(names, err)
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/20-files#Example_embedDemo"><code>歡迎光臨，今日公休：週一
+embed 進來的發票合計： 205 &lt;nil&gt;
+[receipts/2026-12/B01.txt receipts/2027-01/B02.txt receipts/draft/B03.txt] &lt;nil&gt;</code></pre>
+    <ul class="notes">
+      <li><code>//go:embed</code> 要緊貼在<strong>套件層級</strong>的變數宣告上面，中間只能有空行或 // 註解。型別只能是 string、[]byte 或 embed.FS。只用 string、[]byte 時要寫 <code>import _ "embed"</code>。</li>
+      <li>路徑相對於這個 .go 檔所在的目錄，不能有 <code>.</code>、<code>..</code>，也不能用 / 開頭，所以上層目錄的檔案 embed 不到（常見錯誤 7）。</li>
+      <li>embed 整個目錄時，名稱以 <code>.</code> 或 <code>_</code> 開頭的檔案不會被放進去；要包含它們，寫成 <code>//go:embed all:receipts</code>。</li>
+      <li>embed.FS 裡的路徑包含目錄名稱本身（<code>receipts/2026-12/B01.txt</code>）。想讓 receipts 變成根，用 <code>fs.Sub(receipts, "receipts")</code>。</li>
+      <li>內容在編譯時就固定了，執行時改磁碟上的檔案不會影響它；改了檔案要重新編譯。</li>
+    </ul>
+    <section class="deep" aria-labelledby="dirfs">
+      <p class="tag">深入：第一次讀可以先跳過</p>
+      <h3 id="dirfs">os.DirFS 不是保險箱</h3>
+      <p>os.DirFS(dir) 會拒絕帶 <code>..</code> 的名稱（那不是合法的 fs.FS 路徑），看起來像是把存取限制在 dir 裡。但它只保證開檔時的路徑以 dir 開頭；dir 裡如果有指向外面的符號連結，照樣打得開。官方文件特別說明它不能拿來當安全機制。目錄的內容不是你能控制的（例如使用者上傳的東西），改用 <code>os.OpenRoot(dir)</code> 再呼叫 <code>root.FS()</code>。</p>
+      <p>自己實作 fs.FS（例如把 zip 檔或資料庫包成檔案系統）時，用 <code>fstest.TestFS</code> 檢查實作有沒有符合介面的各種約定。</p>
+    </section>
+  </section>
+
+  <section aria-labelledby="atomic">
+    <h2 id="atomic">7. 暫存檔與安全覆寫</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 214" role="img" aria-label="成功時：CreateTemp 建暫存檔、寫入、Sync 和 Close、Rename 一次換成新內容。寫到一半出錯時：CreateTemp、寫入失敗、刪掉暫存檔，舊檔完全沒動到">
+        <title>寫好了才換上去</title>
+        <text class="sm t-acc" x="16" y="30">成功</text>
+        <rect class="soft" x="16" y="40" width="96" height="36" rx="6"/>
+        <text class="sm mono" x="64" y="63" text-anchor="middle">CreateTemp</text>
+        <path class="wire" d="M112 58 H120"/>
+        <path class="tip" d="M132 58 L120 52 L120 64 Z"/>
+        <rect class="soft" x="132" y="40" width="96" height="36" rx="6"/>
+        <text class="sm" x="180" y="63" text-anchor="middle">寫入暫存檔</text>
+        <path class="wire" d="M228 58 H236"/>
+        <path class="tip" d="M248 58 L236 52 L236 64 Z"/>
+        <rect class="soft" x="248" y="40" width="96" height="36" rx="6"/>
+        <text class="sm" x="296" y="63" text-anchor="middle">Sync、Close</text>
+        <path class="wire" d="M344 58 H352"/>
+        <path class="tip" d="M364 58 L352 52 L352 64 Z"/>
+        <rect class="acc" x="364" y="40" width="96" height="36" rx="6"/>
+        <text class="sm mono" x="412" y="63" text-anchor="middle">Rename</text>
+        <text class="sm t-acc" x="412" y="96" text-anchor="middle">一次換成新的</text>
+        <text class="sm t-hot" x="16" y="128">寫到一半出錯</text>
+        <rect class="soft" x="16" y="138" width="96" height="36" rx="6"/>
+        <text class="sm mono" x="64" y="161" text-anchor="middle">CreateTemp</text>
+        <path class="wire" d="M112 156 H120"/>
+        <path class="tip" d="M132 156 L120 150 L120 162 Z"/>
+        <rect class="hot" x="132" y="138" width="96" height="36" rx="6"/>
+        <text class="sm" x="180" y="161" text-anchor="middle">寫入失敗</text>
+        <path class="wire" d="M228 156 H236"/>
+        <path class="tip" d="M248 156 L236 150 L236 162 Z"/>
+        <rect class="soft" x="248" y="138" width="96" height="36" rx="6"/>
+        <text class="sm" x="296" y="161" text-anchor="middle">刪掉暫存檔</text>
+        <rect class="acc" x="364" y="138" width="96" height="36" rx="6"/>
+        <text class="sm" x="412" y="161" text-anchor="middle">舊檔沒動到</text>
+        <text class="sm" x="240" y="204" text-anchor="middle">暫存檔放在同一個目錄，Rename 才能一次換掉</text>
+      </svg>
+      <figcaption>新內容先寫進旁邊的暫存檔，全部成功才用 Rename 換上去。任何時候去讀，看到的不是完整的舊檔，就是完整的新檔。</figcaption>
+    </figure>
+    <p>需要一個用完就丟的檔案或目錄時，不要自己取名字（兩個程式同時跑就會撞名），交給 <code>os.CreateTemp(dir, pattern)</code> 和 <code>os.MkdirTemp(dir, pattern)</code>：pattern 裡的 <code>*</code> 會換成亂數，保證是新的。dir 是空字串時用系統的暫存目錄。這一章每個示範都用這個小工具開自己的暫存目錄：</p>
+    <pre class="code" data-src="chapters/20-files/temp.go#scratch"><code>func scratch() (dir string, done func()) {
+	dir, err := os.MkdirTemp("", "ch20-*")
+	if err != nil {
+		panic(err) // 連暫存目錄都開不了，示範沒辦法繼續
+	}
+	return dir, func() { os.RemoveAll(dir) }
+}</code></pre>
+    <p>測試裡更簡單：<code>t.TempDir()</code> 回傳一個新目錄，測試結束時自動刪掉（練習題就是這樣用的）。</p>
+    <p>暫存檔最重要的用途是<strong>安全覆寫</strong>。WriteFile 先清空舊檔再寫，寫到一半程式當掉、磁碟滿了、或產生內容的程式出錯，檔案就只剩一半。正確的做法是先寫到同一個目錄的暫存檔，全部成功才用 <code>os.Rename</code> 換過去：</p>
+    <pre class="code" data-src="chapters/20-files/temp.go#saveAtomic,atomicDemo"><code>func saveAtomic(path string, write func(io.Writer) error) (err error) {
+	tmp, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path)+".*.tmp")
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if err != nil {
+			tmp.Close()
+			os.Remove(tmp.Name())
+		}
+	}()
+
+	if err = write(tmp); err != nil {
+		return err
+	}
+	if err = tmp.Sync(); err != nil { // 確定資料真的寫到磁碟上，再換名字
+		return err
+	}
+	if err = tmp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmp.Name(), path)
+}
+
+func atomicDemo() {
+	dir, done := scratch()
+	defer done()
+	path := filepath.Join(dir, "prices.txt")
+
+	err := saveAtomic(path, func(w io.Writer) error {
+		_, err := io.WriteString(w, "排骨飯 90\n雞腿飯 100\n")
+		return err
+	})
+	fmt.Println("第一次存檔：", err)
+
+	err = saveAtomic(path, func(w io.Writer) error {
+		if _, err := io.WriteString(w, "排骨飯 95\n"); err != nil {
+			return err
+		}
+		return errors.New("第二行的價格不是數字")
+	})
+	fmt.Println("第二次存檔：", err)
+
+	data, err := os.ReadFile(path)
+	fmt.Printf("檔案內容：%q %v\n", data, err)
+
+	entries, err := os.ReadDir(dir)
+	for _, e := range entries {
+		fmt.Println("目錄裡有：", e.Name())
+	}
+	fmt.Println("錯誤：", err)
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/20-files#Example_atomicDemo"><code>第一次存檔： &lt;nil&gt;
+第二次存檔： 第二行的價格不是數字
+檔案內容："排骨飯 90\n雞腿飯 100\n" &lt;nil&gt;
+目錄裡有： prices.txt
+錯誤： &lt;nil&gt;</code></pre>
+    <ul class="notes">
+      <li>在 macOS、Linux 這類 Unix 系統上，Rename 取代既有的檔案是一次完成的：別的程式去讀，看到的不是舊的就是新的，不會看到一半。官方文件說明在非 Unix 系統（例如 Windows）上，Rename 即使在同一個目錄也不保證是一次完成的。</li>
+      <li>暫存檔一定要和目標放在<strong>同一個目錄</strong>：Rename 不能跨檔案系統，系統的暫存目錄和你的資料常常不在同一個檔案系統上。</li>
+      <li>出錯時 defer 會關掉並刪除暫存檔，目錄裡只剩原本的 prices.txt。成功時暫存檔已經改名，不需要刪。</li>
+      <li>write 參數是一個函式，saveAtomic 不在乎內容怎麼產生：可以是 Fprintf、json 編碼、io.Copy。這種「把動作當參數傳進來」的設計，讓「安全覆寫」這件事只要寫一次。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="pitfalls">
+    <h2 id="pitfalls">常見錯誤</h2>
+    <h3 id="pit-readall">1. 用 ReadFile 讀不知道多大的檔案</h3>
+    <p>log、上傳的檔案、使用者給的輸入，大小都不是你能控制的。ReadFile 和 io.ReadAll 會把它整個放進記憶體。用 Scanner 一行一行讀、用 io.Copy 串流，或至少用 LimitReader 設上限（第 3 節）。</p>
+
+    <h3 id="pit-close">2. 寫入的檔案只寫 defer f.Close()</h3>
+    <p>Close 的錯誤被丟掉，呼叫的人以為存好了。寫入的檔案用具名回傳值加 errors.Join（第 2 節、<a href="11-errors.html#pit-close">11 章</a>）。</p>
+
+    <h3 id="pit-defer-loop">3. 處理很多檔案時，在迴圈裡 defer Close</h3>
+    <p>defer 要等整個函式結束才執行，迴圈跑一萬圈就同時開著一萬個檔案，很快就會碰到「too many open files」。把每一圈的工作抽成一個函式，讓 defer 在那個函式結束時執行（<a href="04-functions.html#pit-defer-loop">04 章</a>）。只有像練習 2 那樣，所有檔案本來就要同時開著的時候，迴圈裡 defer 才是對的。</p>
+
+    <h3 id="pit-concat">4. 用字串相加組路徑</h3>
+    <p><code>dir + "/" + name</code> 在 Windows 上分隔符號不對，dir 結尾已經有 / 時還會多一個。用 filepath.Join；處理 fs.FS、網址的路徑才用 path（第 4 節）。</p>
+
+    <h3 id="pit-traversal">5. 直接用使用者給的檔名開檔</h3>
+    <p><code>filepath.Join(uploads, name)</code> 擋不住 <code>../</code>，也擋不住符號連結。用 os.Root 把操作關在目錄裡（第 4 節、練習 5）。</p>
+
+    <h3 id="pit-flush">6. 用了 bufio.Writer 卻忘了 Flush</h3>
+    <p>資料還在 bufio 的緩衝區裡，檔案就關了，內容少了最後一段，小檔案甚至整個是空的（練習 6、<a href="02-input-output.html#pit-flush">02 章</a>）。</p>
+
+    <h3 id="pit-embed">7. embed 上層目錄的檔案</h3>
+    <p>embed 的路徑不能有 <code>..</code>。把要 embed 的檔案搬進套件的目錄（或子目錄），或是在上層目錄開一個專門 embed 的套件，再 import 它。</p>
+    <pre class="code bad" data-compile-error><code>package main
+
+import (
+	_ "embed"
+	"fmt"
+)
+
+//go:embed ../menu.txt
+var menu string
+
+func main() {
+	fmt.Print(menu)
+}</code></pre>
+    <p class="label">go build</p>
+    <pre class="out err"><code>main.go:8:12: pattern ../menu.txt: invalid pattern syntax</code></pre>
+
+    <h3 id="pit-overwrite">8. 用 WriteFile 直接覆寫重要的檔案</h3>
+    <p>寫到一半出錯，舊內容已經被清空了。設定檔、資料檔、任何壞掉會很麻煩的檔案，用暫存檔加 Rename（第 7 節）。</p>
+  </section>
+
+  <section aria-labelledby="java">
+    <h2 id="java">從 Java 來的你</h2>
+    <div class="table-wrap">
+      <table class="vs">
+        <thead><tr><th scope="col">主題</th><th scope="col">Java</th><th scope="col">Go</th></tr></thead>
+        <tbody>
+          <tr><th scope="row">整個讀寫</th><td class="java"><code>Files.readString</code>、<code>Files.writeString</code></td><td><code>os.ReadFile</code>、<code>os.WriteFile</code></td></tr>
+          <tr><th scope="row">檔案不存在</th><td class="java">丟 <code>NoSuchFileException</code></td><td>回傳錯誤，<code>errors.Is(err, fs.ErrNotExist)</code></td></tr>
+          <tr><th scope="row">用完關掉</th><td class="java">try-with-resources</td><td><code>defer f.Close()</code>；寫入的檔案要檢查 Close 的錯誤</td></tr>
+          <tr><th scope="row">串流複製</th><td class="java"><code>InputStream.transferTo</code></td><td><code>io.Copy</code></td></tr>
+          <tr><th scope="row">接起好幾個串流</th><td class="java"><code>SequenceInputStream</code></td><td><code>io.MultiReader</code></td></tr>
+          <tr><th scope="row">組路徑</th><td class="java"><code>Path.resolve</code></td><td><code>filepath.Join</code></td></tr>
+          <tr><th scope="row">走訪目錄</th><td class="java"><code>Files.walk</code>、<code>Files.walkFileTree</code></td><td><code>filepath.WalkDir</code>、<code>fs.WalkDir</code></td></tr>
+          <tr><th scope="row">打包進程式的檔案</th><td class="java">classpath 資源、<code>getResourceAsStream</code></td><td><code>//go:embed</code>、<code>embed.FS</code></td></tr>
+          <tr><th scope="row">暫存檔</th><td class="java"><code>Files.createTempFile</code></td><td><code>os.CreateTemp</code>；測試用 <code>t.TempDir()</code></td></tr>
+          <tr><th scope="row">原子換檔</th><td class="java"><code>Files.move</code> 加 <code>ATOMIC_MOVE</code></td><td><code>os.Rename</code>（Unix 上取代既有檔案是一次完成的）</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>Java 用 InputStream、Reader、Channel 好幾套階層；Go 只有 io.Reader 和 io.Writer 兩個小介面，檔案、網路連線、壓縮、雜湊、記憶體裡的 buffer 全都實作它們，所以本章的每一個工具都能和其他章的東西接在一起。</p>
+  </section>
+
+  <section aria-labelledby="exercises">
+    <h2 id="exercises">練習</h2>
+    <p>題目在 <code>exercises/20-files/exercises.go</code>。測試只在 <code>t.TempDir()</code> 開的暫存目錄裡讀寫，跑完自動刪掉。</p>
+    <pre class="shell"><code>go test ./exercises/20-files/                  <span class="c"># 跑全部練習</span>
+go test ./exercises/20-files/ -run TestMerge   <span class="c"># 只跑一題</span>
+go test -tags solution ./exercises/20-files/   <span class="c"># 跑參考解答</span></code></pre>
+    <ol class="exercises">
+      <li>
+        <h3><span class="level l1">入門</span>練習 1：第一次開店</h3>
+        <p>讀價目表；還沒有價目表時，用預設內容建一個。</p>
+        <pre class="code" data-src="exercises/20-files/exercises.go#LoadOrInit"><code>func LoadOrInit(path, initial string) (string, error) {
+	// TODO: 實作
+	return "", nil
+}</code></pre>
+        <p>測試：<code>TestLoadOrInit</code>。</p>
+        <details><summary>提示</summary><p>先 ReadFile。成功就回傳；<code>errors.Is(err, fs.ErrNotExist)</code> 才 WriteFile；其他錯誤（path 是目錄時 ReadFile 也會失敗）直接回傳。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l2">進階</span>練習 2：一週的營業額</h3>
+        <p>把好幾天的檔案接成一個。</p>
+        <pre class="code" data-src="exercises/20-files/exercises.go#Merge"><code>func Merge(dst string, srcs ...string) (int64, error) {
+	// TODO: 實作
+	return 0, nil
+}</code></pre>
+        <p>測試：<code>TestMerge</code>。</p>
+        <details><summary>提示</summary><p>第一個迴圈 os.Open 每個來源，放進 <code>[]io.Reader</code>；全部成功才 os.Create(dst)。<code>io.Copy(out, io.MultiReader(readers...))</code> 一次搬完。dst 的 Close 錯誤用第 2 節的寫法。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l2">進階</span>練習 3：每個月用了多少空間</h3>
+        <p>算出每個最上層目錄的大小。參數是 fs.FS，測試用 MapFS。</p>
+        <pre class="code" data-src="exercises/20-files/exercises.go#Usage"><code>func Usage(fsys fs.FS) (map[string]int64, error) {
+	// TODO: 實作
+	return nil, nil
+}</code></pre>
+        <p>測試：<code>TestUsage</code>。</p>
+        <details><summary>提示</summary><p>fs.WalkDir 走過所有檔案，<code>d.Info()</code> 拿大小。路徑的第一段就是最上層目錄：<code>strings.Cut(p, "/")</code> 沒切到 / 時，檔案就在最上層。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l3">挑戰</span>練習 4：叫號紀錄輪替</h3>
+        <p>日誌檔太大時，把舊的往後挪一號，只保留 keep 份。</p>
+        <pre class="code" data-src="exercises/20-files/exercises.go#Rotate"><code>func Rotate(path string, keep int) error {
+	// TODO: 實作
+	return nil
+}</code></pre>
+        <p>測試：<code>TestRotate</code>。</p>
+        <details><summary>提示</summary><p>從編號最大的開始挪（keep-1 → keep，再 keep-2 → keep-1…），才不會蓋掉還沒挪的檔案。Rename 遇到不存在的來源會回傳 fs.ErrNotExist 的錯誤，那種就跳過。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l3">挑戰</span>練習 5：收客人的照片</h3>
+        <p>檔名和內容都來自外面，三種情況都要擋：跑出目錄、蓋掉別人的檔案、檔案太大。</p>
+        <pre class="code" data-src="exercises/20-files/exercises.go#SaveUpload"><code>func SaveUpload(dir, name string, r io.Reader, limit int64) error {
+	// TODO: 實作
+	return nil
+}</code></pre>
+        <p>測試：<code>TestSaveUpload</code>。</p>
+        <details><summary>提示</summary><p>os.OpenRoot(dir)，再用 root.OpenFile 加上 <code>O_CREATE|O_EXCL</code>。用 <code>io.LimitReader(r, limit+1)</code> 複製：多讀到 1 個 byte 就代表超過了，關檔後用 root.Remove 刪掉。注意：已經存在的檔案不能刪，所以刪檔的 defer 要寫在 OpenFile 成功之後。</p></details>
+      </li>
+      <li>
+        <h3><span class="level fix">找錯</span>練習 6：空白的報表</h3>
+        <p>報表檔建立了，打開卻是空的。</p>
+        <pre class="code" data-src="exercises/20-files/exercises.go#WriteReport"><code>func WriteReport(path string, rows []string) error {
+	f, err := os.Create(path)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	w := bufio.NewWriter(f)
+	for i, row := range rows {
+		if _, err := fmt.Fprintf(w, "%d. %s\n", i+1, row); err != nil {
+			return err
+		}
+	}
+	return nil
+}</code></pre>
+        <p>測試：<code>TestWriteReport</code>。</p>
+        <details><summary>提示</summary><p>常見錯誤 2 和 6，兩個都要修。</p></details>
+      </li>
+    </ol>
+    <p><a href="https://github.com/xinqilin/GO-Playground/blob/main/exercises/20-files/solution.go">參考解答</a>：先自己寫完再看。測試通過的寫法都是對的。</p>
+  </section>
+
+  <section aria-labelledby="recap">
+    <h2 id="recap">重點回顧</h2>
+    <ul class="recap">
+      <li>小檔案用 os.ReadFile、os.WriteFile；WriteFile 會先清空舊檔。</li>
+      <li>判斷檔案不存在用 <code>errors.Is(err, fs.ErrNotExist)</code>，不要比對字串，也不要用 os.IsNotExist。</li>
+      <li>os.Open 只讀、os.Create 清空重寫、os.OpenFile 自己組旗標；寫日誌用 O_WRONLY|O_CREATE|O_APPEND。</li>
+      <li>寫入的檔案一定要檢查 Close 的錯誤；只讀的檔案 defer f.Close() 就好。</li>
+      <li>大檔案用 io.Copy 和 Scanner 串流處理；MultiReader、TeeReader、LimitReader 可以自由組合。</li>
+      <li>路徑用 filepath.Join；使用者給的檔名用 os.Root 開，擋住 <code>..</code>、絕對路徑和符號連結。</li>
+      <li>filepath.WalkDir 照字典順序走訪，SkipDir 跳過目錄；callback 先檢查 err。</li>
+      <li>函式收 fs.FS：磁碟用 os.DirFS 或 root.FS()，執行檔裡用 embed.FS，測試用 fstest.MapFS。</li>
+      <li>重要的檔案先寫暫存檔，Sync、Close 之後再 Rename 換上去。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="further">
+    <h2 id="further">延伸閱讀</h2>
+    <ul class="notes">
+      <li>套件文件：<a href="https://pkg.go.dev/os">os</a>、<a href="https://pkg.go.dev/io">io</a>、<a href="https://pkg.go.dev/io/fs">io/fs</a>、<a href="https://pkg.go.dev/path/filepath">path/filepath</a>、<a href="https://pkg.go.dev/embed">embed</a>、<a href="https://pkg.go.dev/testing/fstest">testing/fstest</a>。</li>
+      <li>Go blog：<a href="https://go.dev/blog/osroot">Traversal-resistant file APIs</a>（os.Root 的設計和使用時機）。</li>
+      <li>Go 1.24 版本說明：<a href="https://go.dev/doc/go1.24#directory-limited-filesystem-access">Directory-limited filesystem access</a>。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="run">
+    <h2 id="run">動手跑</h2>
+    <p class="label">在 repo 根目錄</p>
+    <pre class="shell"><code>go run ./chapters/20-files          <span class="c"># 執行本章的示範（只在暫存目錄裡讀寫）</span>
+go test ./chapters/20-files         <span class="c"># 驗證頁面上的每一段輸出</span>
+go test ./exercises/20-files/       <span class="c"># 做練習</span></code></pre>
+    <p><a href="https://github.com/xinqilin/GO-Playground/tree/main/chapters/20-files">在 GitHub 看本章完整程式碼</a>，或看<a href="https://github.com/xinqilin/GO-Playground/tree/main/exercises/20-files">練習題</a>。</p>
+  </section>
+</main>
+
+<nav class="pager" aria-label="章節導覽">
+  <a class="prev" href="19-concurrency-patterns.html">← 19 並行模式</a>
+  <a class="home" href="index.html">目錄</a>
+  <a class="next" href="21-cli.html">21 命令列工具 →</a>
+</nav>
+</body>
+</html>

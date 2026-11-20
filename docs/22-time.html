@@ -1,0 +1,816 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>時間｜Go 圖解手冊</title>
+<meta name="description" content="Go 的時間：Time 與 Duration、用 2006-01-02 15:04:05 寫版面、時區與 time/tzdata、AddDate 的月底進位與夏令時間、Equal 與單調時鐘、Timer、Ticker、AfterFunc，以及注入時鐘和 synctest 假時間讓時間可以測試，附可執行的練習題。">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<header class="site">
+  <a href="index.html">Go 圖解手冊</a>
+  <span class="count">22 / 33</span>
+</header>
+
+<main class="page long">
+  <header class="hero">
+    <div class="num" aria-hidden="true">22</div>
+    <p class="eyebrow">Part 4 · 標準庫實戰 · 第 22 章</p>
+    <h1>時間</h1>
+    <p class="analogy">便當店牆上的時鐘告訴你「現在是哪一刻」，廚房的計時器告訴你「還要多久」。同一刻，台北的時鐘指著 6 點半，東京的指著 7 點半；而「下個月的今天」要看日曆，不是加 30 天。</p>
+  </header>
+
+  <nav class="toc-inline" aria-labelledby="toc-title">
+    <p class="label" id="toc-title">本章內容</p>
+    <ol>
+      <li><a href="#goals">本章你會學到</a></li>
+      <li><a href="#basics">Time 與 Duration</a></li>
+      <li><a href="#layout">格式化與解析</a></li>
+      <li><a href="#zones">時區</a></li>
+      <li><a href="#calendar">日曆的計算</a></li>
+      <li><a href="#compare">比較、單調時鐘與 Unix 時間</a></li>
+      <li><a href="#timers">計時器</a></li>
+      <li><a href="#testing">讓時間可以測試</a></li>
+      <li><a href="#pitfalls">常見錯誤</a></li>
+      <li><a href="#java">從 Java 來的你</a></li>
+      <li><a href="#exercises">練習</a></li>
+      <li><a href="#recap">重點回顧</a></li>
+      <li><a href="#further">延伸閱讀</a></li>
+    </ol>
+  </nav>
+
+  <section aria-labelledby="goals">
+    <h2 id="goals">本章你會學到</h2>
+    <ul class="notes">
+      <li>分清楚「時間點」time.Time 和「時間長度」time.Duration，以及它們之間的加減。</li>
+      <li>用參考時間 <code>2006-01-02 15:04:05</code> 寫格式化和解析的版面。</li>
+      <li>時區：同一個瞬間換時區顯示、解析沒有時區的字串、把時區資料編進執行檔。</li>
+      <li>日曆的計算：AddDate 的月底進位、月底怎麼求、Truncate 為什麼不是當地午夜、夏令時間那一天有幾個小時。</li>
+      <li>用 Equal 比較時間；time.Now 帶著的單調時鐘；Unix 時間。</li>
+      <li>Timer、Ticker、AfterFunc 的差別和收尾。</li>
+      <li>讓和時間有關的程式可以測試：注入「現在幾點」，或用 synctest 的假時間。</li>
+    </ul>
+    <p>先備：<a href="16-select.html#timers">16 章的 time.After 與 Timer</a>、<a href="15-channels.html#deadlock">15 章的 synctest</a>、<a href="18-context.html">18 章的 context</a>。</p>
+    <p>本章的示範都用 <code>time.Date</code> 寫死時間，不用 time.Now()，輸出才會每次都一樣。這本身就是一個重點：和時間有關的程式，要能指定「現在幾點」才測得了，第 7 節會再談。</p>
+  </section>
+
+  <section aria-labelledby="basics">
+    <h2 id="basics">1. Time 與 Duration</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 180" role="img" aria-label="時間軸上，11:52 下單是一個點；做菜 15 分鐘和外送 25 分 30 秒是兩段長度；加起來得到 12:32:30 送達這個點。時間點加長度是時間點，兩個時間點相減是長度">
+        <title>點和長度</title>
+        <rect class="soft" x="60" y="40" width="150" height="26" rx="4"/>
+        <text class="sm" x="135" y="58" text-anchor="middle">做菜 15m</text>
+        <rect class="soft" x="210" y="40" width="170" height="26" rx="4"/>
+        <text class="sm" x="295" y="58" text-anchor="middle">外送 25m30s</text>
+        <path class="wire" d="M30 86 H438"/>
+        <path class="tip" d="M450 86 L438 80 L438 92 Z"/>
+        <circle class="acc" cx="60" cy="86" r="6"/>
+        <circle class="acc" cx="380" cy="86" r="6"/>
+        <text class="sm" x="60" y="114" text-anchor="middle">下單 11:52</text>
+        <text class="sm" x="380" y="114" text-anchor="middle">送達 12:32:30</text>
+        <text class="sm" x="240" y="146" text-anchor="middle">Time + Duration → Time</text>
+        <text class="sm" x="240" y="168" text-anchor="middle">Time − Time → Duration</text>
+      </svg>
+      <figcaption>time.Time 是時間軸上的一個點，time.Duration 是一段長度。點加長度得到另一個點；兩個點相減得到長度。</figcaption>
+    </figure>
+    <p>time 套件最重要的兩個型別：<code>time.Time</code> 表示一個時間點，例如「2026 年 11 月 19 日 11:52」；<code>time.Duration</code> 表示一段時間長度，例如「15 分鐘」。它們之間的運算用方法來做：<code>t.Add(d)</code> 是點加長度，<code>t.Sub(u)</code> 是兩個點相減。外送的預計送達時間：</p>
+    <pre class="code" data-src="chapters/22-time/basics.go#etaDemo"><code>func etaDemo() {
+	ordered := time.Date(2026, time.November, 19, 11, 52, 0, 0, time.UTC)
+	cook := 15 * time.Minute
+	ride := 25*time.Minute + 30*time.Second
+
+	eta := ordered.Add(cook + ride)
+	fmt.Println("總共要花", cook+ride)
+	fmt.Println("預計送達", eta.Format(time.TimeOnly))
+
+	promised := time.Date(2026, time.November, 19, 12, 30, 0, 0, time.UTC)
+	fmt.Println("比答應的晚了", eta.Sub(promised))
+}</code></pre>
+    <pre class="out" data-example="chapters/22-time#Example_etaDemo"><code>總共要花 40m30s
+預計送達 12:32:30
+比答應的晚了 2m30s</code></pre>
+    <ul class="notes">
+      <li><code>time.Date(年, 月, 日, 時, 分, 秒, 奈秒, 時區)</code> 組出一個時間點。月份是 <code>time.November</code> 這種具名常數，不容易把月和日寫反。</li>
+      <li>時區是必填的：同樣是「11:52」，在台北和在倫敦是不同的時間點（第 3 節）。</li>
+      <li>Duration 印出來是 <code>40m30s</code> 這種格式，人看得懂，也能用 time.ParseDuration 解析回來。</li>
+    </ul>
+    <p>Duration 其實就是 <code>int64</code>，單位是奈秒。<code>time.Minute</code> 是 60,000,000,000 這個常數，<code>15 * time.Minute</code> 就是 15 分鐘：</p>
+    <pre class="code" data-src="chapters/22-time/basics.go#durationDemo"><code>func durationDemo() {
+	d := 90 * time.Minute
+	fmt.Println(d, d.Hours(), int64(d))
+
+	wait, err := time.ParseDuration("1h15m30s")
+	fmt.Println(wait, wait.Minutes(), err)
+
+	people := 7
+	perPerson := 3 * time.Minute
+	fmt.Println("排隊要等", time.Duration(people)*perPerson)
+
+	fmt.Println((95 * time.Second).Round(time.Minute), (95 * time.Second).Truncate(time.Minute))
+}</code></pre>
+    <pre class="out" data-example="chapters/22-time#Example_durationDemo"><code>1h30m0s 1.5 5400000000000
+1h15m30s 75.5 &lt;nil&gt;
+排隊要等 21m0s
+2m0s 1m0s</code></pre>
+    <p>注意第三段：人數 people 是 int 變數，不能直接乘上 Duration。<code>15 * time.Minute</code> 可以，是因為 15 是沒有型別的常數，會自動變成 Duration；變數就不會：</p>
+    <pre class="code bad" data-compile-error><code>package main
+
+import (
+	"fmt"
+	"time"
+)
+
+func main() {
+	people := 7
+	perPerson := 3 * time.Minute
+	fmt.Println(people * perPerson)
+}</code></pre>
+    <p class="label">編譯錯誤</p>
+    <pre class="out err"><code>./main.go:11:14: invalid operation: people * perPerson (mismatched types int and time.Duration)</code></pre>
+    <p>寫成 <code>time.Duration(people) * perPerson</code>：先把人數轉成 Duration，意思是「7 倍」，再乘上每人 3 分鐘。反過來，<code>time.Duration(5)</code> 不是 5 秒，是 5 奈秒；從設定檔讀到「5」這種數字時，記得乘上單位：<code>time.Duration(n) * time.Second</code>。</p>
+    <ul class="notes">
+      <li><code>d.Hours()</code>、<code>d.Minutes()</code>、<code>d.Seconds()</code> 回傳 float64，<code>d.Milliseconds()</code> 回傳 int64。</li>
+      <li><code>d.Round(m)</code> 四捨五入、<code>d.Truncate(m)</code> 無條件捨去到 m 的倍數。給人看的時候很好用：95 秒顯示成「約 2 分鐘」。</li>
+      <li>int64 的奈秒大約能表示正負 290 年，一般用途不會超過。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="layout">
+    <h2 id="layout">2. 格式化與解析</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 180" role="img" aria-label="Go 的版面用一個固定的參考時間 2006-01-02 15:04:05 -0700 來表示格式：2006 是年、01 是月、02 是日、15 是 24 小時制的時、04 是分、05 是秒、-0700 是時區。記法是 1 月 2 日下午 3 點 4 分 5 秒，06 年，時區 -7">
+        <title>參考時間的每一段</title>
+        <rect class="acc" x="47" y="40" width="50" height="34" rx="6"/>
+        <text class="sm mono" x="72" y="62" text-anchor="middle">2006</text>
+        <text class="sm mono" x="105" y="62" text-anchor="middle">-</text>
+        <rect class="acc" x="113" y="40" width="36" height="34" rx="6"/>
+        <text class="sm mono" x="131" y="62" text-anchor="middle">01</text>
+        <text class="sm mono" x="157" y="62" text-anchor="middle">-</text>
+        <rect class="acc" x="165" y="40" width="36" height="34" rx="6"/>
+        <text class="sm mono" x="183" y="62" text-anchor="middle">02</text>
+        <rect class="acc" x="217" y="40" width="36" height="34" rx="6"/>
+        <text class="sm mono" x="235" y="62" text-anchor="middle">15</text>
+        <text class="sm mono" x="261" y="62" text-anchor="middle">:</text>
+        <rect class="acc" x="269" y="40" width="36" height="34" rx="6"/>
+        <text class="sm mono" x="287" y="62" text-anchor="middle">04</text>
+        <text class="sm mono" x="313" y="62" text-anchor="middle">:</text>
+        <rect class="acc" x="321" y="40" width="36" height="34" rx="6"/>
+        <text class="sm mono" x="339" y="62" text-anchor="middle">05</text>
+        <rect class="acc" x="373" y="40" width="60" height="34" rx="6"/>
+        <text class="sm mono" x="403" y="62" text-anchor="middle">-0700</text>
+        <text class="sm" x="72" y="98" text-anchor="middle">年</text>
+        <text class="sm" x="131" y="98" text-anchor="middle">月</text>
+        <text class="sm" x="183" y="98" text-anchor="middle">日</text>
+        <text class="sm" x="235" y="98" text-anchor="middle">時</text>
+        <text class="sm" x="287" y="98" text-anchor="middle">分</text>
+        <text class="sm" x="339" y="98" text-anchor="middle">秒</text>
+        <text class="sm" x="403" y="98" text-anchor="middle">時區</text>
+        <text class="sm" x="240" y="140" text-anchor="middle">記法：1 月 2 日 下午 3 點 4 分 5 秒，06 年，時區 -7</text>
+        <text class="sm" x="240" y="164" text-anchor="middle">版面裡寫 YYYY、MM 這種字，Go 不認得，原樣印出來</text>
+      </svg>
+      <figcaption>Go 不用 yyyy、MM 這種代號，而是把一個固定的參考時間「寫成你要的樣子」。每一段數字都不一樣，所以 Go 認得出哪一段是什麼。</figcaption>
+    </figure>
+    <p>其他語言用 <code>yyyy-MM-dd</code> 這種代號描述格式。Go 用的是一個具體的時間：<strong>2006 年 1 月 2 日 15 點 04 分 05 秒，時區 -0700</strong>。想要什麼格式，就把這個參考時間照那個格式寫出來，這個字串叫做<strong>版面</strong>（layout）：</p>
+    <pre class="code" data-src="chapters/22-time/layout.go#weekdays,receiptStamp,layoutDemo"><code>var weekdays = [...]string{"日", "一", "二", "三", "四", "五", "六"}
+
+func receiptStamp(t time.Time) string {
+	return t.Format("2006/01/02") + "（" + weekdays[t.Weekday()] + "）" + t.Format("15:04")
+}
+
+func layoutDemo() {
+	t := time.Date(2026, time.November, 19, 18, 30, 5, 0, time.UTC)
+	fmt.Println(t.Format(time.DateTime))
+	fmt.Println(t.Format(time.RFC3339))
+	fmt.Println(t.Format("01/02 15:04"), t.Format("1/2 3:04PM"), t.Format("Mon Jan 2"))
+	fmt.Println(receiptStamp(t))
+	fmt.Println(t.Format("YYYY-MM-DD hh:mm")) // 其他語言的寫法：沒有一個是 Go 認得的數字
+}</code></pre>
+    <pre class="out" data-example="chapters/22-time#Example_layoutDemo"><code>2026-11-19 18:30:05
+2026-11-19T18:30:05Z
+11/19 18:30 11/19 6:30PM Thu Nov 19
+2026/11/19（四）18:30
+YYYY-MM-DD hh:mm</code></pre>
+    <ul class="notes">
+      <li>常用的版面已經有常數：<code>time.DateTime</code>（2006-01-02 15:04:05）、<code>time.DateOnly</code>、<code>time.TimeOnly</code>（Go 1.20 起），以及 <code>time.RFC3339</code>。在 API、JSON、log 裡交換時間，用 RFC3339，它一定帶著時區。</li>
+      <li><code>01</code> 補零、<code>1</code> 不補零；<code>15</code> 是 24 小時制，<code>3</code> 搭配 <code>PM</code> 是 12 小時制；<code>Mon</code>、<code>Jan</code> 是英文的星期和月份。</li>
+      <li>最後一行：<code>YYYY-MM-DD hh:mm</code> 裡沒有任何參考時間的數字，Go 全部當成一般文字，原樣印出來，不會報錯。</li>
+      <li>月份、星期的名稱只有英文。中文的星期就像 receiptStamp 一樣，用 <code>t.Weekday()</code>（星期日是 0）自己對照。</li>
+    </ul>
+    <p>反過來，<code>time.Parse(版面, 字串)</code> 把字串解析成時間，版面要和字串的樣子<strong>完全一樣</strong>，連分隔符號都是：</p>
+    <pre class="code" data-src="chapters/22-time/layout.go#parseDemo"><code>func parseDemo() {
+	const layout = "2006/01/02 15:04"
+	t, err := time.Parse(layout, "2026/11/19 18:30")
+	fmt.Println(t, err)
+
+	_, err = time.Parse(layout, "2026-11-19 18:30") // 分隔符號不一樣
+	fmt.Println(err)
+
+	_, err = time.Parse(time.DateOnly, "2026-02-30")
+	fmt.Println(err)
+}</code></pre>
+    <pre class="out" data-example="chapters/22-time#Example_parseDemo"><code>2026-11-19 18:30:00 +0000 UTC &lt;nil&gt;
+parsing time "2026-11-19 18:30" as "2006/01/02 15:04": cannot parse "-11-19 18:30" as "/"
+parsing time "2026-02-30": day out of range</code></pre>
+    <ul class="notes">
+      <li>解析出來的時間在 UTC：字串裡沒有時區，Parse 就當成 UTC。這常常不是你要的，第 3 節會說明。</li>
+      <li>錯誤訊息會指出卡在哪一段：<code>cannot parse "-11-19 18:30" as "/"</code> 表示那裡應該是 <code>/</code>。</li>
+      <li>Parse 會檢查日期存不存在，2 月 30 日是錯誤；但第 4 節的 <code>time.Date</code> 不檢查，它會進位。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="zones">
+    <h2 id="zones">3. 時區</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 186" role="img" aria-label="同一個瞬間，在 UTC 是 10:30，在台北（+08:00）是 18:30，在東京（+09:00）是 19:30。Time 記的是瞬間，In 只換顯示用的時區">
+        <title>同一個瞬間，三個時鐘</title>
+        <rect class="acc" x="170" y="12" width="140" height="34" rx="8"/>
+        <text class="sm" x="240" y="34" text-anchor="middle">同一個瞬間</text>
+        <path class="wire" d="M240 46 V60 H85 V68"/>
+        <path class="wire" d="M240 60 V68"/>
+        <path class="wire" d="M240 60 H395 V68"/>
+        <path class="tip" d="M85 80 L79 68 L91 68 Z"/>
+        <path class="tip" d="M240 80 L234 68 L246 68 Z"/>
+        <path class="tip" d="M395 80 L389 68 L401 68 Z"/>
+        <rect class="soft" x="20" y="80" width="130" height="56" rx="8"/>
+        <text class="sm" x="85" y="102" text-anchor="middle">UTC</text>
+        <text class="small mono bold" x="85" y="125" text-anchor="middle">10:30</text>
+        <rect class="soft" x="175" y="80" width="130" height="56" rx="8"/>
+        <text class="sm" x="240" y="102" text-anchor="middle">台北 +08:00</text>
+        <text class="small mono bold" x="240" y="125" text-anchor="middle">18:30</text>
+        <rect class="soft" x="330" y="80" width="130" height="56" rx="8"/>
+        <text class="sm" x="395" y="102" text-anchor="middle">東京 +09:00</text>
+        <text class="small mono bold" x="395" y="125" text-anchor="middle">19:30</text>
+        <text class="sm" x="240" y="164" text-anchor="middle">Time 記的是瞬間；In(loc) 只換顯示用的時區</text>
+      </svg>
+      <figcaption>一個 time.Time 裡同時有「哪一個瞬間」和「用哪個時區顯示」。換時區不會改變瞬間，只改變牆上時間的數字。</figcaption>
+    </figure>
+    <p>一個 time.Time 同時記著兩件事：它是哪一個瞬間，以及用哪個時區（<code>*time.Location</code>）顯示。<code>t.In(loc)</code> 換一個時區顯示同一個瞬間。時區用 <code>time.LoadLocation</code> 依照名稱載入，名稱是 IANA 時區資料庫的格式，例如 <code>Asia/Taipei</code>：</p>
+    <pre class="code" data-src="chapters/22-time/zones.go"><code>package main
+
+import (
+	"fmt"
+	"time"
+	_ "time/tzdata" // 把時區資料庫編進執行檔，沒有安裝時區資料的系統也能 LoadLocation
+)
+
+var (
+	taipei = mustLoad("Asia/Taipei")
+	tokyo  = mustLoad("Asia/Tokyo")
+)
+
+// mustLoad 載入時區。名稱寫錯是程式的錯，啟動時就該發現，所以直接 panic。
+func mustLoad(name string) *time.Location {
+	loc, err := time.LoadLocation(name)
+	if err != nil {
+		panic(err)
+	}
+	return loc
+}
+
+// zonesDemo 同一個瞬間，在不同時區有不同的「牆上時間」。
+func zonesDemo() {
+	paid := time.Date(2026, time.November, 19, 10, 30, 0, 0, time.UTC) // 資料庫裡存 UTC
+	const layout = time.DateTime + " MST"
+
+	fmt.Println(paid.Format(layout))
+	fmt.Println(paid.In(taipei).Format(layout))
+	fmt.Println(paid.In(tokyo).Format(layout))
+	fmt.Println("是同一個瞬間？", paid.Equal(paid.In(tokyo)))
+}
+
+// parseZoneDemo 字串裡沒有時區時，Parse 當成 UTC，ParseInLocation 當成你指定的時區。
+func parseZoneDemo() {
+	const layout = "2006-01-02 15:04"
+	a, err := time.Parse(layout, "2026-11-19 18:30")
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	b, err := time.ParseInLocation(layout, "2026-11-19 18:30", taipei)
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	fmt.Println(a.Location(), a.Format(time.RFC3339))
+	fmt.Println(b.Location(), b.Format(time.RFC3339))
+	fmt.Println("兩個差了", a.Sub(b))
+}</code></pre>
+    <pre class="out" data-example="chapters/22-time#Example_zonesDemo"><code>2026-11-19 10:30:00 UTC
+2026-11-19 18:30:00 CST
+2026-11-19 19:30:00 JST
+是同一個瞬間？ true</code></pre>
+    <ul class="notes">
+      <li>常見的做法：儲存和傳遞都用 UTC（或帶時區的 RFC3339），只有在顯示給人看的時候才 <code>In</code> 成使用者的時區。</li>
+      <li><code>MST</code> 在版面裡代表時區縮寫。縮寫會撞名：台北顯示 CST，美國中部時間也是 CST。交換資料時用 <code>-07:00</code> 這種數字的時差。</li>
+      <li>時區名稱寫錯是程式的錯，所以 mustLoad 在程式啟動時就 panic，不要等到第一次用到才發現。</li>
+    </ul>
+    <p>解析字串時，如果字串裡沒有時區，Parse 會當成 UTC。使用者在台北輸入的「18:30」被當成 UTC 的 18:30，就差了 8 個小時。這種情況用 <code>time.ParseInLocation</code>，指定字串是哪個時區的時間：</p>
+    <pre class="out" data-example="chapters/22-time#Example_parseZoneDemo"><code>UTC 2026-11-19T18:30:00Z
+Asia/Taipei 2026-11-19T18:30:00+08:00
+兩個差了 8h0m0s</code></pre>
+
+    <section class="deep" aria-labelledby="tzdata">
+      <p class="tag">深入：第一次讀可以先跳過</p>
+      <h3 id="tzdata">時區資料從哪裡來？</h3>
+      <p>Go 的執行檔本身不帶時區資料。LoadLocation 依序在這幾個地方找：環境變數 <code>ZONEINFO</code> 指定的位置、作業系統的時區目錄（Unix 上通常是 /usr/share/zoneinfo）、Go 安裝目錄裡的 zoneinfo.zip，最後是 <code>time/tzdata</code> 套件（如果有 import 的話）。</p>
+      <p>開發機上都找得到，但精簡的容器映像檔或某些 Windows 機器上可能沒有，LoadLocation 就會回傳錯誤。zones.go 開頭的 <code>import _ "time/tzdata"</code> 把整份時區資料編進執行檔，執行檔大約多 450 KB，換來在哪裡都能載入。另一個做法是編譯時加 <code>-tags timetzdata</code>，效果一樣，但不用改程式碼。</p>
+      <p>本機的時區 <code>time.Local</code> 由作業系統決定，Unix 上會看環境變數 TZ。time.Now() 回傳的時間就在 time.Local。同一支程式在你的電腦上是台北時間，放進容器裡可能就變成 UTC，所以邏輯裡不要依賴 Local，明確地指定時區。</p>
+    </section>
+  </section>
+
+  <section aria-labelledby="calendar">
+    <h2 id="calendar">4. 日曆的計算</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 172" role="img" aria-label="1 月 31 日加一個月，先變成不存在的 2 月 31 日，多出來的 3 天往後進位，結果是 3 月 3 日。反過來用，下個月的第 0 天就是這個月的最後一天">
+        <title>月底的進位</title>
+        <rect class="soft" x="16" y="30" width="120" height="56" rx="8"/>
+        <text class="sm" x="76" y="53" text-anchor="middle">1 月 31 日</text>
+        <text class="sm" x="76" y="74" text-anchor="middle">加一個月</text>
+        <path class="wire" d="M136 58 H164"/>
+        <path class="tip" d="M176 58 L164 52 L164 64 Z"/>
+        <rect class="hot" x="176" y="30" width="128" height="56" rx="8"/>
+        <text class="sm" x="240" y="53" text-anchor="middle">2 月 31 日</text>
+        <text class="sm" x="240" y="74" text-anchor="middle">這天不存在</text>
+        <path class="wire" d="M304 58 H332"/>
+        <path class="tip" d="M344 58 L332 52 L332 64 Z"/>
+        <rect class="acc" x="344" y="30" width="120" height="56" rx="8"/>
+        <text class="sm" x="404" y="53" text-anchor="middle">3 月 3 日</text>
+        <text class="sm" x="404" y="74" text-anchor="middle">多的 3 天進位</text>
+        <text class="sm" x="240" y="124" text-anchor="middle">time.Date、AddDate 都會把超出的日期往後進位</text>
+        <text class="sm" x="240" y="150" text-anchor="middle">反過來用：下個月的第 0 天 = 這個月的最後一天</text>
+      </svg>
+      <figcaption>Go 不會幫你「夾到月底」。2026 年 2 月只有 28 天，多出來的 3 天跑到 3 月去了。</figcaption>
+    </figure>
+    <p><code>t.AddDate(年, 月, 日)</code> 用日曆加減：加一個月就是月份加一，日不變。問題出在月底：會員 1 月 31 日加入，「一個月後」是 2 月 31 日，這天不存在。Go 不會報錯，也不會改成 2 月底，而是像 <code>time.Date</code> 一樣，把多出來的天數往後進位：</p>
+    <pre class="code" data-src="chapters/22-time/calendar.go#monthEnd,calendarDemo"><code>func monthEnd(t time.Time) time.Time {
+	y, m, _ := t.Date()
+	h, mi, s := t.Clock()
+	return time.Date(y, m+1, 0, h, mi, s, t.Nanosecond(), t.Location())
+}
+
+func calendarDemo() {
+	joined := time.Date(2026, time.January, 31, 12, 0, 0, 0, taipei)
+
+	fmt.Println("加一個月：", joined.AddDate(0, 1, 0).Format(time.DateOnly))
+	fmt.Println("2 月 31 日：", time.Date(2026, time.February, 31, 0, 0, 0, 0, taipei).Format(time.DateOnly))
+	fmt.Println("2 月的最後一天：", monthEnd(time.Date(2026, time.February, 1, 0, 0, 0, 0, taipei)).Format(time.DateOnly))
+
+	today := time.Date(2026, time.November, 19, 0, 0, 0, 0, taipei)
+	xmas := time.Date(2026, time.December, 25, 0, 0, 0, 0, taipei)
+	fmt.Println("離聖誕節還有", int(xmas.Sub(today).Hours()/24), "天")
+}</code></pre>
+    <pre class="out" data-example="chapters/22-time#Example_calendarDemo"><code>加一個月： 2026-03-03
+2 月 31 日： 2026-03-03
+2 月的最後一天： 2026-02-28
+離聖誕節還有 36 天</code></pre>
+    <ul class="notes">
+      <li>進位不只發生在日：<code>time.Date(2026, 13, 1, …)</code> 是 2027 年 1 月 1 日，第 61 分鐘是下一個小時的第 1 分鐘。</li>
+      <li>monthEnd 反過來利用進位：下個月的第 0 天，往回退一天，就是這個月的最後一天。2 月、閏年都不用自己判斷。</li>
+      <li>「到期日要夾到月底」這種業務規則，要自己寫出來（練習 3）。先問清楚規則：1/31 加一個月要變 2/28，那 2/28 再加一個月是 3/28 還是 3/31？</li>
+      <li>算相差幾天，這裡用 Sub 再除以 24 小時，前提是兩個時間都在當地午夜、而且中間沒有夏令時間的切換（見下面的深入）。台灣目前沒有夏令時間。</li>
+    </ul>
+    <p>另一個常見的誤會：<code>t.Truncate(24 * time.Hour)</code> 看起來像是「切到當天的開始」，但它切的是<strong>從時間零點起算的絕對時間</strong>，等於用 UTC 的午夜切。台北早上 7:45 切下去，得到的是前一天的 08:00。要當地的午夜，就用 Date 把日期拿出來重組：</p>
+    <pre class="code" data-src="chapters/22-time/calendar.go#truncateDemo"><code>func truncateDemo() {
+	t := time.Date(2026, time.November, 19, 7, 45, 0, 0, taipei) // 台北早上 7:45
+	fmt.Println("Truncate：", t.Truncate(24*time.Hour).Format(time.DateTime))
+
+	y, m, d := t.Date()
+	fmt.Println("當地午夜：", time.Date(y, m, d, 0, 0, 0, 0, t.Location()).Format(time.DateTime))
+}</code></pre>
+    <pre class="out" data-example="chapters/22-time#Example_truncateDemo"><code>Truncate： 2026-11-18 08:00:00
+當地午夜： 2026-11-19 00:00:00</code></pre>
+
+    <section class="deep" aria-labelledby="dst">
+      <p class="tag">深入：第一次讀可以先跳過</p>
+      <h3 id="dst">一天不一定是 24 小時</h3>
+      <p>有夏令時間的地方，每年有一天只有 23 小時、有一天有 25 小時。紐約在 2026 年 11 月 1 日凌晨把時鐘撥回一小時，那一天有 25 個小時。這時「加一天」和「加 24 小時」就不一樣了：</p>
+      <pre class="code" data-src="chapters/22-time/calendar.go#dstDemo"><code>func dstDemo() {
+	ny := mustLoad("America/New_York")
+	t := time.Date(2026, time.October, 31, 12, 0, 0, 0, ny)
+	const layout = time.DateTime + " MST"
+
+	fmt.Println("AddDate：", t.AddDate(0, 0, 1).Format(layout))
+	fmt.Println("Add 24h：", t.Add(24*time.Hour).Format(layout))
+	fmt.Println("那一天其實有", t.AddDate(0, 0, 1).Sub(t))
+}</code></pre>
+      <pre class="out" data-example="chapters/22-time#Example_dstDemo"><code>AddDate： 2026-11-01 12:00:00 EST
+Add 24h： 2026-11-01 11:00:00 EST
+那一天其實有 25h0m0s</code></pre>
+      <p>AddDate 加的是日曆上的一天，時刻保持 12:00；Add 加的是物理上的 24 小時，因為多了一小時，牆上時間只到 11:00。規則很簡單：「明天同一個時間」用 AddDate，「24 小時之後」用 Add。服務的使用者在其他國家時，這個差別就會出現。</p>
+    </section>
+  </section>
+
+  <section aria-labelledby="compare">
+    <h2 id="compare">5. 比較、單調時鐘與 Unix 時間</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 180" role="img" aria-label="a 是 UTC 的 10:30，b 是 a 換成台北時區。兩個是同一個瞬間，但時區欄位不一樣。a == b 比較每一個欄位，結果是 false；a.Equal(b) 只比瞬間，結果是 true">
+        <title>== 和 Equal</title>
+        <text class="sm mono" x="130" y="24" text-anchor="middle">a</text>
+        <text class="sm mono" x="350" y="24" text-anchor="middle">b := a.In(taipei)</text>
+        <rect class="soft" x="40" y="36" width="180" height="32" rx="6"/>
+        <text class="sm" x="130" y="57" text-anchor="middle">瞬間：10:30 UTC</text>
+        <rect class="soft" x="260" y="36" width="180" height="32" rx="6"/>
+        <text class="sm" x="350" y="57" text-anchor="middle">瞬間：同一個</text>
+        <rect class="soft" x="40" y="76" width="180" height="32" rx="6"/>
+        <text class="sm" x="130" y="97" text-anchor="middle">時區：UTC</text>
+        <rect class="hot" x="260" y="76" width="180" height="32" rx="6"/>
+        <text class="sm" x="350" y="97" text-anchor="middle">時區：Asia/Taipei</text>
+        <text class="sm" x="240" y="142" text-anchor="middle">a == b → false：時區、單調時鐘讀數都要一樣</text>
+        <text class="sm" x="240" y="166" text-anchor="middle">a.Equal(b) → true：只比是不是同一個瞬間</text>
+      </svg>
+      <figcaption>time.Time 是一個 struct，== 會比較它的每一個欄位。要問「是不是同一個時間」，用 Equal。</figcaption>
+    </figure>
+    <p>同一個瞬間換了時區，用 <code>==</code> 比較就不相等了，因為 == 比的是 struct 的每一個欄位，時區也算在內。比較時間一律用方法：<code>Equal</code>、<code>Before</code>、<code>After</code>，或 Go 1.20 起的 <code>Compare</code>（回傳 -1、0、1，可以直接給 slices.SortFunc 用）：</p>
+    <pre class="code" data-src="chapters/22-time/compare.go#equalDemo"><code>func equalDemo() {
+	a := time.Date(2026, time.November, 19, 10, 30, 0, 0, time.UTC)
+	b := a.In(taipei)
+	fmt.Println(a == b, a.Equal(b), a.Compare(b))
+
+	c := a.Add(time.Minute)
+	fmt.Println(a.Before(c), c.After(a), a.Compare(c))
+}</code></pre>
+    <pre class="out" data-example="chapters/22-time#Example_equalDemo"><code>false true 0
+true true -1</code></pre>
+    <p>同樣的理由，time.Time 不適合直接當 map 的 key：同一個瞬間可能變成兩個不同的 key。要當 key，先統一成 <code>t.UTC()</code>，或用 Unix 時間這種整數。</p>
+    <p><code>time.Now()</code> 回傳的時間除了牆上時間，還偷偷帶著一個<strong>單調時鐘</strong>（monotonic clock）的讀數。牆上時間可能被調整：電腦和網路校時、使用者手動改時間，都會讓它跳前跳後；單調時鐘只會往前走，專門用來量「經過了多久」。印出 time.Now() 時，<code>m=</code> 後面那段就是它：</p>
+    <pre class="code" data-src="chapters/22-time/compare.go#monotonicDemo"><code>func monotonicDemo() {
+	start := time.Now()
+	fmt.Println("Now 帶著單調時鐘：", strings.Contains(start.String(), " m="))
+	fmt.Println("Round(0) 之後：", strings.Contains(start.Round(0).String(), " m="))
+	fmt.Println("經過的時間不會是負的：", time.Since(start) &gt;= 0)
+}</code></pre>
+    <pre class="out" data-example="chapters/22-time#Example_monotonicDemo"><code>Now 帶著單調時鐘： true
+Round(0) 之後： false
+經過的時間不會是負的： true</code></pre>
+    <ul class="notes">
+      <li>兩個時間都帶著單調時鐘時，<code>Sub</code>、<code>time.Since</code>、<code>time.Until</code> 用它來算，校時也不會算出負的經過時間。量程式跑多久就寫 <code>start := time.Now()</code> 和 <code>time.Since(start)</code>。</li>
+      <li><code>t.Round(0)</code> 是拿掉單調時鐘讀數的標準寫法；<code>In</code>、<code>UTC</code>、<code>Local</code> 也會拿掉。time.Date、time.Parse 做出來的時間本來就沒有。</li>
+      <li>單調時鐘只在這一次執行的這台機器上有意義，存檔、傳到別台機器時不會帶出去。</li>
+    </ul>
+    <p>Unix 時間是從 1970-01-01 00:00:00 UTC 起算的秒數，和時區無關，是不同系統之間交換時間最簡單的方式：</p>
+    <pre class="code" data-src="chapters/22-time/compare.go#unixDemo"><code>func unixDemo() {
+	t := time.Date(2026, time.November, 19, 10, 30, 0, 0, time.UTC)
+	fmt.Println(t.Unix(), t.UnixMilli())
+
+	back := time.Unix(t.Unix(), 0) // 回來的時間用的是本機時區
+	fmt.Println(back.UTC().Format(time.RFC3339), back.Equal(t))
+}</code></pre>
+    <pre class="out" data-example="chapters/22-time#Example_unixDemo"><code>1795084200 1795084200000
+2026-11-19T10:30:00Z true</code></pre>
+    <ul class="notes">
+      <li><code>UnixMilli</code>、<code>UnixMicro</code> 和對應的 <code>time.UnixMilli(ms)</code> 從 Go 1.17 起可以用，JavaScript 的 Date.now() 就是毫秒。</li>
+      <li><code>time.Unix</code> 回傳的時間在 time.Local，印出來前記得 In 或 UTC，不然每台機器印的不一樣。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="timers">
+    <h2 id="timers">6. 計時器</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 176" role="img" aria-label="三條時間軸。Timer：d 之後往 t.C 送一次。Ticker：每隔 d 往 t.C 送一次，直到 Stop。AfterFunc：d 之後在新的 goroutine 呼叫 f">
+        <title>Timer、Ticker、AfterFunc</title>
+        <text class="small mono" x="16" y="44">Timer</text>
+        <path class="wire" d="M110 40 H450"/>
+        <path class="wire" d="M110 32 V48"/>
+        <circle class="acc" cx="250" cy="40" r="6"/>
+        <text class="sm" x="110" y="64">d 之後往 t.C 送一次</text>
+        <text class="small mono" x="16" y="94">Ticker</text>
+        <path class="wire" d="M110 90 H450"/>
+        <path class="wire" d="M110 82 V98"/>
+        <circle class="acc" cx="190" cy="90" r="6"/>
+        <circle class="acc" cx="270" cy="90" r="6"/>
+        <circle class="acc" cx="350" cy="90" r="6"/>
+        <circle class="acc" cx="430" cy="90" r="6"/>
+        <text class="sm" x="110" y="114">每隔 d 往 t.C 送一次，直到 Stop</text>
+        <text class="small mono" x="16" y="144">AfterFunc</text>
+        <path class="wire" d="M110 140 H450"/>
+        <path class="wire" d="M110 132 V148"/>
+        <circle class="hot" cx="250" cy="140" r="6"/>
+        <text class="sm" x="110" y="164">d 之後在新的 goroutine 呼叫 f</text>
+      </svg>
+      <figcaption>Timer 響一次，Ticker 一直響，AfterFunc 響的時候直接幫你呼叫函式。三個都可以 Stop。</figcaption>
+    </figure>
+    <p><a href="16-select.html#timers">16 章</a>用過 time.After 和 Timer 在 select 裡等逾時。這一節補上另外兩種。<code>time.AfterFunc(d, f)</code> 在 d 之後呼叫 f，不用自己開 goroutine 等 channel。訂位系統幫客人保留座位，時間到了還沒付款就把座位放出來：</p>
+    <pre class="code" data-src="chapters/22-time/timers.go#holdSeat,afterFuncDemo"><code>func holdSeat(seat string, d time.Duration, release func(seat string)) *time.Timer {
+	return time.AfterFunc(d, func() { release(seat) })
+}
+
+func afterFuncDemo() {
+	released := make(chan string, 1)
+	release := func(seat string) { released &lt;- seat }
+
+	holdSeat("A1", 10*time.Millisecond, release)
+	fmt.Println("逾時放出：", &lt;-released)
+
+	t := holdSeat("B2", time.Hour, release)
+	fmt.Println("B2 付款了，計時停下來：", t.Stop())
+	fmt.Println("再 Stop 一次：", t.Stop())
+}</code></pre>
+    <pre class="out" data-example="chapters/22-time#Example_afterFuncDemo"><code>逾時放出： A1
+B2 付款了，計時停下來： true
+再 Stop 一次： false</code></pre>
+    <ul class="notes">
+      <li><code>Stop</code> 回傳 true 表示在響之前攔下來了，f 不會被呼叫；回傳 false 表示已經響過（f 已經開始執行）或已經停過。</li>
+      <li>f 在它<strong>自己的 goroutine</strong> 裡執行。f 碰到的共用資料要加鎖或用 channel，這裡的 release 就是透過 channel 把結果交回來（<a href="17-sync.html">17 章</a>、練習 4）。</li>
+    </ul>
+    <p>每隔固定時間做一件事，用 <code>time.NewTicker(d)</code>：它每隔 d 往 <code>t.C</code> 送一個時間。叫號機每隔一段時間叫下一號，同時聽著 ctx，打烊了就停：</p>
+    <pre class="code" data-src="chapters/22-time/timers.go#callNumbers,tickerDemo"><code>func callNumbers(ctx context.Context, first, last int, every time.Duration, call func(n int)) {
+	t := time.NewTicker(every)
+	defer t.Stop()
+	for n := first; n &lt;= last; n++ {
+		select {
+		case &lt;-ctx.Done():
+			return
+		case &lt;-t.C:
+			call(n)
+		}
+	}
+}
+
+func tickerDemo() {
+	callNumbers(context.Background(), 101, 103, 10*time.Millisecond, func(n int) {
+		fmt.Printf("請 %d 號到櫃台\n", n)
+	})
+}</code></pre>
+    <pre class="out" data-example="chapters/22-time#Example_tickerDemo"><code>請 101 號到櫃台
+請 102 號到櫃台
+請 103 號到櫃台</code></pre>
+    <ul class="notes">
+      <li>用完要 <code>defer t.Stop()</code>，停止送 tick。</li>
+      <li>收的人太慢時，Ticker 不會累積一堆 tick 等你，會調整間隔或丟掉來不及收的。所以它適合「大約每隔多久」，不適合用來數經過了幾次。</li>
+      <li><code>t.Reset(d)</code> 可以改間隔。Go 1.23 起，Timer 和 Ticker 沒有 Stop 也會被回收，Reset 之後也不會再收到舊的那次（<a href="16-select.html#timers">16 章</a>），但 Stop 還是要寫：它表達的是「不再需要了」，Ticker 不停就會一直送。</li>
+      <li>用 Ticker 限制呼叫速率的例子在 <a href="19-concurrency-patterns.html#rate">19 章</a>。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="testing">
+    <h2 id="testing">7. 讓時間可以測試</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 214" role="img" aria-label="Checkout 的 Accept 方法透過 c.now() 問現在幾點：正式執行時 now 是 time.Now，測試時 now 回傳固定的時間。另一種方式是 synctest 泡泡：time.Now、Sleep、Timer 都改用假時間，所有 goroutine 都在等時，時間直接跳到下一個計時器">
+        <title>兩種控制時間的方法</title>
+        <rect class="acc" x="20" y="50" width="150" height="52" rx="8"/>
+        <text class="small mono" x="95" y="72" text-anchor="middle">Accept</text>
+        <text class="sm" x="95" y="92" text-anchor="middle">呼叫 c.now()</text>
+        <path class="wire" d="M170 66 H200 V42 H248"/>
+        <path class="tip" d="M260 42 L248 36 L248 48 Z"/>
+        <path class="wire" d="M200 66 V110 H248"/>
+        <path class="tip" d="M260 110 L248 104 L248 116 Z"/>
+        <rect class="soft" x="260" y="18" width="200" height="48" rx="8"/>
+        <text class="sm" x="360" y="38" text-anchor="middle">正式執行</text>
+        <text class="sm mono" x="360" y="57" text-anchor="middle">now = time.Now</text>
+        <rect class="soft" x="260" y="86" width="200" height="48" rx="8"/>
+        <text class="sm" x="360" y="106" text-anchor="middle">測試</text>
+        <text class="sm" x="360" y="125" text-anchor="middle">now 回傳固定的時間</text>
+        <rect class="soft dash" x="20" y="154" width="440" height="50" rx="8"/>
+        <text class="sm" x="240" y="174" text-anchor="middle">synctest 泡泡：time.Now、Sleep、Timer 都改用假時間</text>
+        <text class="sm" x="240" y="194" text-anchor="middle">所有 goroutine 都在等時，時間直接跳到下一個計時器</text>
+      </svg>
+      <figcaption>邏輯裡直接呼叫 time.Now()，測試就沒辦法指定「現在幾點」。把它變成一個可以換掉的函式，或把整個測試放進 synctest 的泡泡。</figcaption>
+    </figure>
+    <p>「折價券到期了沒」這種邏輯，如果裡面直接呼叫 time.Now()，測試就只能等到真的過期，或是寫一張日期很遠的券，到了那天測試突然失敗。解法是讓「現在幾點」從外面傳進來：</p>
+    <pre class="code" data-src="chapters/22-time/clock.go#Coupon,Checkout,Checkout.Accept,checkoutDemo"><code>type Coupon struct {
+	Code    string
+	Expires time.Time
+}
+
+type Checkout struct {
+	now func() time.Time
+}
+
+func (c Checkout) Accept(cp Coupon) bool {
+	return c.now().Before(cp.Expires)
+}
+
+func checkoutDemo() {
+	cp := Coupon{Code: "雙11", Expires: time.Date(2026, time.November, 12, 0, 0, 0, 0, taipei)}
+
+	for _, at := range []time.Time{
+		time.Date(2026, time.November, 11, 23, 59, 0, 0, taipei),
+		time.Date(2026, time.November, 12, 0, 0, 0, 0, taipei),
+	} {
+		c := Checkout{now: func() time.Time { return at }}
+		fmt.Println(at.Format("01/02 15:04"), cp.Code, "可以用？", c.Accept(cp))
+	}
+}</code></pre>
+    <pre class="out" data-example="chapters/22-time#Example_checkoutDemo"><code>11/11 23:59 雙11 可以用？ true
+11/12 00:00 雙11 可以用？ false</code></pre>
+    <ul class="notes">
+      <li>正式執行時寫 <code>Checkout{now: time.Now}</code>，函式本身就是值（<a href="04-functions.html">04 章</a>）；測試時換成回傳固定時間的函式。</li>
+      <li>邊界值最容易出錯：到期的那一刻能不能用？Before 回傳 false，所以「12 日 00:00 起不能用」。規則要寫在註解裡，測試把邊界兩邊都測到。</li>
+      <li>只需要「現在幾點」時，傳一個 <code>func() time.Time</code> 就夠了，不必為了這個定義一個 Clock interface。</li>
+    </ul>
+    <p>和計時器有關的程式（AfterFunc、Ticker、Sleep）就沒辦法這樣換了。<code>testing/synctest</code>（Go 1.25 起）把測試放進一個泡泡，泡泡裡的 time.Now、time.Sleep、Timer 都使用假時間：泡泡裡所有的 goroutine 都在等的時候，時間直接跳到下一個計時器響的時刻。保留 15 分鐘的座位，測試一瞬間就跑完，而且能精確地檢查是在第 15 分鐘放出來的：</p>
+    <pre class="code" data-src="chapters/22-time/main_test.go#TestHoldSeat"><code>func TestHoldSeat(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		start := time.Now() // 泡泡裡的時間從 2000-01-01 00:00:00 UTC 開始
+		released := make(chan string, 2)
+		release := func(seat string) { released &lt;- seat }
+		holdSeat("A1", 15*time.Minute, release)
+		paid := holdSeat("B2", 15*time.Minute, release)
+
+		time.Sleep(14*time.Minute + 59*time.Second)
+		synctest.Wait()
+		if len(released) != 0 {
+			t.Fatalf("還沒到 15 分鐘就放出了 %q", &lt;-released)
+		}
+		paid.Stop() // B2 在最後一秒付款
+
+		time.Sleep(time.Second)
+		synctest.Wait()
+		if n := len(released); n != 1 {
+			t.Fatalf("15 分鐘時放出了 %d 個座位，want 1", n)
+		}
+		if seat := &lt;-released; seat != "A1" || time.Since(start) != 15*time.Minute {
+			t.Errorf("放出 %q，經過 %v；want A1、15m0s", seat, time.Since(start))
+		}
+	})
+}</code></pre>
+    <ul class="notes">
+      <li>泡泡裡的時間從 2000-01-01 00:00:00 UTC 開始，所以要比較的是「經過多久」，不是某個日期。</li>
+      <li><code>synctest.Wait()</code> 等到泡泡裡其他的 goroutine 都卡住（例如 AfterFunc 的 f 已經跑完）才回來，之後再檢查結果就不會有時間差。</li>
+      <li>Ticker 一樣能測：main_test.go 裡的 TestCallNumbers 檢查叫號機在第 30 秒、第 60 秒各叫一號，打烊後立刻停下來，不用等到第 90 秒。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="pitfalls">
+    <h2 id="pitfalls">常見錯誤</h2>
+    <h3 id="pit-layout">1. 版面寫成 YYYY-MM-DD</h3>
+    <p>Go 不認得這些代號，原樣印出來，也不會報錯。版面要用參考時間 <code>2006-01-02 15:04:05</code>，常用的直接用 time.DateTime、time.RFC3339 這些常數（第 2 節）。</p>
+
+    <h3 id="pit-duration-unit">2. 數字直接當成 Duration</h3>
+    <p><code>time.Sleep(5)</code> 睡的是 5 奈秒，不是 5 秒。int 變數和 Duration 相乘會編譯錯誤，寫成 <code>time.Duration(n) * time.Second</code>（第 1 節）。</p>
+
+    <h3 id="pit-equal">3. 用 == 比較時間、用 Time 當 map 的 key</h3>
+    <p>同一個瞬間換了時區、帶不帶單調時鐘讀數，== 的結果都不一樣。比較用 Equal、Before、After、Compare；當 key 先統一成 UTC 或 Unix 時間（第 5 節）。</p>
+
+    <h3 id="pit-parse-zone">4. 解析沒有時區的字串，用了 Parse</h3>
+    <p>Parse 把它當成 UTC，台灣的使用者輸入的時間差了 8 小時。用 ParseInLocation 指定時區，或要求輸入帶時區的 RFC3339（第 3 節）。</p>
+
+    <h3 id="pit-truncate">5. 用 Truncate(24*time.Hour) 求當地的「今天」</h3>
+    <p>它切的是 UTC 的午夜，在台北早上 8 點以前會切到前一天。用 <code>t.Date()</code> 取出年月日再組回 time.Date，或直接 Format 成日期（第 4 節、練習 5）。</p>
+
+    <h3 id="pit-month-end">6. 以為 AddDate 會夾到月底</h3>
+    <p>1 月 31 日加一個月是 3 月 3 日。帳單、會員到期這類規則要自己寫，並且每次從起始日算，不要從上一次的結果一直往後加（第 4 節、練習 3）。</p>
+
+    <h3 id="pit-local">7. 依賴機器的本地時區</h3>
+    <p>time.Now() 和 time.Unix 回傳的時間在 time.Local，它由作業系統和 TZ 環境變數決定。開發機上是台北，容器裡常常是 UTC。要顯示、要依日期分組時，明確地 In 到你要的時區（第 3 節）。</p>
+
+    <h3 id="pit-now">8. 邏輯裡直接呼叫 time.Now、測試裡用 time.Sleep 等</h3>
+    <p>測試又慢又不穩定，邊界時刻也測不到。把「現在幾點」注入進去；和計時器有關的用 synctest（第 7 節）。</p>
+  </section>
+
+  <section aria-labelledby="java">
+    <h2 id="java">從 Java 來的你</h2>
+    <div class="table-wrap">
+      <table class="vs">
+        <thead><tr><th scope="col">主題</th><th scope="col">Java（java.time）</th><th scope="col">Go</th></tr></thead>
+        <tbody>
+          <tr><th scope="row">時間點</th><td class="java"><code>Instant</code>、<code>ZonedDateTime</code> 分開</td><td>一個 <code>time.Time</code>，同時有瞬間和時區</td></tr>
+          <tr><th scope="row">只有日期</th><td class="java"><code>LocalDate</code></td><td>沒有專門的型別；用當地午夜的 Time，或存成 <code>"2006-01-02"</code> 字串</td></tr>
+          <tr><th scope="row">時間長度</th><td class="java"><code>Duration</code></td><td><code>time.Duration</code>，就是 int64 的奈秒</td></tr>
+          <tr><th scope="row">格式</th><td class="java"><code>ofPattern("yyyy/MM/dd HH:mm")</code></td><td><code>"2006/01/02 15:04"</code></td></tr>
+          <tr><th scope="row">時區</th><td class="java"><code>ZoneId.of("Asia/Taipei")</code></td><td><code>time.LoadLocation("Asia/Taipei")</code></td></tr>
+          <tr><th scope="row">1/31 加一個月</th><td class="java"><code>plusMonths(1)</code> 是 2/28，自動夾到月底</td><td><code>AddDate(0, 1, 0)</code> 是 3/3，往後進位</td></tr>
+          <tr><th scope="row">量經過多久</th><td class="java"><code>System.nanoTime()</code></td><td><code>time.Now()</code> 自帶單調時鐘，<code>time.Since(start)</code></td></tr>
+          <tr><th scope="row">可以換掉的時鐘</th><td class="java">注入 <code>java.time.Clock</code></td><td>注入 <code>func() time.Time</code>，或用 synctest</td></tr>
+          <tr><th scope="row">排程</th><td class="java"><code>ScheduledExecutorService</code></td><td><code>time.AfterFunc</code>、<code>time.NewTicker</code></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>最需要注意的是月底：從 Java 搬過來的帳單邏輯，直接換成 AddDate，月底的帳單日就會跑到下個月初。</p>
+  </section>
+
+  <section aria-labelledby="exercises">
+    <h2 id="exercises">練習</h2>
+    <p>題目在 <code>exercises/22-time/exercises.go</code>，題目裡的「幾點」都是台北時間，時區已經準備好了：</p>
+    <pre class="code" data-src="exercises/22-time/doc.go#Taipei"><code>var Taipei = func() *time.Location {
+	loc, err := time.LoadLocation("Asia/Taipei")
+	if err != nil {
+		panic(err)
+	}
+	return loc
+}()</code></pre>
+    <pre class="shell"><code>go test -race ./exercises/22-time/                         <span class="c"># 跑全部練習</span>
+go test -race ./exercises/22-time/ -run TestBillingDates   <span class="c"># 只跑一題</span>
+go test -race -tags solution ./exercises/22-time/          <span class="c"># 跑參考解答</span></code></pre>
+    <ol class="exercises">
+      <li>
+        <h3><span class="level l1">入門</span>練習 1：離打烊還有多久</h3>
+        <p>店門口的看板。</p>
+        <pre class="code" data-src="exercises/22-time/exercises.go#Remaining"><code>func Remaining(now, closing time.Time) string {
+	// TODO: 實作
+	return ""
+}</code></pre>
+        <p>測試：<code>TestRemaining</code>。</p>
+        <details><summary>提示</summary><p><code>closing.Sub(now)</code> 不管兩個時間在哪個時區都算得對。小時用 <code>int(left.Hours())</code>，分鐘用 <code>int(left.Minutes()) % 60</code>，轉成 int 就是無條件捨去。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l1">入門</span>練習 2：現在有開嗎</h3>
+        <p>午餐、晚餐兩個時段，星期一公休。</p>
+        <pre class="code" data-src="exercises/22-time/exercises.go#IsOpen"><code>func IsOpen(t time.Time) bool {
+	// TODO: 實作
+	return false
+}</code></pre>
+        <p>測試：<code>TestIsOpen</code>。測試裡有洛杉磯時間：那裡的星期日晚上，台北已經是星期一中午。</p>
+        <details><summary>提示</summary><p>第一步就是 <code>t = t.In(Taipei)</code>，之後的 Weekday、Hour、Minute 才是台北的。把時刻換成「從午夜起算的分鐘數」<code>t.Hour()*60 + t.Minute()</code>，比較起來最簡單。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l2">進階</span>練習 3：每月扣款日</h3>
+        <p>扣款日夾到月底，而且下個月要回到原本的日。</p>
+        <pre class="code" data-src="exercises/22-time/exercises.go#BillingDates"><code>func BillingDates(first time.Time, n int) []time.Time {
+	// TODO: 實作
+	return nil
+}</code></pre>
+        <p>測試：<code>TestBillingDates</code>。</p>
+        <details><summary>提示</summary><p>不能用 AddDate（第 4 節）。第 i 次扣款的月份是 first 的月份加 i；用 monthEnd 的技巧求出那個月有幾天，日取 <code>min(原本的日, 那個月的天數)</code>。每一次都從 first 算，1/31 → 2/28 之後才會回到 3/31。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l3">挑戰</span>練習 4：座位保留</h3>
+        <p>可以重新計時、可以確認，逾時了自動放出，而且要能被很多 goroutine 同時呼叫。</p>
+        <pre class="code" data-src="exercises/22-time/exercises.go#Holds,NewHolds,Holds.Hold,Holds.Confirm,Holds.Len"><code>type Holds struct {
+	// TODO: 加上需要的欄位
+}
+
+func NewHolds(onExpire func(seat string)) *Holds {
+	// TODO: 實作
+	return &amp;Holds{}
+}
+
+func (h *Holds) Hold(seat string, d time.Duration) {
+	// TODO: 實作
+}
+
+func (h *Holds) Confirm(seat string) bool {
+	// TODO: 實作
+	return false
+}
+
+func (h *Holds) Len() int {
+	// TODO: 實作
+	return 0
+}</code></pre>
+        <p>測試：<code>TestHolds</code>，用 synctest 的假時間跑，記得加 <code>-race</code>。</p>
+        <details><summary>提示</summary><p>用 Mutex 保護一個 map，每個座位記著自己的 <code>*time.Timer</code>（AfterFunc 回傳的）。難的地方是競爭：重新計時時舊的 Timer 可能已經響了、f 正在等鎖。讓每一次保留都有一個自己的指標，f 拿到鎖後先確認「map 裡的還是我」，不是就什麼都不做。onExpire 在鎖外面呼叫。</p></details>
+      </li>
+      <li>
+        <h3><span class="level fix">找錯</span>練習 5：每日訂單統計</h3>
+        <p>報表上，台北早上 8 點以前的訂單都算到前一天去了。</p>
+        <pre class="code" data-src="exercises/22-time/exercises.go#CountByDay"><code>func CountByDay(orders []time.Time) map[string]int {
+	counts := map[string]int{}
+	for _, t := range orders {
+		day := t.In(Taipei).Truncate(24 * time.Hour)
+		counts[day.Format(time.DateOnly)]++
+	}
+	return counts
+}</code></pre>
+        <p>測試：<code>TestCountByDay</code>。</p>
+        <details><summary>提示</summary><p>常見錯誤 5。In 只改顯示的時區，Truncate 還是用 UTC 的午夜切。其實不用切，換成台北時間後直接 Format 成日期就好。</p></details>
+      </li>
+    </ol>
+    <p><a href="https://github.com/xinqilin/GO-Playground/blob/main/exercises/22-time/solution.go">參考解答</a>：先自己寫完再看。測試通過的寫法都是對的。</p>
+  </section>
+
+  <section aria-labelledby="recap">
+    <h2 id="recap">重點回顧</h2>
+    <ul class="recap">
+      <li>Time 是點，Duration 是長度：Add 得到點，Sub 得到長度。</li>
+      <li>Duration 是 int64 奈秒；變數要先轉成 Duration 再乘，數字要乘上單位。</li>
+      <li>版面是把參考時間 2006-01-02 15:04:05 -0700 寫成你要的樣子；交換資料用 RFC3339。</li>
+      <li>字串沒有時區時，Parse 當成 UTC，ParseInLocation 才是你指定的時區。</li>
+      <li>儲存用 UTC，顯示時才 In 成使用者的時區；import _ "time/tzdata" 讓每台機器都載入得到時區。</li>
+      <li>AddDate 和 time.Date 會進位，不會夾到月底；下個月的第 0 天是這個月的最後一天。</li>
+      <li>Truncate(24h) 切的是 UTC 的午夜；當地的日期用 Date 或 Format 取。</li>
+      <li>比較用 Equal、Before、After、Compare，不用 ==；量經過多久用 time.Since，靠的是單調時鐘。</li>
+      <li>Timer 響一次、Ticker 一直響、AfterFunc 在自己的 goroutine 呼叫 f；用完都 Stop。</li>
+      <li>注入 func() time.Time 讓邏輯可以測試；計時器用 synctest 的假時間測試。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="further">
+    <h2 id="further">延伸閱讀</h2>
+    <ul class="notes">
+      <li>套件文件：<a href="https://pkg.go.dev/time">time</a>（開頭的 Monotonic Clocks 一段）、<a href="https://pkg.go.dev/time/tzdata">time/tzdata</a>、<a href="https://pkg.go.dev/testing/synctest">testing/synctest</a>。</li>
+      <li>Go 1.23 版本說明：<a href="https://go.dev/doc/go1.23#timer-changes">Timer 的改變</a>。</li>
+      <li>Go Blog：<a href="https://go.dev/blog/testing-time">Testing Time (and other asynchronicities)</a>、<a href="https://go.dev/blog/synctest">Testing concurrent code with testing/synctest</a>。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="run">
+    <h2 id="run">動手跑</h2>
+    <p class="label">在 repo 根目錄</p>
+    <pre class="shell"><code>go run ./chapters/22-time                          <span class="c"># 依序執行本章所有示範</span>
+go test ./chapters/22-time                         <span class="c"># 驗證頁面上的每一段輸出</span>
+go test ./chapters/22-time -run TestHoldSeat -v    <span class="c"># 15 分鐘的保留，一瞬間跑完</span>
+go test -race ./exercises/22-time/                 <span class="c"># 做練習</span></code></pre>
+    <p><a href="https://github.com/xinqilin/GO-Playground/tree/main/chapters/22-time">在 GitHub 看本章完整程式碼</a>，或看<a href="https://github.com/xinqilin/GO-Playground/tree/main/exercises/22-time">練習題</a>。</p>
+  </section>
+</main>
+
+<nav class="pager" aria-label="章節導覽">
+  <a class="prev" href="21-cli.html">← 21 命令列工具</a>
+  <a class="home" href="index.html">目錄</a>
+  <a class="next" href="23-json.html">23 JSON 與資料編碼 →</a>
+</nav>
+</body>
+</html>

@@ -4,128 +4,512 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>第一支程式｜Go 圖解手冊</title>
-<meta name="description" content="安裝 Go、go run 與 go build 的差別、go.mod 是什麼，以及一支 Go 程式的基本結構。">
+<meta name="description" content="安裝 Go、建立第一個 module、看懂一支 Go 程式的結構，學會 go run、go build、go install、gofmt、go vet、go doc，並學會讀編譯錯誤和測試結果，以及這本手冊的練習怎麼做。">
 <link rel="stylesheet" href="assets/style.css">
 </head>
 <body>
 <header class="site">
   <a href="index.html">Go 圖解手冊</a>
-  <span class="count">00 / 24</span>
+  <span class="count">00 / 33</span>
 </header>
 
-<main class="page">
+<main class="page long">
   <header class="hero">
     <div class="num" aria-hidden="true">00</div>
     <p class="eyebrow">Part 0 · 開始 · 第 00 章</p>
     <h1>第一支程式</h1>
-    <p class="analogy">原始碼是食譜，編譯器是廚師，執行檔是做好的菜。</p>
+    <p class="analogy">原始碼是食譜，編譯器是廚師，執行檔是做好的菜。<code>go</code> 這個指令就是整間廚房：買菜、備料、試吃、擺盤都在裡面。</p>
   </header>
 
-  <section aria-labelledby="look">
-    <h2 id="look">看圖</h2>
-    <div class="figs">
-      <figure class="fig">
-        <svg viewBox="0 0 480 262" role="img" aria-label="go build 把 main.go 編譯成留下來的執行檔；go run 編譯成暫存檔，執行完就刪掉">
-          <title>go build 與 go run</title>
-          <path class="box" d="M20 30 H78 L98 50 V110 H20 Z"/>
-          <path class="wire" d="M78 30 V50 H98"/>
-          <path class="wire faint" d="M32 66 H84 M32 80 H70 M32 94 H80"/>
-          <text class="sm mono" x="59" y="130" text-anchor="middle">main.go</text>
-          <path class="wire" d="M108 70 H176"/>
-          <path class="tip" d="M188 70 L175 63 L175 77 Z"/>
-          <text class="sm mono" x="146" y="58" text-anchor="middle">go build</text>
-          <rect class="acc" x="192" y="40" width="96" height="60" rx="8"/>
-          <text x="240" y="76" text-anchor="middle">編譯器</text>
-          <path class="wire" d="M292 70 H362"/>
-          <path class="tip" d="M374 70 L361 63 L361 77 Z"/>
-          <rect class="hot" x="378" y="36" width="84" height="68" rx="8"/>
-          <text class="mono bold" x="420" y="66" text-anchor="middle">hello</text>
-          <text class="sm" x="420" y="90" text-anchor="middle">執行檔</text>
+  <nav class="toc-inline" aria-labelledby="toc-title">
+    <p class="label" id="toc-title">本章內容</p>
+    <ol>
+      <li><a href="#goals">本章你會學到</a></li>
+      <li><a href="#install">安裝 Go 並確認版本</a></li>
+      <li><a href="#module">建立第一個 module</a></li>
+      <li><a href="#anatomy">一支程式的結構</a></li>
+      <li><a href="#files">一個 package，好幾個檔案</a></li>
+      <li><a href="#commands">go run、go build、go install</a></li>
+      <li><a href="#fmt-vet">gofmt 與 go vet</a></li>
+      <li><a href="#errors">看懂編譯錯誤</a></li>
+      <li><a href="#doc">查文件：go doc</a></li>
+      <li><a href="#editor">編輯器</a></li>
+      <li><a href="#howto">這本手冊怎麼用</a></li>
+      <li><a href="#pitfalls">常見錯誤</a></li>
+      <li><a href="#java">從 Java 來的你</a></li>
+      <li><a href="#exercises">練習</a></li>
+      <li><a href="#recap">重點回顧</a></li>
+      <li><a href="#further">延伸閱讀</a></li>
+    </ol>
+  </nav>
 
-          <path class="box" d="M20 150 H78 L98 170 V230 H20 Z"/>
-          <path class="wire" d="M78 150 V170 H98"/>
-          <path class="wire faint" d="M32 186 H84 M32 200 H70 M32 214 H80"/>
-          <text class="sm mono" x="59" y="250" text-anchor="middle">main.go</text>
-          <path class="wire" d="M108 190 H176"/>
-          <path class="tip" d="M188 190 L175 183 L175 197 Z"/>
-          <text class="sm mono" x="146" y="178" text-anchor="middle">go run</text>
-          <rect class="acc" x="192" y="160" width="96" height="60" rx="8"/>
-          <text x="240" y="196" text-anchor="middle">編譯器</text>
-          <path class="wire" d="M292 190 H362"/>
-          <path class="tip" d="M374 190 L361 183 L361 197 Z"/>
-          <rect class="soft dash" x="378" y="156" width="84" height="68" rx="8"/>
-          <text x="420" y="186" text-anchor="middle">暫存檔</text>
-          <text class="sm" x="420" y="210" text-anchor="middle">跑完就刪</text>
-        </svg>
-        <figcaption><code>go build</code> 把原始碼編成一個執行檔，複製到別台機器就能跑。<code>go run</code> 也會編譯，只是跑完就把檔案丟掉。</figcaption>
-      </figure>
-
-      <figure class="fig">
-        <svg viewBox="0 0 480 240" role="img" aria-label="專案資料夾裡放著 go.mod 和 main.go；go.mod 寫著模組名稱和 Go 版本">
-          <title>go.mod 是專案的身分證</title>
-          <rect class="soft" x="20" y="20" width="130" height="34" rx="6"/>
-          <rect class="soft" x="20" y="40" width="440" height="184" rx="12"/>
-          <text class="mono bold" x="40" y="76">hello/</text>
-          <rect class="acc" x="40" y="96" width="256" height="104" rx="6"/>
-          <text class="mono bold" x="56" y="126">go.mod</text>
-          <text class="sm mono" x="56" y="154">module example.com/hello</text>
-          <text class="sm mono" x="56" y="180">go 1.27</text>
-          <path class="box" d="M330 96 H388 L408 116 V184 H330 Z"/>
-          <path class="wire" d="M388 96 V116 H408"/>
-          <path class="wire faint" d="M342 132 H394 M342 146 H380 M342 160 H390"/>
-          <text class="sm mono" x="369" y="206" text-anchor="middle">main.go</text>
-        </svg>
-        <figcaption><code>go.mod</code> 是專案的身分證，寫著模組名稱和需要的 Go 版本，跟原始碼放在同一個資料夾。</figcaption>
-      </figure>
-
-      <figure class="fig">
-        <svg viewBox="0 0 480 232" role="img" aria-label="一支 Go 程式的三個部分：package main、import、func main 是程式的入口">
-          <title>一支 Go 程式的結構</title>
-          <rect class="soft" x="16" y="16" width="262" height="200" rx="8"/>
-          <rect class="hot" x="26" y="112" width="242" height="30" rx="4"/>
-          <text class="mono" x="34" y="52">package main</text>
-          <text class="mono" x="34" y="92">import "fmt"</text>
-          <text class="mono" x="34" y="133">func main() {</text>
-          <text class="mono" x="58" y="168">fmt.Println(…)</text>
-          <text class="mono" x="34" y="202">}</text>
-          <path class="wire faint" d="M284 46 H300 M284 86 H300"/>
-          <path class="wire hot-ln" d="M272 127 H300"/>
-          <text x="308" y="52">屬於 main 套件</text>
-          <text x="308" y="92">借用 fmt 工具箱</text>
-          <text class="bold t-hot" x="308" y="133">從這裡開始執行</text>
-        </svg>
-        <figcaption><code>package main</code> 加上 <code>func main()</code>，就是一支能執行的程式。<code>import</code> 把標準庫的工具借進來。</figcaption>
-      </figure>
-    </div>
+  <section aria-labelledby="goals">
+    <h2 id="goals">本章你會學到</h2>
+    <ul class="notes">
+      <li>安裝 Go，確認版本，知道 Go 會自動下載專案需要的版本。</li>
+      <li>用 <code>go mod init</code> 建立 module，看懂 <code>go.mod</code> 裡的每一行。</li>
+      <li>看懂一支 Go 程式的結構：package、import、func main、註解。</li>
+      <li>分清楚 <code>go run</code>、<code>go build</code>、<code>go install</code> 的差別。</li>
+      <li>用 gofmt 排版、用 go vet 抓可疑的寫法、用 go doc 查文件。</li>
+      <li>讀懂編譯錯誤和測試失敗的訊息，學會這本手冊的練習怎麼做。</li>
+    </ul>
+    <p>這一章假設你寫過程式，也會用終端機切換資料夾、執行指令。從來沒寫過程式的話，先讀<a href="pre-1-running.html">先修 1 程式怎麼跑起來</a>。</p>
   </section>
 
-  <section aria-labelledby="code">
-    <h2 id="code">最小範例</h2>
-    <pre class="code"><code>package main
+  <section aria-labelledby="install">
+    <h2 id="install">1. 安裝 Go 並確認版本</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 250" role="img" aria-label="go 指令在中間，周圍是八個子指令：run 跑起來、build 編譯、test 測試、fmt 排版、vet 檢查、doc 查文件、mod 管模組、install 安裝">
+        <title>go 指令是一整套工具</title>
+        <path class="wire faint" d="M240 100 L63 70 M240 100 L181 70 M240 100 L299 70 M240 100 L417 70 M240 150 L63 180 M240 150 L181 180 M240 150 L299 180 M240 150 L417 180"/>
+        <rect class="soft" x="12" y="16" width="102" height="54" rx="8"/>
+        <rect class="soft" x="130" y="16" width="102" height="54" rx="8"/>
+        <rect class="soft" x="248" y="16" width="102" height="54" rx="8"/>
+        <rect class="soft" x="366" y="16" width="102" height="54" rx="8"/>
+        <rect class="soft" x="12" y="180" width="102" height="54" rx="8"/>
+        <rect class="soft" x="130" y="180" width="102" height="54" rx="8"/>
+        <rect class="soft" x="248" y="180" width="102" height="54" rx="8"/>
+        <rect class="soft" x="366" y="180" width="102" height="54" rx="8"/>
+        <rect class="acc" x="190" y="100" width="100" height="50" rx="10"/>
+        <text class="lg mono t-acc" x="240" y="135" text-anchor="middle">go</text>
+        <text class="small mono bold" x="63" y="38" text-anchor="middle">run</text>
+        <text class="sm" x="63" y="58" text-anchor="middle">跑起來</text>
+        <text class="small mono bold" x="181" y="38" text-anchor="middle">build</text>
+        <text class="sm" x="181" y="58" text-anchor="middle">編譯</text>
+        <text class="small mono bold" x="299" y="38" text-anchor="middle">test</text>
+        <text class="sm" x="299" y="58" text-anchor="middle">測試</text>
+        <text class="small mono bold" x="417" y="38" text-anchor="middle">fmt</text>
+        <text class="sm" x="417" y="58" text-anchor="middle">排版</text>
+        <text class="small mono bold" x="63" y="202" text-anchor="middle">vet</text>
+        <text class="sm" x="63" y="222" text-anchor="middle">檢查</text>
+        <text class="small mono bold" x="181" y="202" text-anchor="middle">doc</text>
+        <text class="sm" x="181" y="222" text-anchor="middle">查文件</text>
+        <text class="small mono bold" x="299" y="202" text-anchor="middle">mod</text>
+        <text class="sm" x="299" y="222" text-anchor="middle">管模組</text>
+        <text class="small mono bold" x="417" y="202" text-anchor="middle">install</text>
+        <text class="sm" x="417" y="222" text-anchor="middle">安裝</text>
+      </svg>
+      <figcaption>裝好 Go 就有一個 <code>go</code> 指令，編譯、測試、排版、查文件、管理相依都靠它，不用另外裝建置工具。</figcaption>
+    </figure>
+    <p>到 <a href="https://go.dev/doc/install">go.dev 的下載頁</a>選擇你的作業系統：</p>
+    <ul class="notes">
+      <li><strong>macOS</strong>：下載 <code>.pkg</code> 安裝檔，一路按下一步；有用 Homebrew 的話也可以 <code>brew install go</code>。</li>
+      <li><strong>Windows</strong>：下載 <code>.msi</code> 安裝檔。裝完之後要重新開一個終端機視窗，新的 PATH 才會生效。</li>
+      <li><strong>Linux</strong>：下載 <code>.tar.gz</code>，解壓縮到 <code>/usr/local/go</code>，再把 <code>/usr/local/go/bin</code> 加進 PATH。發行版套件庫裡的 Go 常常比較舊，建議直接用官方版本。</li>
+    </ul>
+    <p>裝好之後開一個新的終端機，確認 go 指令找得到：</p>
+    <pre class="shell"><code>go version</code></pre>
+    <p class="label">輸出（以本書寫作時的 macOS 為例，版本和平台依你的電腦而定）</p>
+    <pre class="out"><code>go version go1.27.4 darwin/arm64</code></pre>
+    <p>輸出依序是 Go 的版本、作業系統和 CPU 架構。<code>darwin</code> 是 macOS，<code>arm64</code> 是 Apple 晶片；Windows 會顯示 <code>windows/amd64</code> 之類的組合。</p>
+    <aside class="callout">
+      <span class="title">版本不夠新也沒關係</span>
+      <p>這個 repo 的 <code>go.mod</code> 寫的是 <code>go 1.27</code>。只要你的 Go 是 1.21 以上，遇到要求更新版本的專案時，go 指令會自動下載對應版本的工具鏈（toolchain）來用，這個行為由環境變數 <code>GOTOOLCHAIN</code> 控制，預設值是 <code>auto</code>。第一次會花一點下載時間，之後就直接用快取。</p>
+    </aside>
+    <p>Go 會在你的家目錄底下建立一個 <code>go</code> 資料夾（可以用 <code>go env GOPATH</code> 查實際位置）。下載的套件放在它的 <code>pkg/mod</code>，<code>go install</code> 裝的程式放在它的 <code>bin</code>。把這個 <code>bin</code> 加進 PATH，之後裝的工具就能直接在終端機執行。</p>
+  </section>
+
+  <section aria-labelledby="module">
+    <h2 id="module">2. 建立第一個 module</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 240" role="img" aria-label="專案資料夾裡放著 go.mod 和 main.go；go.mod 寫著模組名稱和 Go 版本">
+        <title>go.mod 是專案的身分證</title>
+        <rect class="soft" x="20" y="20" width="130" height="34" rx="6"/>
+        <rect class="soft" x="20" y="40" width="440" height="184" rx="12"/>
+        <text class="mono bold" x="40" y="76">hello/</text>
+        <rect class="acc" x="40" y="96" width="256" height="104" rx="6"/>
+        <text class="mono bold" x="56" y="126">go.mod</text>
+        <text class="sm mono" x="56" y="154">module example.com/hello</text>
+        <text class="sm mono" x="56" y="180">go 1.27.4</text>
+        <path class="box" d="M330 96 H388 L408 116 V184 H330 Z"/>
+        <path class="wire" d="M388 96 V116 H408"/>
+        <path class="wire faint" d="M342 132 H394 M342 146 H380 M342 160 H390"/>
+        <text class="sm mono" x="369" y="206" text-anchor="middle">main.go</text>
+      </svg>
+      <figcaption><code>go.mod</code> 是專案的身分證：寫著 module 的名稱和需要的 Go 版本，和原始碼放在同一個資料夾。</figcaption>
+    </figure>
+    <p>Go 的程式碼以 <strong>module</strong> 為單位管理。一個 module 就是一個資料夾，最上層有一個 <code>go.mod</code> 檔。建立 module 只要一個指令：</p>
+    <pre class="shell"><code>mkdir hello
+cd hello
+go mod init example.com/hello</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out"><code>go: creating new go.mod: module example.com/hello</code></pre>
+    <p class="label">產生的 go.mod</p>
+    <pre class="out"><code>module example.com/hello
+
+go 1.27.4</code></pre>
+    <p>只有兩行，但都很重要：</p>
+    <ul class="notes">
+      <li><code>module example.com/hello</code> 是 module 的路徑，也就是它的全名。別人要用你的程式碼時，import 的就是這個路徑開頭的名字。只在自己電腦上練習的話，名字隨便取都可以；要放上 GitHub 讓別人用的話，習慣寫成 <code>github.com/你的帳號/repo 名稱</code>。</li>
+      <li><code>go 1.27.4</code> 表示這個 module 至少需要哪個版本的 Go。<code>go mod init</code> 會填入你目前用的版本。它也決定了語言的行為：例如第 <a href="03-control-flow.html">03 章</a>提到的「每一圈都是新的迴圈變數」，只在這一行寫 1.22 以上時才生效。</li>
+    </ul>
+    <p>以後用到第三方套件時，go.mod 會多出 <code>require</code> 區塊，旁邊也會出現記錄檢查碼的 <code>go.sum</code>，<a href="29-packages-modules.html">package 與 module</a> 那一章會詳細介紹。現在只用標準庫，go.mod 就保持這兩行。</p>
+  </section>
+
+  <section aria-labelledby="anatomy">
+    <h2 id="anatomy">3. 一支程式的結構</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 232" role="img" aria-label="一支 Go 程式的三個部分：package main、import、func main 是程式的入口">
+        <title>一支 Go 程式的結構</title>
+        <rect class="soft" x="16" y="16" width="262" height="200" rx="8"/>
+        <rect class="hot" x="26" y="112" width="242" height="30" rx="4"/>
+        <text class="mono" x="34" y="52">package main</text>
+        <text class="mono" x="34" y="92">import "fmt"</text>
+        <text class="mono" x="34" y="133">func main() {</text>
+        <text class="mono" x="58" y="168">fmt.Println(…)</text>
+        <text class="mono" x="34" y="202">}</text>
+        <path class="wire faint" d="M284 46 H300 M284 86 H300"/>
+        <path class="wire hot-ln" d="M272 127 H300"/>
+        <text x="308" y="52">屬於 main 套件</text>
+        <text x="308" y="92">借用 fmt 工具箱</text>
+        <text class="bold t-hot" x="308" y="133">從這裡開始執行</text>
+      </svg>
+      <figcaption><code>package main</code> 加上 <code>func main()</code>，就是一支能執行的程式。<code>import</code> 把標準庫的工具借進來。</figcaption>
+    </figure>
+    <p>這是本章程式的 <code>main.go</code>，完整的檔案長這樣：</p>
+    <pre class="code" data-src="chapters/00-hello/main.go"><code>// 第 00 章：第一支 Go 程式。
+//
+// 一支可以執行的 Go 程式需要 package main 和 func main()。
+// 這一章的程式分成 main.go 和 greet.go 兩個檔案，它們屬於同一個 package。
+//
+// 執行：go run ./chapters/00-hello
+package main
+
+import "fmt"
+
+// main 是程式的入口：它跑完，整支程式就結束。
+func main() {
+	fmt.Println("哈囉，Go！")
+
+	// Println 可以一次印好幾個值，值和值之間自動補一個空白，最後換行。
+	fmt.Println("便當", 3, "個，共", 255, "元，已付款：", true)
+
+	// greeting 寫在 greet.go，同一個 package 裡的函式可以直接呼叫。
+	fmt.Println(greeting("小明"))
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/00-hello#Example"><code>哈囉，Go！
+便當 3 個，共 255 元，已付款： true
+哈囉，小明！</code></pre>
+    <p>由上往下看：</p>
+    <ul class="notes">
+      <li><strong>最上面的註解</strong>：緊貼在 <code>package</code> 上方的註解是這個 package 的說明文件，<code>go doc</code> 會把它顯示出來（第 8 節）。註解有兩種寫法：<code>//</code> 到行尾，或 <code>/* … */</code> 包住一段；實務上幾乎都用 <code>//</code>。</li>
+      <li><strong><code>package main</code></strong>：每個 .go 檔的第一行（註解除外）都要宣告它屬於哪個 package。名字叫 <code>main</code> 的 package 很特別：它會被編譯成可以執行的程式，其他名字的 package 則是給別人 import 的函式庫。</li>
+      <li><strong><code>import "fmt"</code></strong>：把標準庫的 fmt 套件借進來用，fmt 負責格式化輸出。import 的是路徑，用的時候寫路徑的最後一段當前綴，也就是 <code>fmt.Println</code>。要 import 好幾個時，用括號包成一組：<code>import ( "fmt" "os" )</code>，每個路徑各佔一行。</li>
+      <li><strong><code>func main()</code></strong>：程式的入口，沒有參數，也沒有回傳值。main 跑完，整支程式就結束；命令列參數要從 <code>os.Args</code> 拿（命令列工具那一章）。</li>
+      <li><strong>每一行敘述的結尾不用分號</strong>：編譯器會自動補上，所以 Go 程式碼幾乎看不到分號（規則在第 <a href="03-control-flow.html#pit-brace">03 章常見錯誤 1</a>）。</li>
+    </ul>
+    <p><code>fmt.Println</code> 可以一次印好幾個值，不管是字串、整數還是布林值，它會在值和值之間補一個空白，最後換行。所以第二行輸出的「已付款：」和 <code>true</code> 中間多了一個空白。想精準控制格式時，要用 <code>fmt.Printf</code>，第 <a href="02-input-output.html">02 章</a>會介紹。</p>
+    <aside class="callout">
+      <span class="title">字串和中文</span>
+      <p>Go 的原始碼一律是 UTF-8 編碼，字串可以直接放中文，不需要任何設定。用雙引號 <code>"…"</code> 寫的是字串；單引號 <code>'a'</code> 是一個字元（rune），兩者是不同的型別，第 <a href="08-strings-runes.html">08 章</a>會細講。</p>
+    </aside>
+    <h3>大寫開頭才能給別人用</h3>
+    <p>注意 <code>fmt.Println</code> 的 P 是大寫。Go 沒有 <code>public</code>、<code>private</code> 這些關鍵字，而是用名字的第一個字母決定：大寫開頭的名字會被<strong>匯出</strong>（exported），其他 package 可以使用；小寫開頭的只有自己的 package 看得到。所以標準庫給你用的函式全都是大寫開頭，而我們的 <code>greeting</code> 是小寫，只在這個 package 裡使用。寫成 <code>fmt.println</code> 會發生什麼事，第 7 節會看到。</p>
+  </section>
+
+  <section aria-labelledby="files">
+    <h2 id="files">4. 一個 package，好幾個檔案</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 236" role="img" aria-label="hello 資料夾裡有 main.go 和 greet.go，兩個都是 package main。go run 點會把兩個檔案一起編譯；go run main.go 只編譯 main.go，所以找不到 greeting">
+        <title>一個資料夾就是一個 package</title>
+        <rect class="wire dash" x="16" y="16" width="290" height="152" rx="12"/>
+        <text class="sm" x="32" y="40">hello/：一個資料夾就是一個 package</text>
+        <rect class="soft" x="36" y="56" width="120" height="96" rx="8"/>
+        <rect class="soft" x="170" y="56" width="120" height="96" rx="8"/>
+        <text class="small mono bold" x="96" y="82" text-anchor="middle">main.go</text>
+        <text class="sm mono" x="96" y="106" text-anchor="middle">package main</text>
+        <text class="sm" x="96" y="132" text-anchor="middle">呼叫 greeting</text>
+        <text class="small mono bold" x="230" y="82" text-anchor="middle">greet.go</text>
+        <text class="sm mono" x="230" y="106" text-anchor="middle">package main</text>
+        <text class="sm" x="230" y="132" text-anchor="middle">定義 greeting</text>
+        <path class="wire acc-ln" d="M306 92 H330"/>
+        <path class="tip acc-tip" d="M342 92 L329 85 L329 99 Z"/>
+        <rect class="acc" x="344" y="64" width="124" height="56" rx="8"/>
+        <text class="small mono" x="406" y="88" text-anchor="middle">go run .</text>
+        <text class="sm" x="406" y="108" text-anchor="middle">兩個檔案一起編</text>
+        <text class="small mono t-hot" x="16" y="200">go run main.go</text>
+        <text class="small t-hot" x="16" y="224">只編 main.go，找不到 greeting</text>
+      </svg>
+      <figcaption>同一個資料夾裡的 .go 檔屬於同一個 package，要一起編譯；用 <code>.</code> 指定整個資料夾最保險。</figcaption>
+    </figure>
+    <p><code>main.go</code> 呼叫的 <code>greeting</code> 不在 main.go 裡，而是寫在同一個資料夾的 <code>greet.go</code>：</p>
+    <pre class="code" data-src="chapters/00-hello/greet.go"><code>package main
+
+// greeting 回傳一句打招呼的話。
+func greeting(name string) string {
+	return "哈囉，" + name + "！"
+}</code></pre>
+    <p>Go 的規則是：<strong>一個資料夾就是一個 package</strong>。同一個資料夾裡的 .go 檔都要宣告同一個 package 名稱，編譯時會被當成一個整體，彼此的函式、變數、型別可以直接使用，不用 import，也不用管哪個檔案先寫。程式變大時，就照主題把程式拆成幾個檔案，例如第 03 章把 if、for、switch 的示範分別放在 if.go、loops.go、switch.go。</p>
+    <p>正因為如此，執行時要指定「整個資料夾」，而不是單一檔案：</p>
+    <pre class="shell"><code>go run .          <span class="c"># 編譯目前資料夾裡的整個 package</span>
+go run main.go    <span class="c"># 只編譯 main.go 這一個檔案</span></code></pre>
+    <p class="label">go run main.go 的輸出</p>
+    <pre class="out err"><code># command-line-arguments
+./main.go:6:14: undefined: greeting</code></pre>
+    <p>只給 main.go 時，go 指令會把這一個檔案當成一個臨時的 package（名字叫 <code>command-line-arguments</code>），greet.go 不在裡面，所以找不到 greeting。養成用 <code>go run .</code> 或 <code>go run ./路徑</code> 的習慣，就不會遇到這個問題。</p>
+  </section>
+
+  <section aria-labelledby="commands">
+    <h2 id="commands">5. go run、go build、go install</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 262" role="img" aria-label="go build 把 main.go 編譯成留下來的執行檔；go run 編譯成暫存檔，執行完就刪掉">
+        <title>go build 與 go run</title>
+        <path class="box" d="M20 30 H78 L98 50 V110 H20 Z"/>
+        <path class="wire" d="M78 30 V50 H98"/>
+        <path class="wire faint" d="M32 66 H84 M32 80 H70 M32 94 H80"/>
+        <text class="sm mono" x="59" y="130" text-anchor="middle">main.go</text>
+        <path class="wire" d="M108 70 H176"/>
+        <path class="tip" d="M188 70 L175 63 L175 77 Z"/>
+        <text class="sm mono" x="146" y="58" text-anchor="middle">go build</text>
+        <rect class="acc" x="192" y="40" width="96" height="60" rx="8"/>
+        <text x="240" y="76" text-anchor="middle">編譯器</text>
+        <path class="wire" d="M292 70 H362"/>
+        <path class="tip" d="M374 70 L361 63 L361 77 Z"/>
+        <rect class="hot" x="378" y="36" width="84" height="68" rx="8"/>
+        <text class="mono bold" x="420" y="66" text-anchor="middle">hello</text>
+        <text class="sm" x="420" y="90" text-anchor="middle">執行檔</text>
+        <path class="box" d="M20 150 H78 L98 170 V230 H20 Z"/>
+        <path class="wire" d="M78 150 V170 H98"/>
+        <path class="wire faint" d="M32 186 H84 M32 200 H70 M32 214 H80"/>
+        <text class="sm mono" x="59" y="250" text-anchor="middle">main.go</text>
+        <path class="wire" d="M108 190 H176"/>
+        <path class="tip" d="M188 190 L175 183 L175 197 Z"/>
+        <text class="sm mono" x="146" y="178" text-anchor="middle">go run</text>
+        <rect class="acc" x="192" y="160" width="96" height="60" rx="8"/>
+        <text x="240" y="196" text-anchor="middle">編譯器</text>
+        <path class="wire" d="M292 190 H362"/>
+        <path class="tip" d="M374 190 L361 183 L361 197 Z"/>
+        <rect class="soft dash" x="378" y="156" width="84" height="68" rx="8"/>
+        <text x="420" y="186" text-anchor="middle">暫存檔</text>
+        <text class="sm" x="420" y="210" text-anchor="middle">跑完就刪</text>
+      </svg>
+      <figcaption><code>go build</code> 把原始碼編成一個執行檔，複製到別台機器就能跑。<code>go run</code> 也會編譯，只是跑完就把檔案丟掉。</figcaption>
+    </figure>
+    <p>Go 是編譯式語言：原始碼要先被編譯器翻譯成機器碼，才能執行。三個指令都會編譯，差別在編譯出來的執行檔放到哪裡：</p>
+    <div class="table-wrap">
+      <table class="vs">
+        <thead><tr><th scope="col">指令</th><th scope="col">做什麼</th><th scope="col">什麼時候用</th></tr></thead>
+        <tbody>
+          <tr><th scope="row"><code>go run .</code></th><td>編譯到暫存資料夾，馬上執行，跑完就刪掉</td><td>開發中，改一下、跑一下</td></tr>
+          <tr><th scope="row"><code>go build</code></th><td>在目前資料夾產生執行檔，名字取 module 路徑的最後一段（例如 <code>hello</code>，Windows 是 <code>hello.exe</code>）；用 <code>-o</code> 可以指定名稱和位置</td><td>要把程式交給別人或部署到伺服器</td></tr>
+          <tr><th scope="row"><code>go install</code></th><td>編譯後放進 <code>go env GOPATH</code> 底下的 <code>bin</code>（有設定 <code>GOBIN</code> 的話放那裡）</td><td>安裝自己常用的命令列工具</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <pre class="shell"><code>go build -o bin/hello ./chapters/00-hello   <span class="c"># 在 bin/ 產生執行檔</span>
+./bin/hello                                 <span class="c"># 直接執行，不需要 go 指令</span></code></pre>
+    <p>有幾件事值得知道：</p>
+    <ul class="notes">
+      <li><strong>編譯很快</strong>：go 指令有 build cache，沒改過的 package 不會重新編譯，所以 <code>go run</code> 第二次之後幾乎是立刻執行。</li>
+      <li><strong>產物是單一執行檔</strong>：在大多數情況下，Go 會把程式需要的東西全部打包進一個執行檔，目標機器不需要安裝 Go，也不需要額外的 runtime。部署就是把這個檔案複製過去。</li>
+      <li><strong>交叉編譯只要設兩個環境變數</strong>：在 Mac 上執行 <code>GOOS=linux GOARCH=amd64 go build</code>，就能產生 Linux 伺服器用的執行檔，<a href="32-toolchain.html">工具鏈</a>那一章會細講。</li>
+      <li><strong>路徑寫法</strong>：<code>.</code> 是目前資料夾，<code>./chapters/00-hello</code> 是相對路徑；<code>./...</code> 代表目前資料夾和底下所有子資料夾，例如 <code>go build ./...</code> 會檢查整個 repo 都能編譯。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="fmt-vet">
+    <h2 id="fmt-vet">6. gofmt 與 go vet</h2>
+    <h3>gofmt：排版只有一種</h3>
+    <p>Go 的程式碼排版是由工具決定的，不是由團隊爭論出來的。<code>gofmt</code> 會把縮排統一成 tab、在運算子兩側補空白、把大括號放到固定的位置。用 <code>-d</code> 可以先看它打算怎麼改。下面這個檔案排版很亂，但可以編譯：</p>
+    <pre class="shell"><code>gofmt -d messy.go</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out"><code>diff messy.go.orig messy.go
+--- messy.go.orig
++++ messy.go
+@@ -1,6 +1,10 @@
+ package main
++
+ import "fmt"
+-func main(){
+-    total:=85*3
+-  if total&gt;200 {fmt.Println("超過預算")}
++
++func main() {
++	total := 85 * 3
++	if total &gt; 200 {
++		fmt.Println("超過預算")
++	}
+ }</code></pre>
+    <p>開頭是 <code>-</code> 的是原本的行，<code>+</code> 是排版後的行。確認沒問題就用 <code>gofmt -w messy.go</code> 直接改寫檔案，或在 module 裡用 <code>go fmt ./...</code> 一次處理所有檔案。實務上不需要手動執行：設定好編輯器（第 9 節），存檔時就會自動排版。因為大家的程式都長得一樣，讀別人的 Go 程式碼會輕鬆很多，code review 也不用再討論空白和換行。</p>
+
+    <h3>go vet：能編譯，不代表沒問題</h3>
+    <p>編譯器只檢查「合不合法」，<code>go vet</code> 則會找出「合法但很可疑」的寫法。最常抓到的是格式字串和參數對不上。下面這支程式可以編譯，因為它沒有違反任何語法規則；但 <code>%d</code> 是整數的格式，卻配了一個字串：</p>
+    <pre class="code bad" data-vet-error><code>package main
 
 import "fmt"
 
 func main() {
-	fmt.Println("Hello, 世界")
-	fmt.Println("整數", 3, "小數", 3.14, "布林", true)
-	fmt.Println('a', '世')
+	name := "小明"
+	fmt.Printf("%d 你好\n", name)
 }</code></pre>
+    <pre class="shell"><code>go vet .</code></pre>
     <p class="label">輸出</p>
-    <pre class="out"><code>Hello, 世界
-整數 3 小數 3.14 布林 true
-97 19990</code></pre>
+    <pre class="out err"><code>main.go:7:14: fmt.Printf format %d has arg name of wrong type string</code></pre>
+    <p>vet 的訊息很具體：第 7 行第 14 欄，<code>%d</code> 配到了 string 型別的 <code>name</code>。<code>go test</code> 在跑測試之前也會自動執行一部分 vet 檢查（printf 就是其中之一），本 repo 的 CI 則會對所有程式完整跑一次 <code>go vet ./...</code>。</p>
   </section>
 
-  <section aria-labelledby="notes">
-    <h2 id="notes">工程師筆記</h2>
+  <section aria-labelledby="errors">
+    <h2 id="errors">7. 看懂編譯錯誤</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 170" role="img" aria-label="編譯錯誤 ./main.go:6:2: declared and not used: total 分成四段：檔案、行、欄、原因">
+        <title>編譯錯誤的格式</title>
+        <text class="sm" x="16" y="30">go build 印出的一行錯誤</text>
+        <text class="small mono" x="16" y="62">./main.go</text>
+        <text class="small mono" x="96" y="62">:</text>
+        <text class="small mono t-hot" x="108" y="62">6</text>
+        <text class="small mono" x="120" y="62">:</text>
+        <text class="small mono t-hot" x="132" y="62">2</text>
+        <text class="small mono" x="144" y="62">:</text>
+        <text class="small mono" x="158" y="62">declared and not used: total</text>
+        <path class="wire acc-ln" d="M16 74 V80 H92 V74 M106 74 V80 H118 V74 M130 74 V80 H142 V74 M158 74 V80 H394 V74"/>
+        <text class="small" x="54" y="104" text-anchor="middle">檔案</text>
+        <text class="small" x="112" y="104" text-anchor="middle">行</text>
+        <text class="small" x="136" y="104" text-anchor="middle">欄</text>
+        <text class="small" x="276" y="104" text-anchor="middle">原因</text>
+        <text class="small t-acc" x="240" y="148" text-anchor="middle">先看位置，再看原因；一次只修第一個錯誤</text>
+      </svg>
+      <figcaption>每一行錯誤都是「檔案:行:欄: 原因」。編輯器和終端機通常可以直接點檔名跳到那個位置。</figcaption>
+    </figure>
+    <p>初學時遇到的編譯錯誤大多是下面幾種。每個例子都是一支完整的程式，錯誤訊息是實際執行 <code>go build</code> 的結果（省略了第一行的 package 名稱）。遇到很多個錯誤時，先修第一個：後面的錯誤常常是第一個錯誤連帶造成的。</p>
+
+    <h3>宣告了變數卻沒用</h3>
+    <pre class="code bad" data-compile-error><code>package main
+
+import "fmt"
+
+func main() {
+	total := 85 * 3
+	fmt.Println("便當三個")
+}</code></pre>
+    <p class="label">編譯錯誤</p>
+    <pre class="out err"><code>./main.go:6:2: declared and not used: total</code></pre>
+    <p>在其他語言這只是警告，在 Go 是錯誤。沒用到的變數通常代表程式寫到一半、或者算出來的值忘了用，編譯器直接擋下來，可以少掉一整類 bug。暫時還不想用的值可以指定給 <code>_</code>（空白識別字）：<code>_ = total</code>。</p>
+
+    <h3>import 了卻沒用</h3>
+    <pre class="code bad" data-compile-error><code>package main
+
+import (
+	"fmt"
+	"os"
+)
+
+func main() {
+	fmt.Println("哈囉")
+}</code></pre>
+    <p class="label">編譯錯誤</p>
+    <pre class="out err"><code>./main.go:5:2: "os" imported and not used</code></pre>
+    <p>沒用到的 import 也是錯誤，這讓每個檔案的相依關係保持乾淨，編譯也更快。設定好編輯器之後，存檔時會自動移除沒用到的 import、補上缺少的 import，這個錯誤幾乎不會再遇到。</p>
+
+    <h3>名字打錯</h3>
+    <pre class="code bad" data-compile-error><code>package main
+
+import "fmt"
+
+func main() {
+	fmt.Println(greting("小明"))
+}
+
+func greeting(name string) string {
+	return "哈囉，" + name
+}</code></pre>
+    <p class="label">編譯錯誤</p>
+    <pre class="out err"><code>./main.go:6:14: undefined: greting</code></pre>
+    <p><code>undefined</code> 表示編譯器找不到這個名字。常見原因有三個：打錯字、忘了 import、或者定義寫在另一個檔案卻只編譯了一個檔案（第 4 節）。</p>
+
+    <h3>用到沒有匯出的名字</h3>
+    <pre class="code bad" data-compile-error><code>package main
+
+import "fmt"
+
+func main() {
+	fmt.println("哈囉")
+}</code></pre>
+    <p class="label">編譯錯誤</p>
+    <pre class="out err"><code>./main.go:6:6: undefined: fmt.println (but have Println)</code></pre>
+    <p>小寫開頭的名字不會匯出，所以從 fmt 外面看不到 <code>println</code>。編譯器還很貼心地提示「但是有 Println」。Go 的錯誤訊息通常都寫得很直接，耐心讀完，答案常常就在裡面。</p>
+  </section>
+
+  <section aria-labelledby="doc">
+    <h2 id="doc">8. 查文件：go doc 與 pkg.go.dev</h2>
+    <p>寫 Go 的時候會一直查標準庫的用法。有兩個地方可以查：</p>
     <ul class="notes">
-      <li>安裝：macOS 用 <code>brew install go</code>，其他平台到 <a href="https://go.dev/dl/">go.dev/dl</a> 下載，裝好後用 <code>go version</code> 確認。</li>
-      <li>這個 repo 的 <code>go.mod</code> 寫的是 <code>go 1.27</code>。本機只要有 Go 1.21 以上，go 指令就會自動下載需要的版本（<code>GOTOOLCHAIN=auto</code>）。</li>
-      <li><code>go run</code> 每次都會編譯，但有 build cache，所以很快。部署用 <code>go build</code> 產生的單一執行檔，目標機器不用裝 Go。</li>
-      <li>沒用到的 import 或區域變數是編譯錯誤，不是警告。</li>
-      <li>格式只有一種：<code>gofmt</code>，縮排用 tab。大部分編輯器存檔時會自動執行。</li>
-      <li>名稱大寫開頭，才能被其他 package 使用（第 20 章）。</li>
+      <li><strong>網頁</strong>：<a href="https://pkg.go.dev/std">pkg.go.dev</a> 有標準庫和所有公開套件的文件，可以搜尋，也有範例。</li>
+      <li><strong>終端機</strong>：<code>go doc</code> 不用開瀏覽器。<code>go doc strings</code> 列出整個套件，<code>go doc strings.Repeat</code> 只看一個函式，<code>go doc -all strings</code> 看完整內容。</li>
     </ul>
+    <p>go doc 顯示的內容來自原始碼裡的註解。所以我們自己寫的程式也能用它查，例如本章的程式：</p>
+    <pre class="shell"><code>go doc ./chapters/00-hello</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out"><code>第 00 章：第一支 Go 程式。
+
+一支可以執行的 Go 程式需要 package main 和 func main()。 這一章的程式分成 main.go 和 greet.go 兩個檔案，它們屬於同一個 package。
+
+執行：go run ./chapters/00-hello</code></pre>
+    <p>這就是 main.go 最上面那段註解。Go 的慣例是：寫在宣告正上方、以那個名字開頭的註解，就是它的文件，例如 <code>// greeting 回傳一句打招呼的話。</code>。不需要特別的標記語法，寫成通順的句子就好。練習 4、5 會需要你用 go doc 查 <code>strings</code> 和 <code>strconv</code> 的函式。</p>
+  </section>
+
+  <section aria-labelledby="editor">
+    <h2 id="editor">9. 編輯器</h2>
+    <p>Go 官方維護一個語言伺服器 <strong>gopls</strong>，大部分編輯器都透過它支援 Go：</p>
+    <ul class="notes">
+      <li><strong>VS Code</strong>：安裝 Go 官方的擴充套件，第一次開 .go 檔時它會提示安裝 gopls 等工具，按下安裝就好。</li>
+      <li><strong>GoLand</strong>：JetBrains 的 Go IDE，裝好就能用。習慣 IntelliJ 的人會很熟悉。</li>
+      <li><strong>Vim、Neovim、Emacs、Zed、Helix</strong>：設定它們的 LSP 功能去使用 gopls。</li>
+    </ul>
+    <p>設定好之後，你會得到：存檔自動排版、自動整理 import、自動完成、跳到定義、找出所有使用的地方、安全地重新命名，以及在你打字時就標出編譯錯誤和 vet 的警告。這些功能在練習時非常有幫助，值得花十分鐘設定好。</p>
+  </section>
+
+  <section aria-labelledby="howto">
+    <h2 id="howto">10. 這本手冊怎麼用</h2>
+    <p>先把整個 repo 下載到你的電腦：</p>
+    <pre class="shell"><code>git clone https://github.com/xinqilin/GO-Playground.git
+cd GO-Playground</code></pre>
+    <p>repo 裡有四個主要的資料夾：</p>
+    <ul class="notes">
+      <li><code>chapters/</code>：每一章的示範程式。頁面上的程式碼和輸出都是從這裡同步過去的，用 <code>go run ./chapters/03-control-flow</code> 就能看到同樣的輸出。</li>
+      <li><code>exercises/</code>：每一章的練習題。<code>exercises.go</code> 是題目，<code>exercises_test.go</code> 是檢查答案的測試，<code>solution.go</code> 是參考解答。</li>
+      <li><code>projects/</code>：把多章的內容組合起來的專題。</li>
+      <li><code>docs/</code>：你正在讀的這些網頁。</li>
+    </ul>
+    <p>做練習的流程是：打開 <code>exercises.go</code>，把 TODO 換成你的程式，然後執行測試。還沒寫的時候，測試會失敗，並告訴你哪裡不對：</p>
+    <pre class="shell"><code>go test ./exercises/00-hello/ -run TestGreeting</code></pre>
+    <p class="label">輸出（還沒作答時）</p>
+    <pre class="out err"><code>--- FAIL: TestGreeting (0.00s)
+    exercises_test.go:15: Greeting("小明") = "", want "哈囉，小明！"
+    exercises_test.go:15: Greeting("Go") = "", want "哈囉，Go！"
+    exercises_test.go:15: Greeting("") = "", want "哈囉，陌生人！"
+FAIL
+FAIL	github.com/xinqilin/GO-Playground/exercises/00-hello	0.315s
+FAIL</code></pre>
+    <p>每一行失敗訊息都是同一個格式：用什麼參數呼叫、實際得到什麼（<code>=</code> 後面）、期望得到什麼（<code>want</code> 後面）。這裡三次呼叫都得到空字串，因為題目還沒寫。全部寫對之後，最後一行會變成 <code>ok</code>。<code>-run</code> 後面接測試名稱，只跑那一題；不加就跑整章的練習。卡住的時候可以加 <code>-tags solution</code> 跑參考解答，或直接讀 <code>solution.go</code>，但建議先自己試過。</p>
+    <aside class="callout">
+      <span class="title">不要在根目錄跑 go test ./...</span>
+      <p>根目錄的 <code>go test ./...</code> 會連同所有還沒寫的練習一起跑，一定會看到一堆紅燈。只想確認示範程式時，用 <code>go test ./chapters/... ./projects/...</code>。</p>
+    </aside>
+  </section>
+
+  <section aria-labelledby="pitfalls">
+    <h2 id="pitfalls">常見錯誤</h2>
+    <h3>1. 在沒有 go.mod 的資料夾執行</h3>
+    <pre class="shell"><code>go run .</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out err"><code>go: go.mod file not found in current directory or any parent directory; see 'go help modules'</code></pre>
+    <p>go 指令會從目前的資料夾往上找 go.mod，一路找到根目錄都找不到就會報這個錯誤。可能是忘了 <code>go mod init</code>，或者終端機不在專案資料夾裡。用 <code>pwd</code>（Windows 用 <code>cd</code>）確認目前的位置。</p>
+
+    <h3>2. 同一個資料夾放了兩種 package</h3>
+    <p>main.go 寫 <code>package main</code>，greet.go 卻寫了 <code>package hello</code>：</p>
+    <p class="label">go run . 的輸出</p>
+    <pre class="out err"><code>found packages hello (greet.go) and main (main.go) in …/mixed</code></pre>
+    <p>一個資料夾只能有一個 package，所有檔案的 package 名稱必須一致（測試檔的 <code>_test</code> 後綴是唯一的例外，<a href="30-testing.html">測試</a>那一章會介紹）。</p>
+
+    <h3>3. 用 go run main.go 漏掉其他檔案</h3>
+    <p>package 拆成好幾個檔案之後，<code>go run main.go</code> 只會編譯 main.go，其他檔案定義的名字都會變成 undefined。改用 <code>go run .</code>，見第 4 節。</p>
+
+    <h3>4. 把警告當成可以忽略的東西</h3>
+    <p>沒用到的變數和 import 在 Go 是編譯錯誤，不能先放著。這不是刁難，而是讓程式一直保持乾淨。暫時不用的值指定給 <code>_</code>，或乾脆刪掉。</p>
+
+    <h3>5. 裝好之後找不到 go 指令</h3>
+    <p>終端機說找不到 go，通常是 PATH 還沒更新：關掉終端機再開一個新的。還是不行的話，確認安裝路徑底下的 <code>bin</code>（macOS 和 Linux 預設是 <code>/usr/local/go/bin</code>）有加進 PATH。</p>
   </section>
 
   <section aria-labelledby="java">
@@ -135,35 +519,145 @@ func main() {
         <thead><tr><th scope="col">主題</th><th scope="col">Java</th><th scope="col">Go</th></tr></thead>
         <tbody>
           <tr><th scope="row">進入點</th><td class="java"><code>public static void main(String[] args)</code></td><td><code>func main()</code>，命令列參數從 <code>os.Args</code> 拿</td></tr>
-          <tr><th scope="row">建置工具</th><td class="java">Maven 或 Gradle，另外安裝</td><td>內建在 <code>go</code> 指令裡，設定檔是 <code>go.mod</code></td></tr>
-          <tr><th scope="row">產物</th><td class="java"><code>.jar</code>，執行時要有 JVM</td><td>單一原生執行檔，不需要 runtime</td></tr>
-          <tr><th scope="row">格式</th><td class="java">各團隊自訂 style guide</td><td>只有 <code>gofmt</code> 一種</td></tr>
-          <tr><th scope="row">沒用到的 import</th><td class="java">警告</td><td>編譯錯誤</td></tr>
+          <tr><th scope="row">建置工具</th><td class="java">Maven 或 Gradle，另外安裝</td><td>內建在 go 指令裡，設定檔是 <code>go.mod</code></td></tr>
+          <tr><th scope="row">產物</th><td class="java"><code>.jar</code>，執行時需要 JVM</td><td>單一原生執行檔，通常不需要其他 runtime</td></tr>
+          <tr><th scope="row">package 與資料夾</th><td class="java">package 名稱對應資料夾路徑，一個檔案通常一個 public class</td><td>一個資料夾就是一個 package，檔案怎麼切自己決定</td></tr>
+          <tr><th scope="row">可見性</th><td class="java"><code>public</code>、<code>protected</code>、<code>private</code>、package-private</td><td>大寫開頭匯出，小寫開頭只在 package 內可見</td></tr>
+          <tr><th scope="row">排版</th><td class="java">各團隊自訂 style guide</td><td>只有 gofmt 一種</td></tr>
+          <tr><th scope="row">沒用到的 import、變數</th><td class="java">警告</td><td>編譯錯誤</td></tr>
+          <tr><th scope="row">文件</th><td class="java">Javadoc，<code>/** … */</code> 加上 <code>@param</code> 等標記</td><td>宣告上方的一般註解，不需要特別標記；用 go doc 或 pkg.go.dev 看</td></tr>
+          <tr><th scope="row">相依套件</th><td class="java">Maven Central，寫在 pom.xml 或 build.gradle</td><td>直接用原始碼的路徑（例如 GitHub 網址），寫在 go.mod</td></tr>
         </tbody>
       </table>
     </div>
   </section>
 
+  <section aria-labelledby="exercises">
+    <h2 id="exercises">練習</h2>
+    <p>前五題在 <code>exercises/00-hello/exercises.go</code>，每題都有測試；最後兩題是在自己的電腦上動手做，沒有自動測試。你還沒學到變數、if 和字串處理也沒關係，提示會告訴你要用什麼，也可以先跳過，讀完第 01–03 章再回來寫。</p>
+    <pre class="shell"><code>go test ./exercises/00-hello/                     <span class="c"># 跑全部練習</span>
+go test ./exercises/00-hello/ -run TestGreeting   <span class="c"># 只跑一題</span>
+go test -tags solution ./exercises/00-hello/      <span class="c"># 跑參考解答</span></code></pre>
+    <ol class="exercises">
+      <li>
+        <h3><span class="level l1">入門</span>練習 1：打招呼</h3>
+        <p>回傳 <code>"哈囉，&lt;name&gt;！"</code>；name 是空字串時回傳 <code>"哈囉，陌生人！"</code>。</p>
+        <pre class="code" data-src="exercises/00-hello/exercises.go#Greeting"><code>func Greeting(name string) string {
+	// TODO: 實作
+	return ""
+}</code></pre>
+        <p>測試：<code>TestGreeting</code>，第 10 節有它還沒作答時的失敗訊息。</p>
+        <details><summary>提示</summary><p>字串用 <code>+</code> 接起來，和本章的 greeting 一樣。空字串的判斷寫成 <code>if name == "" { name = "陌生人" }</code>，放在組字串之前。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l1">入門</span>練習 2：便當總價</h3>
+        <p>一個便當 85 元，買 10 個以上每個算 80 元。qty 小於 1 時回傳 0。</p>
+        <pre class="code" data-src="exercises/00-hello/exercises.go#BentoTotal"><code>func BentoTotal(qty int) int {
+	// TODO: 實作
+	return 0
+}</code></pre>
+        <p>例如 <code>BentoTotal(3)</code> 是 255，<code>BentoTotal(10)</code> 是 800。測試：<code>TestBentoTotal</code>。</p>
+        <details><summary>提示</summary><p>先用 <code>price := 85</code> 宣告單價，數量夠多時改成 80，最後回傳 <code>qty * price</code>。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l1">入門</span>練習 3：秒數轉時鐘</h3>
+        <p>把秒數轉成 <code>"時:分:秒"</code>，每一段都是兩位數；負數當成 0，時數超過 99 就照實寫出。</p>
+        <pre class="code" data-src="exercises/00-hello/exercises.go#Clock"><code>func Clock(seconds int) string {
+	// TODO: 實作
+	return ""
+}</code></pre>
+        <p>例如 <code>Clock(3725)</code> 是 <code>"01:02:05"</code>。測試：<code>TestClock</code>。</p>
+        <details><summary>提示</summary><p>整數除法會捨去小數：<code>seconds / 3600</code> 是時，<code>seconds % 3600 / 60</code> 是分，<code>seconds % 60</code> 是秒。用 <code>go doc fmt.Sprintf</code> 查格式化的寫法，<code>%02d</code> 表示「至少兩位，不足補 0」。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l2">進階</span>練習 4：ASCII 框</h3>
+        <p>用 <code>+</code>、<code>-</code>、<code>|</code> 把文字框起來，三列之間用換行分開。框的內寬是文字長度加 2，文字左右各留一個空白。text 只會有 ASCII 字元。</p>
+        <pre class="code" data-src="exercises/00-hello/exercises.go#Box"><code>func Box(text string) string {
+	// TODO: 實作
+	return ""
+}</code></pre>
+        <p>例如 <code>Box("Go")</code> 是 <code>"+----+\n| Go |\n+----+"</code>。測試：<code>TestBox</code>。</p>
+        <details><summary>提示</summary><p>執行 <code>go doc strings.Repeat</code>，它可以把一個字串重複 n 次。上下兩條邊框一樣，先算好存在一個變數裡。<code>len(text)</code> 是字串的 byte 數，ASCII 字元一個就是 1 byte。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l2">進階</span>練習 5：讀 go.mod 的版本</h3>
+        <p>讀取 go.mod 的 go 那一行（例如 <code>"go 1.27.4"</code> 或 <code>"go 1.27"</code>），回傳主版號和次版號。格式不對時，例如不是 <code>"go "</code> 開頭、少了次版號，或版號不是數字，就回傳 <code>0, 0, false</code>。</p>
+        <pre class="code" data-src="exercises/00-hello/exercises.go#GoVersion"><code>func GoVersion(line string) (major, minor int, ok bool) {
+	// TODO: 實作
+	return 0, 0, false
+}</code></pre>
+        <p>例如 <code>GoVersion("go 1.27.4")</code> 是 <code>1, 27, true</code>，<code>GoVersion("go 1")</code> 是 <code>0, 0, false</code>。測試：<code>TestGoVersion</code>。</p>
+        <details><summary>提示</summary><p>用 go doc 查這三個函式：<code>strings.CutPrefix</code> 拿掉開頭的 <code>"go "</code>，<code>strings.Split</code> 用 <code>"."</code> 切開，<code>strconv.Atoi</code> 把字串轉成整數，失敗時會回傳錯誤。只看切出來的前兩段，第三段（修訂版號）不用管。</p></details>
+      </li>
+      <li>
+        <h3><span class="level task">動手做</span>練習 6：自己的 module</h3>
+        <p>在 repo 以外的地方建立一個新資料夾，從零做出一支程式：</p>
+        <ol>
+          <li>用 <code>go mod init</code> 建立 module，名稱自己取。</li>
+          <li>寫一個 main.go，印出你的名字和今天的日期（日期先寫死在字串裡）。</li>
+          <li>把印名字的部分抽成一個函式，放到另一個檔案。</li>
+          <li>用 <code>go run .</code> 執行，再用 <code>go build</code> 產生執行檔，直接執行它。</li>
+          <li>執行 <code>go doc .</code>，看看你寫的註解有沒有出現。</li>
+        </ol>
+      </li>
+      <li>
+        <h3><span class="level task">動手做</span>練習 7：故意寫錯</h3>
+        <p>在練習 6 的程式裡，一次製造一個錯誤，先猜編譯器會說什麼，再執行 <code>go build</code> 對答案，最後修好它：</p>
+        <ol>
+          <li>宣告一個變數但不使用。</li>
+          <li>import <code>"strings"</code> 但不使用。</li>
+          <li>把 <code>fmt.Println</code> 寫成 <code>fmt.println</code>。</li>
+          <li>把 <code>{</code> 換到下一行。</li>
+          <li>用 <code>fmt.Printf("%d\n", "文字")</code>，這次改用 <code>go vet .</code> 檢查。</li>
+        </ol>
+      </li>
+    </ol>
+    <p><a href="https://github.com/xinqilin/GO-Playground/blob/main/exercises/00-hello/solution.go">參考解答</a>：先自己寫完再看。測試通過的寫法都是對的。</p>
+  </section>
+
+  <section aria-labelledby="recap">
+    <h2 id="recap">重點回顧</h2>
+    <ul class="recap">
+      <li><code>go version</code> 確認安裝；Go 1.21 以上會自動下載專案需要的版本。</li>
+      <li><code>go mod init 路徑</code> 建立 module；go.mod 記錄 module 路徑和需要的 Go 版本。</li>
+      <li>可以執行的程式是 <code>package main</code> 加上 <code>func main()</code>。</li>
+      <li>一個資料夾就是一個 package，裡面的檔案一起編譯；執行時用 <code>go run .</code>。</li>
+      <li>大寫開頭的名字才會匯出給其他 package 使用。</li>
+      <li><code>go run</code> 編譯後馬上執行，<code>go build</code> 留下執行檔，<code>go install</code> 放進 GOPATH 的 bin。</li>
+      <li>排版交給 gofmt，可疑的寫法交給 go vet。</li>
+      <li>錯誤訊息的格式是「檔案:行:欄: 原因」，先修第一個。</li>
+      <li>沒用到的變數和 import 是編譯錯誤。</li>
+      <li>用 go doc 或 pkg.go.dev 查文件；宣告上方的註解就是文件。</li>
+      <li>練習題用 <code>go test ./exercises/章節/</code> 檢查，失敗訊息會告訴你得到什麼、期望什麼。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="further">
+    <h2 id="further">延伸閱讀</h2>
+    <ul class="notes">
+      <li>安裝：<a href="https://go.dev/doc/install">Download and install</a>。</li>
+      <li>官方入門教學：<a href="https://go.dev/doc/tutorial/getting-started">Tutorial: Get started with Go</a>，以及介紹 module 和 package 怎麼組織的 <a href="https://go.dev/doc/code">How to Write Go Code</a>。</li>
+      <li>go 指令的完整說明：<a href="https://pkg.go.dev/cmd/go">cmd/go</a>；module 的規格：<a href="https://go.dev/ref/mod">Go Modules Reference</a>。</li>
+      <li>自動切換版本：<a href="https://go.dev/doc/toolchain">Go Toolchains</a>。</li>
+      <li>文件註解的寫法：<a href="https://go.dev/doc/comment">Go Doc Comments</a>。</li>
+      <li>編輯器支援：<a href="https://go.dev/gopls/">gopls</a>。</li>
+    </ul>
+  </section>
+
   <section aria-labelledby="run">
     <h2 id="run">動手跑</h2>
-    <p class="label">在這個 repo 裡</p>
-    <pre class="shell"><code>git clone https://github.com/xinqilin/GO-Playground.git
-cd GO-Playground
-go run ./chapters/00-hello
-go test ./chapters/00-hello
+    <p class="label">在 repo 根目錄</p>
+    <pre class="shell"><code>go run ./chapters/00-hello                  <span class="c"># 執行本章程式</span>
+go test ./chapters/00-hello                 <span class="c"># 驗證頁面上的輸出</span>
 go build -o bin/hello ./chapters/00-hello   <span class="c"># 產生執行檔</span>
-./bin/hello</code></pre>
-    <p class="label">自己從零建一個</p>
-    <pre class="shell"><code>mkdir hello &amp;&amp; cd hello
-go mod init example.com/hello
-<span class="c"># 把上面的程式存成 main.go</span>
-go run .</code></pre>
-    <p><a href="https://github.com/xinqilin/GO-Playground/tree/main/chapters/00-hello">在 GitHub 看完整程式碼</a></p>
+./bin/hello
+go test ./exercises/00-hello/               <span class="c"># 做練習</span></code></pre>
+    <p><a href="https://github.com/xinqilin/GO-Playground/tree/main/chapters/00-hello">在 GitHub 看本章完整程式碼</a>，或看<a href="https://github.com/xinqilin/GO-Playground/tree/main/exercises/00-hello">練習題</a>。</p>
   </section>
 </main>
 
 <nav class="pager" aria-label="章節導覽">
-  <span></span>
+  <a class="prev" href="pre-4-problems.html">← 先修 4 拆解問題</a>
   <a class="home" href="index.html">目錄</a>
   <a class="next" href="01-variables.html">01 變數與型別 →</a>
 </nav>

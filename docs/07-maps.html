@@ -4,141 +4,618 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>map｜Go 圖解手冊</title>
-<meta name="description" content="Go 的 map：用 key 直接查找、找不到時的零值與 comma-ok、走訪順序不固定，以及 nil map。">
+<meta name="description" content="Go 的 map：建立與 nil map、零值與 comma-ok、計數與分組、走訪順序與排序、在 range 裡刪除、clear、key 必須可比較、struct 值不能就地修改、map 是參考、maps.Clone、當成集合、預先配置與並行寫入，附可執行的練習題。">
 <link rel="stylesheet" href="assets/style.css">
 </head>
 <body>
 <header class="site">
   <a href="index.html">Go 圖解手冊</a>
-  <span class="count">07 / 24</span>
+  <span class="count">07 / 33</span>
 </header>
 
-<main class="page">
+<main class="page long">
   <header class="hero">
     <div class="num" aria-hidden="true">07</div>
     <p class="eyebrow">Part 1 · 基礎 · 第 07 章</p>
     <h1>map</h1>
-    <p class="analogy">map 是一排有名牌的置物櫃：報上名字，就直接打開那一格。</p>
+    <p class="analogy">map 是一排有名牌的置物櫃：知道名牌（key）就能直接打開那一格，不用從第一格開始找。</p>
   </header>
 
-  <section aria-labelledby="look">
-    <h2 id="look">看圖</h2>
-    <div class="figs">
-      <figure class="fig">
-        <svg viewBox="0 0 480 206" role="img" aria-label="四個置物櫃各有名牌；ages 小美 直接打開小美那一格，拿到 22">
-          <title>用 key 直接找到櫃子</title>
-          <text class="mono" x="24" y="42">ages["小美"]</text>
-          <path class="wire hot-ln" d="M168 36 H187 V66"/>
-          <path class="tip hot-tip" d="M187 76 L180 63 L194 63 Z"/>
-          <rect class="soft" x="33" y="80" width="96" height="110" rx="6"/>
-          <rect class="acc" x="139" y="80" width="96" height="110" rx="6"/>
-          <rect class="soft" x="245" y="80" width="96" height="110" rx="6"/>
-          <rect class="soft" x="351" y="80" width="96" height="110" rx="6"/>
-          <rect class="box" x="45" y="92" width="72" height="28" rx="4"/>
-          <rect class="box" x="151" y="92" width="72" height="28" rx="4"/>
-          <rect class="box" x="257" y="92" width="72" height="28" rx="4"/>
-          <rect class="box" x="363" y="92" width="72" height="28" rx="4"/>
-          <text class="small" x="81" y="111" text-anchor="middle">小明</text>
-          <text class="small bold" x="187" y="111" text-anchor="middle">小美</text>
-          <text class="small" x="293" y="111" text-anchor="middle">阿德</text>
-          <text class="small" x="399" y="111" text-anchor="middle">小玉</text>
-          <text class="lg" x="81" y="166" text-anchor="middle">19</text>
-          <text class="lg t-acc" x="187" y="166" text-anchor="middle">22</text>
-          <text class="lg" x="293" y="166" text-anchor="middle">31</text>
-          <text class="lg" x="399" y="166" text-anchor="middle">27</text>
-        </svg>
-        <figcaption>map 用 key 直接打開對應的櫃子，不用一格一格找。</figcaption>
-      </figure>
+  <nav class="toc-inline" aria-labelledby="toc-title">
+    <p class="label" id="toc-title">本章內容</p>
+    <ol>
+      <li><a href="#goals">本章你會學到</a></li>
+      <li><a href="#basics">建立與基本操作</a></li>
+      <li><a href="#lookup">讀取：零值與 comma-ok</a></li>
+      <li><a href="#iterate">走訪與刪除</a></li>
+      <li><a href="#keys">key 的型別</a></li>
+      <li><a href="#values">值是 struct</a></li>
+      <li><a href="#reference">map 是參考</a></li>
+      <li><a href="#set">當成集合</a></li>
+      <li><a href="#perf">預先配置與並行</a></li>
+      <li><a href="#pitfalls">常見錯誤</a></li>
+      <li><a href="#java">從 Java 來的你</a></li>
+      <li><a href="#exercises">練習</a></li>
+      <li><a href="#recap">重點回顧</a></li>
+      <li><a href="#further">延伸閱讀</a></li>
+    </ol>
+  </nav>
 
-      <figure class="fig">
-        <svg viewBox="0 0 480 236" role="img" aria-label="查蘋果：櫃子存在，值是 0，ok 是 true；查香蕉：沒有這個櫃子，拿到零值 0，ok 是 false">
-          <title>找不到的 key：comma-ok</title>
-          <path class="wire faint" d="M240 12 V226"/>
-          <text class="small mono" x="120" y="30" text-anchor="middle">v, ok := stock["蘋果"]</text>
-          <rect class="acc" x="70" y="48" width="100" height="110" rx="6"/>
-          <rect class="box" x="84" y="60" width="72" height="28" rx="4"/>
-          <text class="small" x="120" y="79" text-anchor="middle">蘋果</text>
-          <text class="lg" x="120" y="138" text-anchor="middle">0</text>
-          <text class="mono" x="120" y="196" text-anchor="middle">v = 0</text>
-          <text class="mono t-acc" x="120" y="222" text-anchor="middle">ok = true</text>
-
-          <text class="small mono" x="360" y="30" text-anchor="middle">v, ok := stock["香蕉"]</text>
-          <rect class="wire dash" x="310" y="48" width="100" height="110" rx="6"/>
-          <text class="lg mute" x="360" y="116" text-anchor="middle">?</text>
-          <text class="mono" x="360" y="196" text-anchor="middle">v = 0（零值）</text>
-          <text class="mono t-hot" x="360" y="222" text-anchor="middle">ok = false</text>
-        </svg>
-        <figcaption>找不到 key 不會報錯，只會拿到零值；要分辨「沒有這格」和「這格放的是 0」，看第二個回傳值 <code>ok</code>。</figcaption>
-      </figure>
-
-      <figure class="fig">
-        <svg viewBox="0 0 480 214" role="img" aria-label="同一個 map 走訪兩次，順序可能是 c a b，也可能是 b c a；先排序 key 就固定是 a b c">
-          <title>走訪順序不固定</title>
-          <rect class="soft" x="16" y="44" width="110" height="130" rx="10"/>
-          <text class="sm" x="71" y="68" text-anchor="middle">map</text>
-          <text class="mono" x="71" y="100" text-anchor="middle">a:1</text>
-          <text class="mono" x="71" y="128" text-anchor="middle">b:2</text>
-          <text class="mono" x="71" y="156" text-anchor="middle">c:3</text>
-          <text class="small" x="146" y="60">第 1 次</text>
-          <text class="small" x="146" y="124">第 2 次</text>
-          <text class="small t-acc bold" x="146" y="188">先排序</text>
-          <rect class="soft" x="226" y="36" width="44" height="36" rx="6"/>
-          <rect class="soft" x="276" y="36" width="44" height="36" rx="6"/>
-          <rect class="soft" x="326" y="36" width="44" height="36" rx="6"/>
-          <text class="mono" x="248" y="60" text-anchor="middle">c</text>
-          <text class="mono" x="298" y="60" text-anchor="middle">a</text>
-          <text class="mono" x="348" y="60" text-anchor="middle">b</text>
-          <rect class="soft" x="226" y="100" width="44" height="36" rx="6"/>
-          <rect class="soft" x="276" y="100" width="44" height="36" rx="6"/>
-          <rect class="soft" x="326" y="100" width="44" height="36" rx="6"/>
-          <text class="mono" x="248" y="124" text-anchor="middle">b</text>
-          <text class="mono" x="298" y="124" text-anchor="middle">c</text>
-          <text class="mono" x="348" y="124" text-anchor="middle">a</text>
-          <rect class="acc" x="226" y="164" width="44" height="36" rx="6"/>
-          <rect class="acc" x="276" y="164" width="44" height="36" rx="6"/>
-          <rect class="acc" x="326" y="164" width="44" height="36" rx="6"/>
-          <text class="mono t-acc" x="248" y="188" text-anchor="middle">a</text>
-          <text class="mono t-acc" x="298" y="188" text-anchor="middle">b</text>
-          <text class="mono t-acc" x="348" y="188" text-anchor="middle">c</text>
-          <text class="small t-hot" x="428" y="84" text-anchor="middle">每次跑</text>
-          <text class="small t-hot" x="428" y="106" text-anchor="middle">都可能不同</text>
-        </svg>
-        <figcaption>Go 刻意讓 map 的走訪順序每次都可能不同。需要固定順序，就先把 key 取出來排序。</figcaption>
-      </figure>
-    </div>
+  <section aria-labelledby="goals">
+    <h2 id="goals">本章你會學到</h2>
+    <ul class="notes">
+      <li>建立 map、新增、覆寫、刪除，以及 nil map 為什麼能讀不能寫。</li>
+      <li>讀到不存在的 key 會得到零值，用 comma-ok 分辨「沒有」和「值是零」，並利用零值計數和分組。</li>
+      <li>走訪順序不固定，要固定順序就先排序 key；在 range 裡刪除是安全的。</li>
+      <li>哪些型別能當 key，以及為什麼不能直接改 map 裡 struct 的欄位。</li>
+      <li>map 是參考：指定和傳參數都共用同一份資料，要複本用 <code>maps.Clone</code>。</li>
+      <li>用 map 當集合、預先配置容量，以及多個 goroutine 同時寫入的後果。</li>
+    </ul>
+    <p>先備：<a href="05-pointers.html">05 指標</a>、<a href="06-arrays-slices.html">06 陣列與切片</a>。</p>
   </section>
 
-  <section aria-labelledby="code">
-    <h2 id="code">最小範例</h2>
-    <pre class="code"><code>func main() {
-	stock := map[string]int{"蘋果": 0}
-	n, ok := stock["芒果"] <span class="c">// 不存在：拿到零值和 false</span>
+  <section aria-labelledby="basics">
+    <h2 id="basics">1. 建立與基本操作</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 206" role="img" aria-label="四個置物櫃各有名牌；menu 排骨 直接打開排骨那一格，拿到 95">
+        <title>用 key 直接找到櫃子</title>
+        <text class="mono" x="24" y="42">menu["排骨"]</text>
+        <path class="wire hot-ln" d="M168 36 H187 V66"/>
+        <path class="tip hot-tip" d="M187 76 L180 63 L194 63 Z"/>
+        <rect class="soft" x="33" y="80" width="96" height="110" rx="6"/>
+        <rect class="acc" x="139" y="80" width="96" height="110" rx="6"/>
+        <rect class="soft" x="245" y="80" width="96" height="110" rx="6"/>
+        <rect class="soft" x="351" y="80" width="96" height="110" rx="6"/>
+        <rect class="box" x="45" y="92" width="72" height="28" rx="4"/>
+        <rect class="box" x="151" y="92" width="72" height="28" rx="4"/>
+        <rect class="box" x="257" y="92" width="72" height="28" rx="4"/>
+        <rect class="box" x="363" y="92" width="72" height="28" rx="4"/>
+        <text class="small" x="81" y="111" text-anchor="middle">素食</text>
+        <text class="small bold" x="187" y="111" text-anchor="middle">排骨</text>
+        <text class="small" x="293" y="111" text-anchor="middle">魚排</text>
+        <text class="small" x="399" y="111" text-anchor="middle">雞腿</text>
+        <text class="lg" x="81" y="166" text-anchor="middle">70</text>
+        <text class="lg t-acc" x="187" y="166" text-anchor="middle">95</text>
+        <text class="lg" x="293" y="166" text-anchor="middle">100</text>
+        <text class="lg" x="399" y="166" text-anchor="middle">90</text>
+      </svg>
+      <figcaption>map 用 key 直接打開對應的櫃子，不用一格一格找。櫃子的排列順序沒有意義。</figcaption>
+    </figure>
+    <p>map 把 key 對應到 value，型別寫成 <code>map[K]V</code>：<code>map[string]int</code> 是「用字串查整數」，例如品名查價格。可以用字面值建立：</p>
+    <pre class="code" data-src="chapters/07-maps/basics.go#mapBasics"><code>func mapBasics() {
+	menu := map[string]int{
+		"排骨": 85,
+		"雞腿": 90,
+	}
+	menu["素食"] = 70 // 新增
+	menu["排骨"] = 95 // key 已經存在：覆寫
+	delete(menu, "雞腿")
+	delete(menu, "魚排") // 刪除不存在的 key，什麼都不會發生
+	fmt.Println(menu, len(menu))
+	fmt.Println(menu["排骨"])
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/07-maps#Example_mapBasics"><code>map[排骨:95 素食:70] 2
+95</code></pre>
+    <ul class="notes">
+      <li><code>m[k] = v</code>：key 不存在就新增，存在就覆寫。map 裡同一個 key 只會有一份。</li>
+      <li><code>delete(m, k)</code>：刪除 key；key 不存在時什麼都不做，不會出錯。</li>
+      <li><code>len(m)</code>：目前有幾個 key。map 沒有 cap。</li>
+      <li>多行的字面值，每一行最後都要有逗號，包括最後一行。</li>
+      <li><code>fmt.Println</code> 印 map 時會把 key 排序，方便閱讀和測試；這不代表 map 本身有順序（第 3 節）。</li>
+    </ul>
+
+    <h3>make 與 nil map</h3>
+    <pre class="code" data-src="chapters/07-maps/basics.go#makeMap,nilMap"><code>func makeMap() {
+	stock := make(map[string]int)
+	stock["排骨"] = 10
+	stock["雞腿"] = 6
+	fmt.Println(stock, len(stock))
+}
+
+func nilMap() {
+	var stock map[string]int
+	fmt.Println(stock == nil, len(stock), stock["排骨"])
+	defer func() {
+		fmt.Println("panic:", recover())
+	}()
+	stock["排骨"] = 10
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/07-maps#Example_makeMap"><code>map[排骨:10 雞腿:6] 2</code></pre>
+    <pre class="out" data-example="chapters/07-maps#Example_nilMap"><code>true 0 0
+panic: assignment to entry in nil map</code></pre>
+    <p>map 的零值是 nil。nil map 可以讀（讀到零值）、可以取長度、可以 range（一圈都不跑），但<strong>寫入會 panic</strong>。這和 nil slice 可以直接 append 不同，是新手很常踩到的坑：宣告了 <code>var m map[string]int</code> 卻忘了 make。要放資料的 map，一定先用 <code>make(map[K]V)</code> 或字面值 <code>map[K]V{}</code> 建立。struct 裡的 map 欄位也一樣，零值是 nil，要在建構函式裡初始化（第 <a href="09-structs-methods.html">09 章</a>）。</p>
+  </section>
+
+  <section aria-labelledby="lookup">
+    <h2 id="lookup">2. 讀取：零值與 comma-ok</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 236" role="img" aria-label="查排骨：櫃子存在，值是 0，ok 是 true；查魚排：沒有這個櫃子，拿到零值 0，ok 是 false">
+        <title>找不到的 key：comma-ok</title>
+        <path class="wire faint" d="M240 12 V226"/>
+        <text class="small mono" x="120" y="30" text-anchor="middle">n, ok := stock["排骨"]</text>
+        <rect class="acc" x="70" y="48" width="100" height="110" rx="6"/>
+        <rect class="box" x="84" y="60" width="72" height="28" rx="4"/>
+        <text class="small" x="120" y="79" text-anchor="middle">排骨</text>
+        <text class="lg" x="120" y="138" text-anchor="middle">0</text>
+        <text class="mono" x="120" y="196" text-anchor="middle">n = 0</text>
+        <text class="mono t-acc" x="120" y="222" text-anchor="middle">ok = true</text>
+        <text class="small mono" x="360" y="30" text-anchor="middle">n, ok := stock["魚排"]</text>
+        <rect class="wire dash" x="310" y="48" width="100" height="110" rx="6"/>
+        <text class="lg mute" x="360" y="116" text-anchor="middle">?</text>
+        <text class="mono" x="360" y="196" text-anchor="middle">n = 0（零值）</text>
+        <text class="mono t-hot" x="360" y="222" text-anchor="middle">ok = false</text>
+      </svg>
+      <figcaption>找不到 key 不會報錯，只會拿到零值；要分辨「沒有這格」和「這格放的是 0」，看第二個回傳值 <code>ok</code>。</figcaption>
+    </figure>
+    <pre class="code" data-src="chapters/07-maps/lookup.go#commaOK"><code>func commaOK() {
+	stock := map[string]int{"排骨": 0, "雞腿": 3}
+	fmt.Println(stock["排骨"], stock["魚排"]) // 都是 0，分不出來
+
+	n, ok := stock["排骨"]
+	fmt.Println(n, ok)
+	n, ok = stock["魚排"]
 	fmt.Println(n, ok)
 
-	counts := map[string]int{}
-	for _, w := range strings.Fields("go is go") {
-		counts[w]++
-	}
-	for _, k := range slices.Sorted(maps.Keys(counts)) {
-		fmt.Println(k, counts[k])
+	if _, ok := stock["雞腿"]; ok {
+		fmt.Println("有賣雞腿")
 	}
 }</code></pre>
     <p class="label">輸出</p>
-    <pre class="out"><code>0 false
-go 2
-is 1</code></pre>
+    <pre class="out" data-example="chapters/07-maps#Example_commaOK"><code>0 0
+0 true
+0 false
+有賣雞腿</code></pre>
+    <p>讀取不存在的 key，Go 不會丟例外，也不會回傳 nil，而是回傳值型別的零值。這在多數情況下很方便，但也代表 <code>stock["排骨"]</code> 和 <code>stock["魚排"]</code> 都是 0 時分不出來：排骨是賣完了，魚排是根本沒賣。</p>
+    <p>這時用兩個變數接收：<code>n, ok := m[k]</code>，第二個值 ok 是 bool，表示 key 存不存在。這個寫法叫 <strong>comma-ok</strong>，之後的 type assertion（第 <a href="10-interfaces.html">10 章</a>）和從 channel 接收（第 <a href="15-channels.html">15 章</a>）也會用到。只想知道存不存在時，搭配 if 的初始化敘述：<code>if _, ok := m[k]; ok { … }</code>。</p>
+
+    <h3>利用零值：計數</h3>
+    <pre class="code" data-src="chapters/07-maps/lookup.go#countOrders"><code>func countOrders() {
+	orders := []string{"排骨", "雞腿", "排骨", "素食", "排骨"}
+	counts := make(map[string]int)
+	for _, o := range orders {
+		counts[o]++
+	}
+	fmt.Println(counts)
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/07-maps#Example_countOrders"><code>map[排骨:3 素食:1 雞腿:1]</code></pre>
+    <p><code>counts[o]++</code> 第一次遇到某個品項時，讀到的是 0，加一後存回去；不需要先檢查 key 存不存在。在 Java 裡要寫 <code>getOrDefault</code> 或 <code>merge</code>，在 Go 零值就幫你處理好了。</p>
+
+    <h3>利用零值：分組</h3>
+    <pre class="code" data-src="chapters/07-maps/lookup.go#groupOrders"><code>func groupOrders() {
+	type order struct {
+		table int
+		item  string
+	}
+	orders := []order{{1, "排骨"}, {3, "雞腿"}, {1, "素食"}, {2, "排骨"}, {3, "滷蛋"}}
+	byTable := make(map[int][]string)
+	for _, o := range orders {
+		byTable[o.table] = append(byTable[o.table], o.item)
+	}
+	fmt.Println(byTable)
+	fmt.Println(byTable[1], len(byTable[9]))
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/07-maps#Example_groupOrders"><code>map[1:[排骨 素食] 2:[排骨] 3:[雞腿 滷蛋]]
+[排骨 素食] 0</code></pre>
+    <p>值是 slice 時，不存在的 key 讀到 nil slice，而 nil slice 可以直接 append（第 <a href="06-arrays-slices.html#append">06 章</a>），所以分組也只要一行。注意 append 的結果要<strong>存回 map</strong>：<code>byTable[o.table] = append(byTable[o.table], …)</code>。最後一行顯示，讀不存在的桌號只會得到長度 0 的 nil slice，不會出錯。</p>
   </section>
 
-  <section aria-labelledby="notes">
-    <h2 id="notes">工程師筆記</h2>
+  <section aria-labelledby="iterate">
+    <h2 id="iterate">3. 走訪與刪除</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 214" role="img" aria-label="同一個 map 走訪兩次，順序可能是 c a b，也可能是 b c a；先排序 key 就固定是 a b c">
+        <title>走訪順序不固定</title>
+        <rect class="soft" x="16" y="44" width="110" height="130" rx="10"/>
+        <text class="sm" x="71" y="68" text-anchor="middle">map</text>
+        <text class="mono" x="71" y="100" text-anchor="middle">a:1</text>
+        <text class="mono" x="71" y="128" text-anchor="middle">b:2</text>
+        <text class="mono" x="71" y="156" text-anchor="middle">c:3</text>
+        <text class="small" x="146" y="60">第 1 次</text>
+        <text class="small" x="146" y="124">第 2 次</text>
+        <text class="small t-acc bold" x="146" y="188">先排序</text>
+        <rect class="soft" x="226" y="36" width="44" height="36" rx="6"/>
+        <rect class="soft" x="276" y="36" width="44" height="36" rx="6"/>
+        <rect class="soft" x="326" y="36" width="44" height="36" rx="6"/>
+        <text class="mono" x="248" y="60" text-anchor="middle">c</text>
+        <text class="mono" x="298" y="60" text-anchor="middle">a</text>
+        <text class="mono" x="348" y="60" text-anchor="middle">b</text>
+        <rect class="soft" x="226" y="100" width="44" height="36" rx="6"/>
+        <rect class="soft" x="276" y="100" width="44" height="36" rx="6"/>
+        <rect class="soft" x="326" y="100" width="44" height="36" rx="6"/>
+        <text class="mono" x="248" y="124" text-anchor="middle">b</text>
+        <text class="mono" x="298" y="124" text-anchor="middle">c</text>
+        <text class="mono" x="348" y="124" text-anchor="middle">a</text>
+        <rect class="acc" x="226" y="164" width="44" height="36" rx="6"/>
+        <rect class="acc" x="276" y="164" width="44" height="36" rx="6"/>
+        <rect class="acc" x="326" y="164" width="44" height="36" rx="6"/>
+        <text class="mono t-acc" x="248" y="188" text-anchor="middle">a</text>
+        <text class="mono t-acc" x="298" y="188" text-anchor="middle">b</text>
+        <text class="mono t-acc" x="348" y="188" text-anchor="middle">c</text>
+        <text class="small t-hot" x="428" y="84" text-anchor="middle">每次跑</text>
+        <text class="small t-hot" x="428" y="106" text-anchor="middle">都可能不同</text>
+      </svg>
+      <figcaption>Go 刻意讓 map 的走訪順序每次都可能不同。需要固定順序，就先把 key 取出來排序。</figcaption>
+    </figure>
+    <pre class="code" data-src="chapters/07-maps/iterate.go#rangeMap"><code>func rangeMap() {
+	menu := map[string]int{"排骨": 85, "雞腿": 90, "素食": 70}
+	total := 0
+	for _, price := range menu {
+		total += price
+	}
+	fmt.Println(total)
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/07-maps#Example_rangeMap"><code>245</code></pre>
+    <p><code>for k, v := range m</code> 走過每一組 key 和 value，只要 key 時寫 <code>for k := range m</code>。走訪的<strong>順序沒有定義</strong>，而且 Go 的 runtime 會刻意打亂，讓同一個程式每次執行的順序都可能不同。這是為了逼你不要依賴順序：如果某個版本剛好有固定順序，程式就會在不知不覺中依賴它，換版本時才出問題。所以這個範例只做加總，和順序無關。</p>
+
+    <h3>固定順序：先排序 key</h3>
+    <pre class="code" data-src="chapters/07-maps/iterate.go#sortedRange"><code>func sortedRange() {
+	menu := map[string]int{"排骨": 85, "雞腿": 90, "素食": 70, "魚排": 100}
+	for _, name := range slices.Sorted(maps.Keys(menu)) {
+		fmt.Println(name, menu[name])
+	}
+
+	// Go 1.23 以前的寫法：自己收集 key 再排序
+	names := make([]string, 0, len(menu))
+	for name := range menu {
+		names = append(names, name)
+	}
+	slices.Sort(names)
+	fmt.Println(names)
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/07-maps#Example_sortedRange"><code>排骨 85
+素食 70
+雞腿 90
+魚排 100
+[排骨 素食 雞腿 魚排]</code></pre>
+    <p>Go 1.23 起，<code>maps.Keys(m)</code> 回傳一個疊代器，<code>slices.Sorted</code> 把它收集成排好序的 slice，一行就完成。疊代器在第 <a href="13-iterators.html">13 章</a>介紹，現在只要記得這個組合。舊的程式碼常見下半段的寫法：自己 range 收集 key，再排序。中文字串的排序依照 UTF-8 的 byte 順序，不是筆畫或注音，所以「排骨」排在「雞腿」前面只是編碼的結果。</p>
+
+    <h3>依照值排序</h3>
+    <pre class="code" data-src="chapters/07-maps/iterate.go#sortByValue"><code>func sortByValue() {
+	sold := map[string]int{"排骨": 12, "雞腿": 30, "素食": 12, "魚排": 7}
+	names := slices.Collect(maps.Keys(sold))
+	slices.SortFunc(names, func(a, b string) int {
+		return cmp.Or(
+			cmp.Compare(sold[b], sold[a]), // 賣得多的排前面
+			cmp.Compare(a, b),
+		)
+	})
+	for _, name := range names {
+		fmt.Println(name, sold[name])
+	}
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/07-maps#Example_sortByValue"><code>雞腿 30
+排骨 12
+素食 12
+魚排 7</code></pre>
+    <p>map 本身不能排序，排序的永遠是從 map 取出來的 key。比較函式查 <code>sold[a]</code> 和 <code>sold[b]</code> 來比較銷量。排骨和素食都賣了 12 個，如果只比銷量，兩者的先後就取決於 map 的走訪順序，每次執行可能不同；<code>cmp.Or</code> 回傳第一個不是 0 的比較結果，銷量相同時再比名稱，結果才會固定。</p>
+
+    <h3>在 range 裡刪除</h3>
+    <pre class="code" data-src="chapters/07-maps/iterate.go#deleteWhileRange"><code>func deleteWhileRange() {
+	stock := map[string]int{"排骨": 0, "雞腿": 3, "素食": 0, "魚排": 5}
+	for name, n := range stock {
+		if n == 0 {
+			delete(stock, name)
+		}
+	}
+	fmt.Println(stock)
+
+	maps.DeleteFunc(stock, func(name string, n int) bool { return n &lt; 4 })
+	fmt.Println(stock)
+
+	clear(stock)
+	fmt.Println(stock, len(stock))
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/07-maps#Example_deleteWhileRange"><code>map[雞腿:3 魚排:5]
+map[魚排:5]
+map[] 0</code></pre>
+    <p>規格明確保證：走訪時刪除還沒走到的 key，它就不會被走到；刪除目前的 key 也是安全的。所以「把賣完的品項刪掉」可以直接在 range 裡做。<code>maps.DeleteFunc</code> 是同一件事的簡寫，條件成立的就刪除。<code>clear(m)</code>（Go 1.21 起的內建函式）一次刪除所有 key，map 本身還在，可以繼續使用。</p>
+    <p>反過來，在走訪時<strong>新增</strong> key，新的 key 可能被走到、也可能不會，規格不保證。需要邊走邊新增時，先把要新增的收集起來，走完再加。</p>
+  </section>
+
+  <section aria-labelledby="keys">
+    <h2 id="keys">4. key 的型別</h2>
+    <p>key 的型別必須可以用 <code>==</code> 比較，因為 map 要判斷兩個 key 是不是同一個。可以當 key 的：數字、字串、bool、指標、channel、陣列，以及欄位全都可以比較的 struct。不能當 key 的：slice、map、函式。</p>
+    <pre class="code bad" data-compile-error><code>package main
+
+import "fmt"
+
+func main() {
+	combos := map[[]string]int{}
+	fmt.Println(len(combos))
+}</code></pre>
+    <p class="label">編譯錯誤</p>
+    <pre class="out err"><code>./main.go:6:16: invalid map key type []string</code></pre>
+
+    <h3>struct 和陣列當 key</h3>
+    <pre class="code" data-src="chapters/07-maps/keys.go#seat,structKey"><code>type seat struct {
+	row, col int
+}
+
+func structKey() {
+	booked := map[seat]string{
+		{1, 2}: "小明",
+		{3, 4}: "小華",
+	}
+	fmt.Println(booked[seat{1, 2}], len(booked))
+	_, taken := booked[seat{2, 2}]
+	fmt.Println(taken)
+
+	trips := make(map[[2]string]int) // 起點和終點組成的路段
+	trips[[2]string{"甲站", "乙站"}]++
+	trips[[2]string{"甲站", "乙站"}]++
+	trips[[2]string{"乙站", "甲站"}]++
+	fmt.Println(trips[[2]string{"甲站", "乙站"}], len(trips))
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/07-maps#Example_structKey"><code>小明 2
+false
+2 2</code></pre>
+    <p>需要用「好幾個值的組合」當 key 時，不必把它們拼成字串（例如 <code>"1,2"</code>），直接用 struct：座位的列和行、日期和分店、起點和終點。兩個 struct 的每個欄位都相等，就是同一個 key。陣列也一樣，<code>[2]string{"甲站", "乙站"}</code> 和 <code>[2]string{"乙站", "甲站"}</code> 是不同的 key。在字面值裡，key 的型別名稱可以省略，直接寫 <code>{1, 2}</code>。</p>
+
+    <section class="deep" aria-labelledby="nan">
+      <p class="tag">深入：第一次讀可以先跳過</p>
+      <h3 id="nan">4.1 NaN 當 key</h3>
+      <pre class="code" data-src="chapters/07-maps/keys.go#nanKey"><code>func nanKey() {
+	m := make(map[float64]string)
+	m[math.NaN()] = "a"
+	m[math.NaN()] = "b"
+	_, ok := m[math.NaN()]
+	fmt.Println(len(m), ok)
+}</code></pre>
+      <p class="label">輸出</p>
+      <pre class="out" data-example="chapters/07-maps#Example_nanKey"><code>2 false</code></pre>
+      <p>浮點數的 NaN（Not a Number）不等於任何值，包括它自己（第 <a href="01-variables.html">01 章</a>的浮點數）。所以每次用 NaN 寫入都會新增一個 key，而且用 NaN 永遠查不到。這些 key 只能靠 range 走訪或 clear 清掉。實務上避免用浮點數當 key：金額用整數的「分」，座標轉成整數格子。</p>
+      <p>另外，key 的型別是 interface（例如 <code>map[any]int</code>）時，編譯器沒辦法事先檢查，放進一個 slice 當 key 會在執行時 panic。interface 在第 <a href="10-interfaces.html">10 章</a>。</p>
+    </section>
+  </section>
+
+  <section aria-labelledby="values">
+    <h2 id="values">5. 值是 struct</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 212" role="img" aria-label="從 menu 拿出排骨的複本 it，把 it 的 stock 從 10 改成 9，再把 it 放回 menu">
+        <title>拿出來、改完、放回去</title>
+        <text class="small mono bold" x="104" y="26" text-anchor="middle">menu</text>
+        <rect class="soft" x="24" y="38" width="160" height="124" rx="8"/>
+        <rect class="box" x="68" y="50" width="72" height="28" rx="4"/>
+        <text class="small" x="104" y="69" text-anchor="middle">排骨</text>
+        <text class="small mono" x="104" y="110" text-anchor="middle">price 85</text>
+        <text class="small mono" x="104" y="140" text-anchor="middle">stock 10</text>
+        <path class="wire" d="M184 86 H286"/>
+        <path class="tip" d="M298 86 L285 79 L285 93 Z"/>
+        <text class="sm" x="242" y="76" text-anchor="middle">1. 拿出複本</text>
+        <text class="small mono bold" x="376" y="26" text-anchor="middle">it</text>
+        <rect class="hot" x="300" y="38" width="152" height="124" rx="8"/>
+        <text class="small mono" x="376" y="80" text-anchor="middle">price 85</text>
+        <text class="small mono t-hot" x="376" y="110" text-anchor="middle">stock 9</text>
+        <text class="sm" x="376" y="142" text-anchor="middle">2. 改複本</text>
+        <path class="wire" d="M300 132 H198"/>
+        <path class="tip" d="M186 132 L199 125 L199 139 Z"/>
+        <text class="sm" x="242" y="152" text-anchor="middle">3. 放回去</text>
+        <text class="sm" x="240" y="198" text-anchor="middle">不能直接改 map 裡那一格的欄位</text>
+      </svg>
+      <figcaption>從 map 讀出來的 struct 是複本。改完要用 <code>menu["排骨"] = it</code> 存回去，map 裡的資料才會變。</figcaption>
+    </figure>
+    <p>map 的值是 struct 時，直接修改欄位是編譯錯誤：</p>
+    <pre class="code bad" data-compile-error><code>package main
+
+import "fmt"
+
+type item struct {
+	price int
+	stock int
+}
+
+func main() {
+	menu := map[string]item{"排骨": {price: 85, stock: 10}}
+	menu["排骨"].stock--
+	fmt.Println(menu)
+}</code></pre>
+    <p class="label">編譯錯誤</p>
+    <pre class="out err"><code>./main.go:12:2: cannot assign to struct field menu["排骨"].stock in map</code></pre>
+    <p>原因和第 <a href="05-pointers.html#pit-map-addr">05 章</a>「不能取 map 元素的位址」一樣：map 長大時會把資料搬到新的位置，map 裡的元素沒有固定的位址，也就沒有辦法「就地」修改它的某個欄位。有兩種解法：</p>
+    <pre class="code" data-src="chapters/07-maps/values.go#item,structValue"><code>type item struct {
+	price int
+	stock int
+}
+
+func structValue() {
+	menu := map[string]item{"排骨": {price: 85, stock: 10}}
+	it := menu["排骨"] // 拿到的是複本
+	it.stock--
+	fmt.Println(menu["排骨"].stock, it.stock)
+	menu["排骨"] = it // 放回去
+	fmt.Println(menu["排骨"].stock)
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/07-maps#Example_structValue"><code>10 9
+9</code></pre>
+    <p>第一種：拿出來、改完、放回去。<code>it := menu["排骨"]</code> 是複本，只改 it 的時候 map 裡還是 10；存回去之後才變成 9。練習 4 就是忘了存回去的 bug。</p>
+    <pre class="code" data-src="chapters/07-maps/values.go#pointerValue"><code>func pointerValue() {
+	menu := map[string]*item{"排骨": {price: 85, stock: 10}}
+	menu["排骨"].stock--
+	fmt.Println(menu["排骨"].stock)
+
+	if it, ok := menu["魚排"]; ok {
+		it.stock--
+	} else {
+		fmt.Println("沒有魚排", it == nil)
+	}
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/07-maps#Example_pointerValue"><code>9
+沒有魚排 true</code></pre>
+    <p>第二種：值改成指標 <code>map[string]*item</code>。map 裡存的是位址，<code>menu["排骨"]</code> 拿到指標，透過指標修改的是同一個 item。代價是 key 不存在時讀到的是 nil 指標，直接 <code>menu["魚排"].stock--</code> 會 panic，所以要先用 comma-ok 檢查。struct 小、偶爾修改時用第一種；struct 大、經常修改，或其他地方也要共用同一個 item 時用第二種。</p>
+  </section>
+
+  <section aria-labelledby="reference">
+    <h2 id="reference">6. map 是參考</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 226" role="img" aria-label="menu 和 alias 兩個變數指向同一份資料；snapshot 由 maps.Clone 建立，指向另一份獨立的資料">
+        <title>兩個變數，同一份資料</title>
+        <rect class="acc" x="16" y="30" width="120" height="40" rx="6"/>
+        <rect class="acc" x="16" y="88" width="120" height="40" rx="6"/>
+        <rect class="soft" x="16" y="166" width="120" height="40" rx="6"/>
+        <text class="small mono bold" x="76" y="55" text-anchor="middle">menu</text>
+        <text class="small mono bold" x="76" y="113" text-anchor="middle">alias</text>
+        <text class="small mono bold" x="76" y="191" text-anchor="middle">snapshot</text>
+        <path class="wire acc-ln" d="M136 50 H190 V64 H222"/>
+        <path class="tip acc-tip" d="M234 64 L221 57 L221 71 Z"/>
+        <path class="wire acc-ln" d="M136 108 H190 V92 H222"/>
+        <path class="tip acc-tip" d="M234 92 L221 85 L221 99 Z"/>
+        <rect class="acc" x="236" y="24" width="210" height="110" rx="10"/>
+        <text class="small mono" x="341" y="56" text-anchor="middle">排骨: 90</text>
+        <text class="small mono" x="341" y="84" text-anchor="middle">雞腿: 95</text>
+        <text class="small mono" x="341" y="112" text-anchor="middle">素食: 75</text>
+        <path class="wire" d="M136 186 H222"/>
+        <path class="tip" d="M234 186 L221 179 L221 193 Z"/>
+        <rect class="soft dash" x="236" y="160" width="210" height="52" rx="10"/>
+        <text class="sm" x="341" y="191" text-anchor="middle">maps.Clone 複製的獨立資料</text>
+      </svg>
+      <figcaption>map 變數只是一個指向資料的把手。指定給 alias、傳給函式，都還是同一份資料；要獨立的複本就用 <code>maps.Clone</code>。</figcaption>
+    </figure>
+    <pre class="code" data-src="chapters/07-maps/reference.go#raisePrices,mapIsReference"><code>func raisePrices(menu map[string]int, n int) {
+	for name := range menu {
+		menu[name] += n
+	}
+}
+
+func mapIsReference() {
+	menu := map[string]int{"排骨": 85, "雞腿": 90}
+	alias := menu
+	alias["素食"] = 70
+	fmt.Println(len(menu))
+
+	raisePrices(menu, 5)
+	fmt.Println(menu)
+
+	snapshot := maps.Clone(menu)
+	snapshot["排骨"] = 0
+	fmt.Println(menu["排骨"], snapshot["排骨"])
+	fmt.Println(maps.Equal(menu, snapshot))
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/07-maps#Example_mapIsReference"><code>3
+map[排骨:90 素食:75 雞腿:95]
+90 0
+false</code></pre>
+    <p>map 變數裡存的其實是一個指向內部資料結構的指標，所以：</p>
     <ul class="notes">
-      <li>map 要用 <code>make</code> 或字面值建立；只宣告的 nil map 可以讀，寫入會 panic：<code>assignment to entry in nil map</code>。</li>
-      <li>讀不存在的 key 拿到零值，所以 <code>counts[w]++</code> 不用先檢查 key 在不在。</li>
-      <li>走訪順序不固定，而且是刻意的；要固定順序就 <code>slices.Sorted(maps.Keys(m))</code>。</li>
-      <li>key 必須能用 <code>==</code> 比較：slice、map、func 不能當 key；欄位都能比較的 struct 可以。</li>
-      <li>map 不能同時被多個 goroutine 寫入，會直接 <code>fatal error: concurrent map writes</code>，要加 <code>sync.Mutex</code>（第 17 章）。</li>
-      <li>map 裡的值不能取地址：<code>m[k].Field = 1</code> 編譯不過，要整個取出、修改、再放回去。要做 set 就用 <code>map[string]struct{}</code>。</li>
+      <li><code>alias := menu</code> 之後，從 alias 新增的素食，menu 也看得到。</li>
+      <li>把 map 傳給函式，函式裡的新增、修改、刪除，呼叫端都看得到。不需要傳 <code>*map[K]V</code>。這和 slice 不同：slice 的 append 呼叫端看不到，map 的新增看得到。</li>
+      <li>要一份獨立的複本就用 <code>maps.Clone</code>。它是淺複製：值如果是指標或 slice，複本和原本還是共用那些資料（第 <a href="05-pointers.html#passing">05 章</a>）。</li>
+      <li>map 不能用 <code>==</code> 比較（只能和 nil 比），比較內容用 <code>maps.Equal</code>。</li>
     </ul>
+    <p>這也代表：把內部的 map 直接回傳給呼叫端，呼叫端就能改到你的資料。需要保護內部狀態時，回傳 <code>maps.Clone</code> 的結果。</p>
+  </section>
+
+  <section aria-labelledby="set">
+    <h2 id="set">7. 當成集合</h2>
+    <pre class="code" data-src="chapters/07-maps/set.go#mapAsSet"><code>func mapAsSet() {
+	soldOut := map[string]struct{}{} // struct{} 不佔空間，只用來表示「有這個 key」
+	soldOut["雞腿"] = struct{}{}
+	soldOut["魚排"] = struct{}{}
+	_, out := soldOut["雞腿"]
+	fmt.Println(out, len(soldOut))
+	fmt.Println(slices.Sorted(maps.Keys(soldOut)))
+
+	seen := make(map[string]bool) // 用 bool 寫起來比較直覺：不存在的 key 讀到 false
+	var dup []string
+	for _, t := range []string{"A01", "A02", "A01", "A03", "A02"} {
+		if seen[t] {
+			dup = append(dup, t)
+		}
+		seen[t] = true
+	}
+	fmt.Println(dup)
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/07-maps#Example_mapAsSet"><code>true 2
+[雞腿 魚排]
+[A01 A02]</code></pre>
+    <p>Go 沒有內建的 set，用 map 的 key 代替：只在乎 key 在不在，值不重要。常見兩種寫法：</p>
+    <ul class="notes">
+      <li><code>map[string]struct{}</code>：<code>struct{}</code> 是沒有欄位的 struct，大小是 0，不佔額外空間。缺點是寫起來囉唆，判斷要用 comma-ok。</li>
+      <li><code>map[string]bool</code>：多花一個 byte，但不存在的 key 讀到 false，可以直接寫 <code>if seen[t]</code>，比較好讀。</li>
+    </ul>
+    <p>資料量不大時，選好讀的 <code>map[string]bool</code> 就好。集合的典型用途：找重複（上面的號碼牌）、去除重複、求交集和差集（練習 6）。</p>
+  </section>
+
+  <section aria-labelledby="perf">
+    <h2 id="perf">8. 預先配置與並行</h2>
+    <pre class="code" data-src="chapters/07-maps/presize.go#buildIndex,indexByName"><code>func buildIndex(names []string) map[string]int {
+	idx := make(map[string]int, len(names))
+	for i, name := range names {
+		idx[name] = i
+	}
+	return idx
+}
+
+func indexByName() {
+	idx := buildIndex([]string{"排骨", "雞腿", "素食"})
+	fmt.Println(idx["素食"], len(idx))
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/07-maps#Example_indexByName"><code>2 3</code></pre>
+    <p><code>make(map[K]V, n)</code> 的第二個參數是「大概會放幾個 key」的提示。map 放滿時要擴充，把所有資料重新安排一次，和 slice 的 append 換陣列類似。事先知道數量時給這個提示，就能省掉中間的擴充。它只是提示，放超過 n 個也沒問題，<code>len</code> 一開始還是 0。</p>
+
+    <h3>map 不能同時寫</h3>
+    <p>map 不是並行安全的：一個 goroutine 在寫入時，其他 goroutine 不能同時讀或寫同一個 map。<code>chapters/07-maps/concurrent</code> 讓兩個 goroutine 同時寫入（goroutine 在第 <a href="14-goroutines.html">14 章</a>）：</p>
+    <pre class="code" data-src="chapters/07-maps/concurrent/main.go#main"><code>func main() {
+	counts := make(map[int]int)
+	var wg sync.WaitGroup
+	for g := range 2 {
+		wg.Go(func() {
+			for i := range 1_000_000 {
+				counts[i%100] = g
+			}
+		})
+	}
+	wg.Wait()
+	fmt.Println("沒有被偵測到，這次運氣好", len(counts))
+}</code></pre>
+    <pre class="shell"><code>go run ./chapters/07-maps/concurrent</code></pre>
+    <p class="label">輸出（後面的 goroutine 堆疊省略）</p>
+    <pre class="out err"><code>fatal error: concurrent map writes
+
+goroutine 19 [running]:
+…
+exit status 2</code></pre>
+    <p>runtime 偵測到時會直接結束程式。注意這是 <code>fatal error</code>，不是 panic，recover 接不住。偵測是盡力而為的，沒被偵測到不代表沒問題，資料可能已經壞掉了。需要在多個 goroutine 之間共用 map 時，用 <code>sync.Mutex</code> 保護它，或改用 <code>sync.Map</code>（第 <a href="17-sync.html">17 章</a>）；測試時加上 <code>-race</code>，執行過程中實際發生的這類衝突都會被回報。</p>
+
+    <section class="deep" aria-labelledby="internals">
+      <p class="tag">深入：第一次讀可以先跳過</p>
+      <h3 id="internals">8.1 map 裡面長什麼樣子</h3>
+      <p>map 是一個雜湊表（hash table）：用 key 算出一個雜湊值，依照雜湊值決定資料放在哪一群格子裡，所以查詢、新增、刪除的平均成本都是常數時間，不會隨資料量變慢。資料太滿時會配置更大的表，重新安排所有資料，這就是元素沒有固定位址的原因。</p>
+      <p>Go 1.24 起，內建 map 改用一種叫 Swiss Tables 的設計，整體效能比以前好。這是 runtime 內部的改變，程式的寫法完全不受影響；也正因為 Go 沒有保證走訪順序，才能這樣替換實作。</p>
+    </section>
+  </section>
+
+  <section aria-labelledby="pitfalls">
+    <h2 id="pitfalls">常見錯誤</h2>
+    <h3 id="pit-nil-write">1. 寫入 nil map</h3>
+    <p>錯誤訊息是 <code>assignment to entry in nil map</code>（第 1 節）。最常見的情況是 struct 裡有 map 欄位，卻沒有初始化。寫入前確認 map 已經用 make 或字面值建立。</p>
+
+    <h3 id="pit-zero">2. 用讀到的值判斷 key 存不存在</h3>
+    <p><code>if stock["魚排"] == 0</code> 分不出「沒有這個品項」和「庫存是 0」。需要分辨時用 comma-ok：<code>n, ok := stock["魚排"]</code>。</p>
+
+    <h3 id="pit-order">3. 依賴走訪順序</h3>
+    <p>直接 range map 產生輸出、測試期望值或 API 回應，順序每次都可能不同，結果就是時好時壞的測試。需要固定順序就先排序 key（第 3 節），練習 5 就是這個 bug。依照值排序時，值相同的要再比 key，順序才會固定。</p>
+
+    <h3 id="pit-struct-field">4. 改了 struct 的複本卻沒存回去</h3>
+    <p><code>it := m[k]; it.stock--</code> 只改到複本（第 5 節）。改完要 <code>m[k] = it</code>，或者改用 <code>map[K]*V</code>。</p>
+
+    <h3 id="pit-alias">5. 以為指定會複製 map</h3>
+    <p><code>backup := menu</code> 不是備份，兩個變數是同一份資料（第 6 節）。要備份用 <code>maps.Clone(menu)</code>。</p>
+
+    <h3 id="pit-concurrent">6. 多個 goroutine 同時讀寫</h3>
+    <p>會造成 <code>fatal error: concurrent map writes</code>，或是更糟的，沒被偵測到的資料損毀（第 8 節）。用 mutex 保護，並在測試加上 <code>-race</code>。</p>
   </section>
 
   <section aria-labelledby="java">
@@ -149,20 +626,147 @@ is 1</code></pre>
         <tbody>
           <tr><th scope="row">型別</th><td class="java"><code>HashMap&lt;String, Integer&gt;</code></td><td><code>map[string]int</code>，語言內建</td></tr>
           <tr><th scope="row">找不到</th><td class="java"><code>get</code> 回傳 <code>null</code></td><td>回傳零值，用 <code>v, ok := m[k]</code> 分辨</td></tr>
+          <tr><th scope="row">計數</th><td class="java"><code>merge(k, 1, Integer::sum)</code></td><td><code>m[k]++</code></td></tr>
+          <tr><th scope="row">分組</th><td class="java"><code>computeIfAbsent(k, …).add(v)</code></td><td><code>m[k] = append(m[k], v)</code></td></tr>
           <tr><th scope="row">走訪順序</th><td class="java"><code>HashMap</code> 不保證；<code>TreeMap</code>、<code>LinkedHashMap</code> 可固定</td><td>不保證，而且每次刻意不同；要排序自己來</td></tr>
+          <tr><th scope="row">走訪時刪除</th><td class="java">要用 <code>Iterator.remove</code>，否則 <code>ConcurrentModificationException</code></td><td>直接 <code>delete</code>，安全</td></tr>
+          <tr><th scope="row">key 的相等</th><td class="java"><code>equals</code> 和 <code>hashCode</code>，可以自己定義</td><td>內建的 <code>==</code>，不能自訂；struct 逐欄位比較</td></tr>
+          <tr><th scope="row">未初始化</th><td class="java"><code>null</code>，呼叫方法就 <code>NullPointerException</code></td><td>nil map 可以讀，寫入才 panic</td></tr>
           <tr><th scope="row">並行存取</th><td class="java"><code>ConcurrentHashMap</code></td><td>自己加 <code>sync.Mutex</code>，或用 <code>sync.Map</code></td></tr>
-          <tr><th scope="row">Set</th><td class="java"><code>HashSet</code></td><td><code>map[T]struct{}</code></td></tr>
+          <tr><th scope="row">Set</th><td class="java"><code>HashSet</code></td><td><code>map[T]bool</code> 或 <code>map[T]struct{}</code></td></tr>
         </tbody>
       </table>
     </div>
   </section>
 
+  <section aria-labelledby="exercises">
+    <h2 id="exercises">練習</h2>
+    <p>題目在 <code>exercises/07-maps/exercises.go</code>，用到的型別定義在 <code>doc.go</code>。</p>
+    <pre class="shell"><code>go test ./exercises/07-maps/                   <span class="c"># 跑全部練習</span>
+go test ./exercises/07-maps/ -run TestTally    <span class="c"># 只跑一題</span>
+go test -tags solution ./exercises/07-maps/    <span class="c"># 跑參考解答</span></code></pre>
+    <ol class="exercises">
+      <li>
+        <h3><span class="level l1">入門</span>練習 1：最受歡迎的便當</h3>
+        <p>統計每個品項被點了幾次，並找出被點最多次的品項；次數相同時取名稱排序較前面的。</p>
+        <pre class="code" data-src="exercises/07-maps/exercises.go#Tally"><code>func Tally(orders []string) (counts map[string]int, top string) {
+	// TODO: 實作
+	return nil, ""
+}</code></pre>
+        <p>例如 <code>[排骨 雞腿 排骨 素食 雞腿]</code>：排骨和雞腿都是 2 次，top 是「排骨」。測試：<code>TestTally</code>。</p>
+        <details><summary>提示</summary><p>先用第 2 節的方法計數。再走過 counts 找最大值：次數比目前的 top 多，或次數一樣但名稱比較小（<code>name &lt; top</code>），就換成它。因為走訪順序不固定，平手的規則一定要寫清楚。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l1">入門</span>練習 2：反查代碼</h3>
+        <p>把「代碼 → 品名」反轉成「品名 → 代碼」。有兩個代碼對到同一個品名時，無法反轉。</p>
+        <pre class="code" data-src="exercises/07-maps/exercises.go#Invert"><code>func Invert(codes map[string]string) (map[string]string, bool) {
+	// TODO: 實作
+	return nil, false
+}</code></pre>
+        <p>測試：<code>TestInvert</code>。</p>
+        <details><summary>提示</summary><p>建立新的 map，走過 codes 時先用 comma-ok 檢查品名是否已經放過，放過就回傳 <code>nil, false</code>。新的 map 的大小一定和 codes 一樣，可以用 make 的第二個參數。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l2">進階</span>練習 3：依路線分組</h3>
+        <p>依路線把車站分組，每條路線的站名由小到大排序。轉乘站在每條路線上各出現一次。</p>
+        <pre class="code" data-src="exercises/07-maps/doc.go#Station"><code>type Station struct {
+	Name string
+	Line string
+}</code></pre>
+        <pre class="code" data-src="exercises/07-maps/exercises.go#GroupByLine"><code>func GroupByLine(stations []Station) map[string][]string {
+	// TODO: 實作
+	return nil
+}</code></pre>
+        <p>測試：<code>TestGroupByLine</code>。</p>
+        <details><summary>提示</summary><p>第 2 節的分組。分完之後再走過 map，對每個值呼叫 <code>slices.Sort</code>。slice 的排序是原地進行的，map 裡存的 header 指向同一個陣列，所以不需要再存回去。</p></details>
+      </li>
+      <li>
+        <h3><span class="level fix">找錯</span>練習 4：補貨</h3>
+        <p>回傳的數量是對的，但 stock 裡的庫存沒有變。</p>
+        <pre class="code" data-src="exercises/07-maps/doc.go#Item"><code>type Item struct {
+	Price int
+	Qty   int
+}</code></pre>
+        <pre class="code" data-src="exercises/07-maps/exercises.go#Restock"><code>func Restock(stock map[string]Item, name string, n int) int {
+	item := stock[name]
+	item.Qty += n
+	return item.Qty
+}</code></pre>
+        <p>測試：<code>TestRestock</code>。</p>
+        <details><summary>提示</summary><p>第 5 節的圖：拿出來、改完，還少了哪一步？name 不存在時，<code>stock[name]</code> 讀到的零值 Item 正好就是「價格 0、庫存 0」，所以不必特別處理。</p></details>
+      </li>
+      <li>
+        <h3><span class="level fix">找錯</span>練習 5：價目表</h3>
+        <p>內容是對的，但每次呼叫的順序可能不同。測試會連續呼叫 50 次。</p>
+        <pre class="code" data-src="exercises/07-maps/exercises.go#Summary"><code>func Summary(menu map[string]int) string {
+	var parts []string
+	for name, price := range menu {
+		parts = append(parts, fmt.Sprintf("%s=%d", name, price))
+	}
+	return strings.Join(parts, ", ")
+}</code></pre>
+        <p>測試：<code>TestSummary</code>。</p>
+        <details><summary>提示</summary><p>第 3 節的「固定順序：先排序 key」。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l2">進階</span>練習 6：兩家店都有賣的</h3>
+        <p>回傳同時出現在 a 和 b 裡的品項，排序、不重複。輸入本身可能有重複。</p>
+        <pre class="code" data-src="exercises/07-maps/exercises.go#Common"><code>func Common(a, b []string) []string {
+	// TODO: 實作
+	return nil
+}</code></pre>
+        <p>測試：<code>TestCommon</code>。</p>
+        <details><summary>提示</summary><p>把 a 放進一個集合。走過 b，在集合裡的放進第二個集合（用集合才不會重複）。最後把第二個集合的 key 排序回傳；沒有共同品項時要回傳 nil，記得先檢查長度。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l3">挑戰</span>練習 7：最少坐幾站</h3>
+        <p>links 記錄每一站可以直接到達的下一站。計算從 from 到 to 最少要坐幾站，到不了時回傳 -1。路網裡可能有環，也可能有單向的路。</p>
+        <pre class="code" data-src="exercises/07-maps/exercises.go#Hops"><code>func Hops(links map[string][]string, from, to string) int {
+	// TODO: 實作
+	return 0
+}</code></pre>
+        <p>測試的路網有兩條路線、兩個轉乘點，還有一段不相連的路線。測試：<code>TestHops</code>。</p>
+        <details><summary>提示</summary><p>用廣度優先搜尋（BFS）：準備一個佇列（slice）和一個記錄距離的 map。先放進 from，距離 0。每次從佇列前面拿出一站，如果是 to 就回傳它的距離；否則把它的每個還沒記錄過的下一站記上「距離加一」，放到佇列後面。佇列空了還沒找到就是 -1。用 map 記錄走過的站，才不會在環裡繞不出來。</p></details>
+      </li>
+    </ol>
+    <p><a href="https://github.com/xinqilin/GO-Playground/blob/main/exercises/07-maps/solution.go">參考解答</a>：先自己寫完再看。測試通過的寫法都是對的。</p>
+  </section>
+
+  <section aria-labelledby="recap">
+    <h2 id="recap">重點回顧</h2>
+    <ul class="recap">
+      <li><code>m[k] = v</code> 新增或覆寫，<code>delete(m, k)</code> 刪除，<code>len(m)</code> 是 key 的個數。</li>
+      <li>nil map 可以讀、不能寫；要放資料先 make 或用字面值建立。</li>
+      <li>讀不存在的 key 得到零值；要分辨存不存在用 <code>v, ok := m[k]</code>。</li>
+      <li>零值讓計數 <code>m[k]++</code> 和分組 <code>m[k] = append(m[k], v)</code> 都只要一行。</li>
+      <li>走訪順序不固定；要固定順序就 <code>slices.Sorted(maps.Keys(m))</code>，依值排序時平手要再比 key。</li>
+      <li>在 range 裡刪除是安全的；<code>clear(m)</code> 清空，<code>maps.DeleteFunc</code> 依條件刪除。</li>
+      <li>key 必須可以用 <code>==</code> 比較；多個值的組合用 struct 當 key。</li>
+      <li>不能直接改 map 裡 struct 的欄位：拿出來改完存回去，或用指標當值。</li>
+      <li>map 是參考，指定和傳參數都共用資料；複本用 <code>maps.Clone</code>，比較用 <code>maps.Equal</code>。</li>
+      <li>集合用 <code>map[T]bool</code> 或 <code>map[T]struct{}</code>。</li>
+      <li>知道數量時 <code>make(map[K]V, n)</code>；多個 goroutine 共用 map 要加鎖。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="further">
+    <h2 id="further">延伸閱讀</h2>
+    <ul class="notes">
+      <li>Go 語言規格：<a href="https://go.dev/ref/spec#Map_types">Map types</a>、<a href="https://go.dev/ref/spec#Index_expressions">Index expressions</a>（comma-ok）、<a href="https://go.dev/ref/spec#Deletion_of_map_elements">Deletion of map elements</a>、<a href="https://go.dev/ref/spec#For_range">For statements with range clause</a>（走訪時刪除與新增的規則）、<a href="https://go.dev/ref/spec#Comparison_operators">Comparison operators</a>（哪些型別可以比較）。</li>
+      <li>套件文件：<a href="https://pkg.go.dev/maps">maps</a>、內建函式 <a href="https://pkg.go.dev/builtin#delete">delete</a>、<a href="https://pkg.go.dev/builtin#clear">clear</a>。</li>
+      <li>Go Blog：<a href="https://go.dev/blog/maps">Go maps in action</a>、<a href="https://go.dev/blog/swisstable">Faster Go maps with Swiss Tables</a>。</li>
+      <li>官方 FAQ：<a href="https://go.dev/doc/faq#atomic_maps">Why are map operations not defined to be atomic?</a></li>
+    </ul>
+  </section>
+
   <section aria-labelledby="run">
     <h2 id="run">動手跑</h2>
     <p class="label">在 repo 根目錄</p>
-    <pre class="shell"><code>go run ./chapters/07-maps
-go test ./chapters/07-maps</code></pre>
-    <p><a href="https://github.com/xinqilin/GO-Playground/tree/main/chapters/07-maps">在 GitHub 看完整程式碼</a></p>
+    <pre class="shell"><code>go run ./chapters/07-maps                   <span class="c"># 執行本章所有示範</span>
+go test ./chapters/07-maps/...              <span class="c"># 驗證頁面上的每一段輸出</span>
+go run ./chapters/07-maps/concurrent        <span class="c"># 看並行寫入的錯誤</span>
+go test ./exercises/07-maps/                <span class="c"># 做練習</span></code></pre>
+    <p><a href="https://github.com/xinqilin/GO-Playground/tree/main/chapters/07-maps">在 GitHub 看本章完整程式碼</a>，或看<a href="https://github.com/xinqilin/GO-Playground/tree/main/exercises/07-maps">練習題</a>。</p>
   </section>
 </main>
 

@@ -4,131 +4,727 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>疊代器｜Go 圖解手冊</title>
-<meta name="description" content="Go 1.23 的 range-over-func 疊代器：iter.Seq 與 yield 的來回、提早 break，以及把疊代器接成管線。">
+<meta name="description" content="Go 的疊代器：range 一個函式、iter.Seq 與 iter.Seq2、yield 的約定與提早結束、替自己的型別寫疊代器、標準庫的疊代器函式、串成惰性管線、iter.Pull，以及疊代器、slice 與 channel 怎麼選，附可執行的練習題。">
 <link rel="stylesheet" href="assets/style.css">
 </head>
 <body>
 <header class="site">
   <a href="index.html">Go 圖解手冊</a>
-  <span class="count">13 / 24</span>
+  <span class="count">13 / 33</span>
 </header>
 
-<main class="page">
+<main class="page long">
   <header class="hero">
     <div class="num" aria-hidden="true">13</div>
     <p class="eyebrow">Part 2 · 型別系統 · 第 13 章</p>
     <h1>疊代器</h1>
-    <p class="analogy">疊代器是一台發球機：你要一顆，它丟一顆；你喊停，它就停。</p>
+    <p class="analogy">疊代器是一台叫號機：你要下一號，它就叫下一號；你說不用了，它就關機收工，不會繼續叫下去。</p>
   </header>
 
-  <section aria-labelledby="look">
-    <h2 id="look">看圖</h2>
-    <div class="figs">
-      <figure class="fig">
-        <svg viewBox="0 0 480 296" role="img" aria-label="Countdown 每次呼叫 yield 交出一個數字，迴圈回答 true 繼續；交出 2 時迴圈 break，yield 回傳 false，Countdown 就 return">
-          <title>yield 的一來一回</title>
-          <rect class="acc" x="40" y="16" width="160" height="40" rx="8"/>
-          <rect class="soft" x="280" y="16" width="160" height="40" rx="8"/>
-          <text class="small mono" x="120" y="41" text-anchor="middle">Countdown(5)</text>
-          <text class="small mono" x="360" y="41" text-anchor="middle">for n := range</text>
-          <path class="wire faint" d="M120 56 V292 M360 56 V292"/>
+  <nav class="toc-inline" aria-labelledby="toc-title">
+    <p class="label" id="toc-title">本章內容</p>
+    <ol>
+      <li><a href="#goals">本章你會學到</a></li>
+      <li><a href="#rangefunc">range 一個函式</a></li>
+      <li><a href="#yield">yield 的約定：提早結束</a></li>
+      <li><a href="#custom">替自己的型別寫疊代器</a></li>
+      <li><a href="#stdlib">標準庫的疊代器</a></li>
+      <li><a href="#pipeline">串成管線</a></li>
+      <li><a href="#pull">iter.Pull</a></li>
+      <li><a href="#choose">疊代器、slice 與 channel</a></li>
+      <li><a href="#pitfalls">常見錯誤</a></li>
+      <li><a href="#java">從 Java 來的你</a></li>
+      <li><a href="#exercises">練習</a></li>
+      <li><a href="#recap">重點回顧</a></li>
+      <li><a href="#further">延伸閱讀</a></li>
+    </ol>
+  </nav>
 
-          <path class="wire" d="M120 80 H346 M120 130 H346 M120 180 H346"/>
-          <path class="tip" d="M358 80 L346 74 L346 86 Z"/>
-          <path class="tip" d="M358 130 L346 124 L346 136 Z"/>
-          <path class="tip" d="M358 180 L346 174 L346 186 Z"/>
-          <text class="small mono" x="240" y="72" text-anchor="middle">yield(5)</text>
-          <text class="small mono" x="240" y="122" text-anchor="middle">yield(4)</text>
-          <text class="small mono" x="240" y="172" text-anchor="middle">yield(3)</text>
-          <path class="wire faint" d="M360 104 H134 M360 154 H134 M360 204 H134"/>
-          <path class="tip" d="M122 104 L134 98 L134 110 Z"/>
-          <path class="tip" d="M122 154 L134 148 L134 160 Z"/>
-          <path class="tip" d="M122 204 L134 198 L134 210 Z"/>
-          <text class="sm" x="240" y="99" text-anchor="middle">true</text>
-          <text class="sm" x="240" y="149" text-anchor="middle">true</text>
-          <text class="sm" x="240" y="199" text-anchor="middle">true</text>
-          <text class="small" x="372" y="84">印出 5</text>
-          <text class="small" x="372" y="134">印出 4</text>
-          <text class="small" x="372" y="184">印出 3</text>
-
-          <path class="wire" d="M120 230 H346"/>
-          <path class="tip" d="M358 230 L346 224 L346 236 Z"/>
-          <text class="small mono" x="240" y="222" text-anchor="middle">yield(2)</text>
-          <text class="small bold t-hot" x="372" y="234">break</text>
-          <path class="wire hot-ln" d="M360 254 H134"/>
-          <path class="tip hot-tip" d="M122 254 L134 248 L134 260 Z"/>
-          <text class="small t-hot" x="240" y="249" text-anchor="middle">false</text>
-          <text class="small mono bold t-hot" x="132" y="284">return</text>
-        </svg>
-        <figcaption>range 每要一個值，疊代器就呼叫一次 <code>yield</code>。迴圈 break 時 <code>yield</code> 回傳 false，疊代器要馬上 return。</figcaption>
-      </figure>
-
-      <figure class="fig">
-        <svg viewBox="0 0 480 196" role="img" aria-label="疊代器像水管接起來：Fib 產生費氏數列，Filter 只留偶數，Take 取 5 個就停，Collect 收成 slice，得到 0 2 8 34 144">
-          <title>疊代器可以接起來</title>
-          <rect class="soft" x="18" y="30" width="96" height="62" rx="8"/>
-          <rect class="soft" x="134" y="30" width="96" height="62" rx="8"/>
-          <rect class="soft" x="250" y="30" width="96" height="62" rx="8"/>
-          <rect class="acc" x="366" y="30" width="96" height="62" rx="8"/>
-          <text class="small mono bold" x="66" y="56" text-anchor="middle">Fib()</text>
-          <text class="sm" x="66" y="78" text-anchor="middle">0 1 1 2 3…</text>
-          <text class="small mono bold" x="182" y="56" text-anchor="middle">Filter</text>
-          <text class="sm" x="182" y="78" text-anchor="middle">只留偶數</text>
-          <text class="small mono bold" x="298" y="56" text-anchor="middle">Take(5)</text>
-          <text class="sm" x="298" y="78" text-anchor="middle">拿滿就停</text>
-          <text class="small mono bold" x="414" y="56" text-anchor="middle">Collect</text>
-          <text class="sm" x="414" y="78" text-anchor="middle">收成 slice</text>
-          <path class="wire" d="M114 61 H124 M230 61 H240 M346 61 H356"/>
-          <path class="tip" d="M134 61 L123 55 L123 67 Z"/>
-          <path class="tip" d="M250 61 L239 55 L239 67 Z"/>
-          <path class="tip" d="M366 61 L355 55 L355 67 Z"/>
-          <path class="wire hot-ln dash" d="M298 98 V114 H66 V98"/>
-          <text class="sm t-hot" x="182" y="132" text-anchor="middle">拿滿 5 個就叫上游停</text>
-          <text class="small mono bold t-acc" x="414" y="168" text-anchor="middle">[0 2 8 34 144]</text>
-        </svg>
-        <figcaption>疊代器可以像水管一樣接起來。值一次流過一個，<code>Take</code> 拿滿 5 個就叫上游停下，無限的 <code>Fib</code> 也不會跑不完。</figcaption>
-      </figure>
-    </div>
+  <section aria-labelledby="goals">
+    <h2 id="goals">本章你會學到</h2>
+    <ul class="notes">
+      <li>range 一個函式時，背後到底發生了什麼事，<code>iter.Seq</code> 和 <code>iter.Seq2</code> 是什麼。</li>
+      <li>yield 的約定：使用端 break 之後，疊代器必須立刻停下來，而且有機會收尾。</li>
+      <li>替自己的型別寫疊代器，包括遞迴走訪一棵樹。</li>
+      <li>標準庫 <code>slices</code>、<code>maps</code>、<code>strings</code> 裡回傳疊代器的函式。</li>
+      <li>把疊代器接成惰性的管線，用不到的值根本不會算。</li>
+      <li>用 <code>iter.Pull</code> 一次拿一個值，同時從兩個來源交錯取值。</li>
+      <li>判斷什麼時候回傳 slice、疊代器或 channel。</li>
+    </ul>
+    <p>先備：<a href="12-generics.html">12 泛型</a>、<a href="04-functions.html#closures">04 章的 closure</a> 和 <a href="04-functions.html#defer">defer</a>、<a href="03-control-flow.html#range">03 章的 range</a>。</p>
   </section>
 
-  <section aria-labelledby="code">
-    <h2 id="code">最小範例</h2>
-    <pre class="code"><code>func Countdown(n int) iter.Seq[int] {
+  <section aria-labelledby="rangefunc">
+    <h2 id="rangefunc">1. range 一個函式</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 224" role="img" aria-label="疊代器 callNumbers 自己跑迴圈，每產生一個號碼就呼叫一次 yield；yield 就是你寫的迴圈本體，執行完回傳 true，疊代器繼續">
+        <title>疊代器呼叫你的迴圈本體</title>
+        <rect class="soft" x="16" y="24" width="170" height="160" rx="10"/>
+        <text class="small mono bold" x="101" y="50" text-anchor="middle">callNumbers</text>
+        <text class="sm" x="101" y="72" text-anchor="middle">疊代器自己跑迴圈</text>
+        <text class="small mono" x="101" y="112" text-anchor="middle">n = 17</text>
+        <text class="small mono" x="101" y="142" text-anchor="middle">n = 18</text>
+        <text class="small mono" x="101" y="172" text-anchor="middle">n = 19</text>
+        <rect class="acc" x="294" y="24" width="170" height="160" rx="10"/>
+        <text class="small mono bold" x="379" y="50" text-anchor="middle">yield</text>
+        <text class="sm" x="379" y="72" text-anchor="middle">就是你的迴圈本體</text>
+        <text class="small" x="379" y="112" text-anchor="middle">請 17 號</text>
+        <text class="small" x="379" y="142" text-anchor="middle">請 18 號</text>
+        <text class="small" x="379" y="172" text-anchor="middle">請 19 號</text>
+        <path class="wire acc-ln" d="M150 108 H282 M150 138 H282 M150 168 H282"/>
+        <path class="tip acc-tip" d="M292 108 L280 102 L280 114 Z M292 138 L280 132 L280 144 Z M292 168 L280 162 L280 174 Z"/>
+        <text class="sm" x="240" y="212" text-anchor="middle">每次 yield 回傳 true，疊代器就繼續</text>
+      </svg>
+      <figcaption>range 一個函式時，主導迴圈的是疊代器：它每產生一個值，就呼叫一次你的迴圈本體。</figcaption>
+    </figure>
+    <p><a href="03-control-flow.html#range">03 章</a>的 range 可以走過 slice、map、字串、channel 和整數。Go 1.23 起，range 後面也可以接一個<strong>函式</strong>，只要它長成這個樣子：</p>
+    <pre class="code" data-src="chapters/13-iterators/rangefunc.go#callNumbers,rangeFuncDemo"><code>func callNumbers(from, to int) iter.Seq[int] {
 	return func(yield func(int) bool) {
-		for i := n; i &gt;= 1; i-- {
-			if !yield(i) {
+		for n := from; n &lt;= to; n++ {
+			if !yield(n) {
 				return
 			}
 		}
 	}
 }
 
-func main() {
-	for n := range Countdown(5) {
-		if n == 2 {
-			break <span class="c">// 這時 yield 回傳 false</span>
-		}
-		fmt.Println(n)
+func rangeFuncDemo() {
+	for n := range callNumbers(17, 19) {
+		fmt.Println("請", n, "號")
 	}
-	fmt.Println(slices.Collect(Countdown(3)))
 }</code></pre>
     <p class="label">輸出</p>
-    <pre class="out"><code>5
-4
-3
-[3 2 1]</code></pre>
+    <pre class="out" data-example="chapters/13-iterators#Example_rangeFuncDemo"><code>請 17 號
+請 18 號
+請 19 號</code></pre>
+    <p>callNumbers 回傳的是一個函式，它的參數叫 <code>yield</code>（「交出」），型別是 <code>func(int) bool</code>。這種「收一個 yield 函式當參數」的函式，就叫<strong>疊代器</strong>（iterator）。標準庫的 <code>iter</code> 套件替它取了名字：</p>
+    <ul class="notes">
+      <li><code>iter.Seq[V]</code> 就是 <code>func(yield func(V) bool)</code>，每次交出一個值，range 時寫 <code>for v := range seq</code>。</li>
+      <li><code>iter.Seq2[K, V]</code> 就是 <code>func(yield func(K, V) bool)</code>，每次交出兩個值，range 時寫 <code>for k, v := range seq</code>，像走過 map 一樣。</li>
+    </ul>
+    <p>兩個都是用函式型別定義的<a href="12-generics.html#types">泛型型別</a>，不是 interface，不需要實作任何方法。yield 也可以不收參數（<code>func(yield func() bool)</code>），range 時只寫 <code>for range f</code>，很少用到。</p>
+    <p>range 一個函式時，Go 會把<strong>迴圈本體</strong>包成一個 yield 函式，再把它傳給疊代器。疊代器裡每呼叫一次 yield，迴圈本體就執行一次，執行完 yield 回傳 true，表示「繼續」。下面這段程式不用 range，自己動手把迴圈本體包成函式傳進去，印出來的東西一模一樣：</p>
+    <pre class="code" data-src="chapters/13-iterators/rangefunc.go#byHand"><code>func byHand() {
+	seq := callNumbers(17, 19)
+	seq(func(n int) bool {
+		fmt.Println("請", n, "號")
+		return true
+	})
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/13-iterators#Example_byHand"><code>請 17 號
+請 18 號
+請 19 號</code></pre>
+    <p>所以疊代器是「<strong>推</strong>」（push）的模式：值由疊代器推給你，什麼時候推、推幾個，由疊代器的程式決定。寫疊代器的人只要寫一個普通的 for 迴圈，在要交出值的地方呼叫 yield，「目前走到哪裡」就留在區域變數 n 裡，不需要另外記狀態。</p>
+    <p>yield 一定要回傳 bool，range 才接受。少了 bool 的函式就不是疊代器：</p>
+    <pre class="code bad" data-compile-error><code>package main
+
+import "fmt"
+
+func numbers(yield func(int)) {
+	for n := 1; n &lt;= 3; n++ {
+		yield(n)
+	}
+}
+
+func main() {
+	for n := range numbers {
+		fmt.Println(n)
+	}
+}</code></pre>
+    <p class="label">編譯錯誤</p>
+    <pre class="out err"><code>./main.go:12:17: cannot range over numbers (value of type func(yield func(int))): func must be func(yield func(...) bool): yield func does not return bool</code></pre>
+    <p>注意 range 後面接的是函式本身 <code>numbers</code>，不是呼叫它。callNumbers 寫成「回傳疊代器的函式」，是為了能帶參數 17、19 進去；range 的是它回傳的那個函式。</p>
   </section>
 
-  <section aria-labelledby="notes">
-    <h2 id="notes">工程師筆記</h2>
+  <section aria-labelledby="yield">
+    <h2 id="yield">2. yield 的約定：提早結束</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 256" role="img" aria-label="疊代器先打開收據匣，交出 A-001 和 A-002；迴圈本體處理 A-002 後 break，yield 回傳 false，疊代器 return，defer 關上收據匣，然後迴圈才結束">
+        <title>break 之後發生的事</title>
+        <text class="small bold" x="103" y="20" text-anchor="middle">receipts 疊代器</text>
+        <text class="small bold" x="377" y="20" text-anchor="middle">迴圈本體</text>
+        <rect class="box" x="16" y="32" width="174" height="30" rx="6"/>
+        <text class="small" x="103" y="53" text-anchor="middle">打開收據匣</text>
+        <path class="wire acc-ln" d="M190 92 H280"/>
+        <path class="tip acc-tip" d="M290 92 L278 86 L278 98 Z"/>
+        <text class="sm mono" x="240" y="84" text-anchor="middle">A-001</text>
+        <rect class="box" x="290" y="77" width="174" height="30" rx="6"/>
+        <text class="small" x="377" y="98" text-anchor="middle">處理 A-001</text>
+        <path class="wire acc-ln" d="M190 136 H280"/>
+        <path class="tip acc-tip" d="M290 136 L278 130 L278 142 Z"/>
+        <text class="sm mono" x="240" y="128" text-anchor="middle">A-002</text>
+        <rect class="hot" x="290" y="121" width="174" height="30" rx="6"/>
+        <text class="small" x="377" y="142" text-anchor="middle">處理 A-002，break</text>
+        <path class="wire hot-ln" d="M290 180 H200"/>
+        <path class="tip hot-tip" d="M190 180 L202 174 L202 186 Z"/>
+        <text class="sm mono t-hot" x="240" y="172" text-anchor="middle">false</text>
+        <rect class="acc" x="16" y="165" width="174" height="30" rx="6"/>
+        <text class="small" x="103" y="186" text-anchor="middle">return，關上收據匣</text>
+        <path class="wire" d="M190 224 H280"/>
+        <path class="tip" d="M290 224 L278 218 L278 230 Z"/>
+        <rect class="soft" x="290" y="209" width="174" height="30" rx="6"/>
+        <text class="small" x="377" y="230" text-anchor="middle">迴圈結束</text>
+      </svg>
+      <figcaption>break 讓 yield 回傳 false。疊代器看到 false 就 return，它的 defer 會在迴圈結束之前執行完。</figcaption>
+    </figure>
+    <p>使用端可以隨時 break。這時迴圈本體不會再執行，但疊代器還在它自己的 for 迴圈裡，它得知道要停。所以 yield 會回傳一個 bool：</p>
     <ul class="notes">
-      <li><code>iter.Seq[V]</code> 就是 <code>func(yield func(V) bool)</code>；<code>iter.Seq2[K, V]</code> 一次交出兩個值，像 <code>slices.All</code> 交出 index 和值。</li>
-      <li>一定要檢查 <code>yield</code> 的回傳值。使用端 break 之後還繼續 yield，會 panic：<code>range function continued iteration after function for loop body returned false</code>。</li>
-      <li>疊代器是惰性的：沒有 range 就不會執行，所以可以表示無限長的序列。</li>
-      <li>標準庫：<code>slices.All</code>、<code>slices.Values</code>、<code>slices.Collect</code>、<code>slices.Sorted</code>、<code>maps.Keys</code>、<code>maps.Values</code>（Go 1.23），<code>strings.SplitSeq</code>、<code>strings.Lines</code>（Go 1.24）。</li>
-      <li>想用「呼叫 next() 拿下一個」的方式，用 <code>iter.Pull</code>，用完記得呼叫 stop。</li>
-      <li>一般的 slice 直接 range 就好；需要組合、惰性，或想隱藏內部資料結構時，才自己寫疊代器。</li>
+      <li>回傳 <code>true</code>：迴圈本體正常跑完這一圈，還要下一個值。</li>
+      <li>回傳 <code>false</code>：使用端已經離開迴圈了（break、return，或用 goto 跳出去）。疊代器必須立刻停止，不可以再呼叫 yield。</li>
     </ul>
+    <p>這就是每個疊代器都寫 <code>if !yield(v) { return }</code> 的原因。它帶來一個好處：疊代器可以在結束時收尾，例如關檔案、釋放資源，不管使用端是全部跑完還是中途離開：</p>
+    <pre class="code" data-src="chapters/13-iterators/earlystop.go#receipts,earlyStopDemo"><code>func receipts() iter.Seq[string] {
+	return func(yield func(string) bool) {
+		fmt.Println("打開收據匣")
+		defer fmt.Println("關上收據匣")
+		for _, r := range []string{"A-001", "A-002", "A-003"} {
+			if !yield(r) {
+				return
+			}
+		}
+	}
+}
+
+func earlyStopDemo() {
+	for r := range receipts() {
+		fmt.Println("處理", r)
+		if r == "A-002" {
+			break
+		}
+	}
+	fmt.Println("迴圈結束")
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/13-iterators#Example_earlyStopDemo"><code>打開收據匣
+處理 A-001
+處理 A-002
+關上收據匣
+迴圈結束</code></pre>
+    <p>注意順序：「關上收據匣」印在「迴圈結束」<strong>之前</strong>。break 之後，yield 回傳 false，疊代器 return，它的 defer 執行，然後 range 才結束，程式繼續往下走。收尾一定在迴圈結束時已經完成。</p>
+    <p>不理會 yield 的回傳值，就違反了約定。使用端都已經 break 了，疊代器還繼續交出下一個值，Go 會直接 panic，不會讓迴圈本體在 break 之後又被執行：</p>
+    <pre class="code" data-src="chapters/13-iterators/earlystop.go#rudeNumbers,ignoreYieldDemo"><code>func rudeNumbers() iter.Seq[int] {
+	return func(yield func(int) bool) {
+		for n := 1; n &lt;= 3; n++ {
+			yield(n)
+		}
+	}
+}
+
+func ignoreYieldDemo() {
+	defer func() {
+		fmt.Println("panic:", recover())
+	}()
+	for n := range rudeNumbers() {
+		fmt.Println(n)
+		break
+	}
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/13-iterators#Example_ignoreYieldDemo"><code>1
+panic: runtime error: range function continued iteration after function for loop body returned false</code></pre>
+    <p>這個錯誤只有在使用端提早離開時才會出現，全部跑完的時候看不出來。所以測試疊代器時，一定要有一個「取幾個就 break」的案例，本章的練習測試都有。</p>
+
+    <section class="deep" aria-labelledby="yield-panic">
+      <p class="tag">深入：第一次讀可以先跳過</p>
+      <h3 id="yield-panic">2.1 迴圈本體 panic 的時候</h3>
+      <p>迴圈本體是被 yield 呼叫的，所以本體裡的 panic 會從 yield 冒出來，往上經過疊代器，再傳到外面。panic 往上傳的路上，疊代器的 defer 一樣會執行（<a href="04-functions.html#panic">04 章</a>），收據匣照樣會關上。疊代器不應該用 recover 把它吞掉，那個 panic 不是疊代器造成的。</p>
+      <p>另外，迴圈本體裡的 return 會讓 yield 回傳 false、疊代器收尾，然後外層的函式才真的 return。對使用端來說，range 一個函式和 range 一個 slice 寫起來沒有兩樣，break、continue、return 都照常使用。</p>
+    </section>
+  </section>
+
+  <section aria-labelledby="custom">
+    <h2 id="custom">3. 替自己的型別寫疊代器</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 214" role="img" aria-label="深度優先走訪菜單分類樹：菜單、便當、排骨飯、雞腿飯；在雞腿飯找到後 break，false 從雞腿飯往上傳回便當和菜單，飲料和紅茶不會被走到">
+        <title>走訪一棵樹，中途喊停</title>
+        <path class="wire" d="M240 46 V60 H130 V76"/>
+        <path class="wire faint" d="M240 60 H350 V76"/>
+        <path class="wire" d="M130 106 V120 H70 V136 M130 120 H190 V136"/>
+        <path class="wire faint" d="M350 106 V136"/>
+        <rect class="box" x="200" y="16" width="80" height="30" rx="6"/>
+        <text class="small" x="240" y="37" text-anchor="middle">菜單</text>
+        <rect class="box" x="90" y="76" width="80" height="30" rx="6"/>
+        <text class="small" x="130" y="97" text-anchor="middle">便當</text>
+        <rect class="soft" x="310" y="76" width="80" height="30" rx="6"/>
+        <text class="small mute" x="350" y="97" text-anchor="middle">飲料</text>
+        <rect class="box" x="30" y="136" width="80" height="30" rx="6"/>
+        <text class="small" x="70" y="157" text-anchor="middle">排骨飯</text>
+        <rect class="acc" x="150" y="136" width="80" height="30" rx="6"/>
+        <text class="small" x="190" y="157" text-anchor="middle">雞腿飯</text>
+        <rect class="soft" x="310" y="136" width="80" height="30" rx="6"/>
+        <text class="small mute" x="350" y="157" text-anchor="middle">紅茶</text>
+        <text class="sm mono" x="194" y="12" text-anchor="end">1</text>
+        <text class="sm mono" x="84" y="72" text-anchor="end">2</text>
+        <text class="sm mono" x="24" y="132" text-anchor="end">3</text>
+        <text class="sm mono" x="144" y="132" text-anchor="end">4</text>
+        <path class="wire hot-ln dash" d="M232 151 H250 V91 H182"/>
+        <path class="tip hot-tip" d="M172 91 L184 85 L184 97 Z"/>
+        <path class="wire hot-ln dash" d="M110 76 V31 H188"/>
+        <path class="tip hot-tip" d="M198 31 L186 25 L186 37 Z"/>
+        <text class="sm t-hot" x="256" y="125">false</text>
+        <text class="sm" x="240" y="200" text-anchor="middle">找到雞腿飯就 break；false 一層一層往上傳</text>
+      </svg>
+      <figcaption>遞迴走訪時，每一層都要把「使用端喊停了」往上傳。飲料和紅茶根本不會被走到。</figcaption>
+    </figure>
+    <p>疊代器最常見的用途，是讓使用端可以 range 你自己的資料結構，不必知道裡面怎麼存。習慣上，型別提供一個回傳疊代器的方法，最常用的名字是 <code>All</code>：</p>
+    <pre class="code" data-src="chapters/13-iterators/custom.go#Menu,Menu.Add,Menu.All,seq2Demo"><code>type Menu struct {
+	names  []string
+	prices map[string]int
+}
+
+func (m *Menu) Add(name string, price int) {
+	if m.prices == nil {
+		m.prices = map[string]int{}
+	}
+	if _, ok := m.prices[name]; !ok {
+		m.names = append(m.names, name)
+	}
+	m.prices[name] = price
+}
+
+func (m *Menu) All() iter.Seq2[string, int] {
+	return func(yield func(string, int) bool) {
+		for _, n := range m.names {
+			if !yield(n, m.prices[n]) {
+				return
+			}
+		}
+	}
+}
+
+func seq2Demo() {
+	var m Menu
+	m.Add("排骨飯", 85)
+	m.Add("雞腿飯", 95)
+	m.Add("紅茶", 25)
+	for name, price := range m.All() {
+		fmt.Println(name, price)
+	}
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/13-iterators#Example_seq2Demo"><code>排骨飯 85
+雞腿飯 95
+紅茶 25</code></pre>
+    <p>Menu 裡其實有一個 slice 和一個 map，用 slice 記住加入的順序。如果直接開放這兩個欄位，使用端得自己知道「要走 names、再拿名字去查 prices」。All 把這件事藏起來，回傳一個 <code>iter.Seq2[string, int]</code>，使用端只要寫 <code>for name, price := range m.All()</code>。以後內部改成別的存法，使用端的程式一行都不用改。</p>
+    <p>方法的命名可以參考標準庫的習慣：交出全部內容的叫 <code>All</code>，只交出 key 或 value 的叫 <code>Keys</code>、<code>Values</code>，倒著走的叫 <code>Backward</code>。疊代器有其他順序或條件時，用描述性的名字，例如下面的 <code>Walk</code>。</p>
+    <p>遞迴的資料結構（樹、巢狀的分類）用疊代器特別順手，因為寫疊代器的人可以用遞迴，使用端卻只看到一個普通的 range。唯一要小心的是：使用端喊停時，<strong>每一層</strong>遞迴都要停下來：</p>
+    <pre class="code" data-src="chapters/13-iterators/custom.go#Category,Category.Walk,Category.walk,treeDemo"><code>type Category struct {
+	Name     string
+	Children []*Category
+}
+
+func (c *Category) Walk() iter.Seq[string] {
+	return func(yield func(string) bool) {
+		c.walk("", yield)
+	}
+}
+
+func (c *Category) walk(prefix string, yield func(string) bool) bool {
+	path := prefix + c.Name
+	if !yield(path) {
+		return false
+	}
+	for _, child := range c.Children {
+		if !child.walk(path+"/", yield) {
+			return false
+		}
+	}
+	return true
+}
+
+func treeDemo() {
+	menu := &amp;Category{Name: "菜單", Children: []*Category{
+		{Name: "便當", Children: []*Category{{Name: "排骨飯"}, {Name: "雞腿飯"}}},
+		{Name: "飲料", Children: []*Category{{Name: "紅茶"}}},
+	}}
+	for path := range menu.Walk() {
+		fmt.Println(path)
+	}
+	for path := range menu.Walk() {
+		if path == "菜單/便當/雞腿飯" {
+			fmt.Println("找到", path)
+			break
+		}
+	}
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/13-iterators#Example_treeDemo"><code>菜單
+菜單/便當
+菜單/便當/排骨飯
+菜單/便當/雞腿飯
+菜單/飲料
+菜單/飲料/紅茶
+找到 菜單/便當/雞腿飯</code></pre>
+    <ul class="notes">
+      <li>Walk 本身只是把遞迴的 walk 包成 <code>iter.Seq[string]</code>。</li>
+      <li>walk 多了一個 bool 回傳值，意思是「還要繼續嗎」。yield 回傳 false 時，walk 回傳 false；上一層看到子分類回傳 false，自己也立刻回傳 false。這樣 false 會一路傳回最上層，不會有任何一層再呼叫 yield。</li>
+      <li>如果 walk 不回傳 bool，只在自己這層檢查 yield，那麼 break 之後，上一層的迴圈會繼續走到「飲料」，再呼叫一次 yield，結果就是第 2 節看過的 panic。</li>
+      <li>第二個 range 找到雞腿飯就 break，所以第二次只印出一行「找到」，飲料那一支完全沒有走。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="stdlib">
+    <h2 id="stdlib">4. 標準庫的疊代器</h2>
+    <p>Go 1.23 加入疊代器時，<code>slices</code> 和 <code>maps</code> 套件也一起加了一批回傳或接收疊代器的函式，Go 1.24 再補上 <code>strings</code> 和 <code>bytes</code> 的：</p>
+    <pre class="code" data-src="chapters/13-iterators/stdlib.go#stdlibDemo"><code>func stdlibDemo() {
+	stock := map[string]int{"雞腿飯": 0, "排骨飯": 10, "滷蛋": 25}
+	fmt.Println(slices.Sorted(maps.Keys(stock)))
+
+	queue := []int{17, 18, 19}
+	for i, n := range slices.Backward(queue) {
+		fmt.Println(i, n)
+	}
+
+	receipt := "排骨飯 x2\n紅茶 x1\n合計 195\n"
+	for line := range strings.Lines(receipt) {
+		fmt.Printf("%q\n", line)
+	}
+
+	for batch := range slices.Chunk([]int{1, 2, 3, 4, 5}, 2) {
+		fmt.Println(batch)
+	}
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/13-iterators#Example_stdlibDemo"><code>[排骨飯 滷蛋 雞腿飯]
+2 19
+1 18
+0 17
+"排骨飯 x2\n"
+"紅茶 x1\n"
+"合計 195\n"
+[1 2]
+[3 4]
+[5]</code></pre>
+    <ul class="notes">
+      <li><code>maps.Keys</code> 交出 map 的所有 key，順序和走訪 map 一樣不固定（<a href="07-maps.html#iterate">07 章</a>）。<code>slices.Sorted</code> 把疊代器的值收集成 slice 並排序，兩個接起來就是「排好序的 key」，這是最常見的組合。</li>
+      <li><code>slices.Backward</code> 從最後一個往前走，索引也是原本的索引。</li>
+      <li><code>strings.Lines</code> 一行一行交出字串的內容，<strong>每一行都包含結尾的換行</strong>，最後一行沒有換行就不含。用 <code>%q</code> 印出來就看得到 <code>\n</code>。</li>
+      <li><code>slices.Chunk</code> 每 n 個切成一段。交出的子 slice 和原本的 slice 共用底層陣列，但容量被切到剛好，對它 append 不會蓋到下一段。</li>
+    </ul>
+    <p>常用的整理成一張表。左半邊產生疊代器，右半邊把疊代器收集回 slice 或 map：</p>
+    <div class="table-wrap">
+      <table class="vs">
+        <thead><tr><th scope="col">函式</th><th scope="col">做什麼</th><th scope="col">版本</th></tr></thead>
+        <tbody>
+          <tr><th scope="row"><code>slices.All(s)</code></th><td>交出索引和元素（Seq2）</td><td>1.23</td></tr>
+          <tr><th scope="row"><code>slices.Values(s)</code></th><td>只交出元素</td><td>1.23</td></tr>
+          <tr><th scope="row"><code>slices.Backward(s)</code></th><td>從尾巴往前交出索引和元素</td><td>1.23</td></tr>
+          <tr><th scope="row"><code>slices.Chunk(s, n)</code></th><td>每 n 個一段的子 slice</td><td>1.23</td></tr>
+          <tr><th scope="row"><code>maps.All</code>、<code>Keys</code>、<code>Values</code></th><td>交出 map 的內容，順序不固定</td><td>1.23</td></tr>
+          <tr><th scope="row"><code>strings.Lines(s)</code></th><td>每一行，含結尾的換行</td><td>1.24</td></tr>
+          <tr><th scope="row"><code>strings.SplitSeq</code>、<code>FieldsSeq</code></th><td>和 Split、Fields 一樣切字串，但不先建 slice</td><td>1.24</td></tr>
+          <tr><th scope="row"><code>slices.Collect(seq)</code></th><td>收集成 slice</td><td>1.23</td></tr>
+          <tr><th scope="row"><code>slices.Sorted(seq)</code></th><td>收集成 slice 並排序</td><td>1.23</td></tr>
+          <tr><th scope="row"><code>maps.Collect(seq2)</code></th><td>收集成新的 map</td><td>1.23</td></tr>
+          <tr><th scope="row"><code>maps.Insert(m, seq2)</code></th><td>加進現有的 map，key 重複就覆蓋</td><td>1.23</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>這些函式讓 slice、map 和疊代器可以互相轉換。例如 <code>maps.Collect(m.All())</code> 就能把第 3 節的 Menu 轉成一個普通的 map。只是要對每一個值做點事時，直接 range 就好，不必先 Collect 成 slice。</p>
+  </section>
+
+  <section aria-labelledby="pipeline">
+    <h2 id="pipeline">5. 串成管線</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 240" role="img" aria-label="naturals 產生 1 到 6，Filter 去掉 4，Map 格式化成三位數，Take 取滿 5 個就喊停，最後 Collect 得到 001 002 003 005 006">
+        <title>一個值一個值流過整條管線</title>
+        <rect class="soft" x="16" y="12" width="150" height="32" rx="6"/>
+        <text class="small mono" x="91" y="34" text-anchor="middle">naturals()</text>
+        <text class="sm mono" x="186" y="34">1 2 3 4 5 6，然後停</text>
+        <path class="wire" d="M91 44 V54"/>
+        <path class="tip" d="M91 62 L85 52 L97 52 Z"/>
+        <rect class="box" x="16" y="62" width="150" height="32" rx="6"/>
+        <text class="small mono" x="91" y="84" text-anchor="middle">Filter</text>
+        <text class="sm mono" x="186" y="84">1 2 3 5 6（去掉尾數 4）</text>
+        <path class="wire" d="M91 94 V104"/>
+        <path class="tip" d="M91 112 L85 102 L97 102 Z"/>
+        <rect class="box" x="16" y="112" width="150" height="32" rx="6"/>
+        <text class="small mono" x="91" y="134" text-anchor="middle">Map</text>
+        <text class="sm mono" x="186" y="134">001 002 003 005 006</text>
+        <path class="wire" d="M91 144 V154"/>
+        <path class="tip" d="M91 162 L85 152 L97 152 Z"/>
+        <rect class="hot" x="16" y="162" width="150" height="32" rx="6"/>
+        <text class="small mono" x="91" y="184" text-anchor="middle">Take(5)</text>
+        <text class="sm t-hot" x="186" y="184">拿滿 5 個就 return</text>
+        <path class="wire" d="M91 194 V204"/>
+        <path class="tip" d="M91 212 L85 202 L97 202 Z"/>
+        <rect class="acc" x="16" y="212" width="150" height="24" rx="6"/>
+        <text class="sm mono" x="91" y="229" text-anchor="middle">slices.Collect</text>
+        <path class="wire hot-ln dash" d="M450 178 V28 H440"/>
+        <path class="tip hot-tip" d="M430 28 L442 22 L442 34 Z"/>
+        <text class="sm t-hot" x="440" y="110" text-anchor="end">停止往上傳</text>
+      </svg>
+      <figcaption>值是一個一個流過整條管線的。Take 拿滿 5 個就停，停止的訊號一路往上傳，naturals 只產生到 6。</figcaption>
+    </figure>
+    <p>疊代器可以接收疊代器、再回傳疊代器，一層包一層，就成了<strong>管線</strong>（pipeline）。這三個轉接函式都只有幾行，而且因為是泛型，任何型別都能用：</p>
+    <pre class="code" data-src="chapters/13-iterators/pipeline.go#Filter,Map,Take"><code>func Filter[T any](seq iter.Seq[T], keep func(T) bool) iter.Seq[T] {
+	return func(yield func(T) bool) {
+		for v := range seq {
+			if keep(v) &amp;&amp; !yield(v) {
+				return
+			}
+		}
+	}
+}
+
+func Map[T, U any](seq iter.Seq[T], f func(T) U) iter.Seq[U] {
+	return func(yield func(U) bool) {
+		for v := range seq {
+			if !yield(f(v)) {
+				return
+			}
+		}
+	}
+}
+
+func Take[T any](seq iter.Seq[T], n int) iter.Seq[T] {
+	return func(yield func(T) bool) {
+		if n &lt;= 0 {
+			return
+		}
+		count := 0
+		for v := range seq {
+			if !yield(v) {
+				return
+			}
+			count++
+			if count == n {
+				return
+			}
+		}
+	}
+}</code></pre>
+    <p>每一個都是同樣的形狀：回傳一個新的疊代器，裡面 range 上游的疊代器，處理之後交給自己的 yield，yield 回傳 false 就 return。Take 多做了一件事：數到 n 個就主動 return。它一 return，裡面那個 <code>for v := range seq</code> 就結束了，對上游來說，這跟使用端 break 一模一樣，上游的 yield 也收到 false。</p>
+    <p>所以上游可以是無限的：</p>
+    <pre class="code" data-src="chapters/13-iterators/pipeline.go#naturals,pipelineDemo"><code>func naturals() iter.Seq[int] {
+	return func(yield func(int) bool) {
+		for n := 1; ; n++ {
+			if !yield(n) {
+				return
+			}
+		}
+	}
+}
+
+func pipelineDemo() {
+	nums := Filter(naturals(), func(n int) bool { return n%10 != 4 })
+	labels := Map(nums, func(n int) string { return fmt.Sprintf("%03d", n) })
+	fmt.Println(slices.Collect(Take(labels, 5)))
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/13-iterators#Example_pipelineDemo"><code>[001 002 003 005 006]</code></pre>
+    <p>naturals 永遠不會自己結束，但整條管線只跑到需要的地方。<code>Filter</code>、<code>Map</code> 那兩行執行時什麼也沒算，只是把疊代器包起來；直到最後 <code>slices.Collect</code> 開始 range，值才一個一個被拉出來。這叫<strong>惰性求值</strong>（lazy evaluation）。把每一步印出來就看得很清楚：</p>
+    <pre class="code" data-src="chapters/13-iterators/pipeline.go#lazyDemo"><code>func lazyDemo() {
+	src := func(yield func(int) bool) {
+		for n := 1; n &lt;= 3; n++ {
+			fmt.Println("產生", n)
+			if !yield(n) {
+				return
+			}
+		}
+	}
+	doubled := Map(src, func(n int) int {
+		fmt.Println("加倍", n)
+		return n * 2
+	})
+	for v := range doubled {
+		fmt.Println("拿到", v)
+		if v == 4 {
+			break
+		}
+	}
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/13-iterators#Example_lazyDemo"><code>產生 1
+加倍 1
+拿到 2
+產生 2
+加倍 2
+拿到 4</code></pre>
+    <p>「產生、加倍、拿到」是交錯出現的：一個值走完整條管線，下一個值才產生。拿到 4 就 break，所以第 3 個值根本沒有產生，也沒有加倍。如果改用 slice 一步一步做（先產生全部、再全部加倍），每一步都要多一個完整的中間 slice，而且算了用不到的值。</p>
+    <p>標準庫目前沒有提供 Map、Filter 這類轉接函式。需要時自己寫，就像上面這樣；也別把所有迴圈都改寫成管線，一個普通的 for 迴圈裡寫 if 和 continue，常常更好讀。管線的價值在資料量大、來源無限，或是要重複組合同一套步驟的時候。</p>
+  </section>
+
+  <section aria-labelledby="pull">
+    <h2 id="pull">6. iter.Pull</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 196" role="img" aria-label="左邊 push：疊代器呼叫 yield 把值推給你；右邊 pull：你呼叫 next 向疊代器要一個值，拿回 v 和 ok">
+        <title>push 和 pull</title>
+        <text class="small bold" x="120" y="22" text-anchor="middle">push：range</text>
+        <rect class="soft" x="40" y="38" width="160" height="40" rx="8"/>
+        <text class="small" x="120" y="64" text-anchor="middle">疊代器</text>
+        <path class="wire acc-ln" d="M120 78 V118"/>
+        <path class="tip acc-tip" d="M120 128 L114 116 L126 116 Z"/>
+        <text class="sm mono" x="130" y="106">yield(v)</text>
+        <rect class="acc" x="40" y="128" width="160" height="40" rx="8"/>
+        <text class="small" x="120" y="154" text-anchor="middle">你的迴圈本體</text>
+        <text class="sm" x="120" y="188" text-anchor="middle">疊代器決定什麼時候給</text>
+        <path class="wire faint" d="M240 20 V180"/>
+        <text class="small bold" x="360" y="22" text-anchor="middle">pull：iter.Pull</text>
+        <rect class="acc" x="280" y="38" width="160" height="40" rx="8"/>
+        <text class="small" x="360" y="64" text-anchor="middle">你的程式</text>
+        <path class="wire" d="M330 78 V118"/>
+        <path class="tip" d="M330 128 L324 116 L336 116 Z"/>
+        <text class="sm mono" x="322" y="106" text-anchor="end">next()</text>
+        <path class="wire acc-ln" d="M390 128 V88"/>
+        <path class="tip acc-tip" d="M390 78 L384 90 L396 90 Z"/>
+        <text class="sm mono" x="398" y="106">v, ok</text>
+        <rect class="soft" x="280" y="128" width="160" height="40" rx="8"/>
+        <text class="small" x="360" y="154" text-anchor="middle">疊代器</text>
+        <text class="sm" x="360" y="188" text-anchor="middle">你決定什麼時候要</text>
+      </svg>
+      <figcaption>iter.Pull 把「推給你」的疊代器，換成「你去拿」的 next 函式。</figcaption>
+    </figure>
+    <p>range 很方便，但它一次只能走一個疊代器，而且節奏由疊代器決定。有時候你需要自己決定什麼時候拿下一個值，例如同時從兩個疊代器交錯取值。這時用 <code>iter.Pull</code>：</p>
+    <pre class="code" data-src="chapters/13-iterators/pull.go#pullBasics"><code>func pullBasics() {
+	next, stop := iter.Pull(slices.Values([]string{"A-001", "A-002"}))
+	defer stop()
+
+	v1, ok1 := next()
+	v2, ok2 := next()
+	v3, ok3 := next()
+	fmt.Println(v1, ok1, v2, ok2)
+	fmt.Printf("%q %v\n", v3, ok3)
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/13-iterators#Example_pullBasics"><code>A-001 true A-002 true
+"" false</code></pre>
+    <ul class="notes">
+      <li><code>iter.Pull(seq)</code> 回傳兩個函式：<code>next</code> 和 <code>stop</code>（Seq2 用 <code>iter.Pull2</code>）。</li>
+      <li>每呼叫一次 <code>next()</code>，就拿到下一個值和一個 ok。用完了 ok 是 false，值是零值。這和 map 的 comma-ok 是同一個習慣。</li>
+      <li><code>stop()</code> 告訴疊代器「不要了」，就像 range 時的 break：疊代器的 yield 收到 false，執行它的 defer。沒拿完就不要了的時候<strong>一定要呼叫 stop</strong>，否則疊代器會一直停在那裡等，它的收尾永遠不會執行。最保險的寫法是拿到之後馬上 <code>defer stop()</code>，多呼叫幾次也沒關係。</li>
+      <li>next 和 stop 不能同時從好幾個 goroutine 呼叫。</li>
+    </ul>
+    <p>實際的例子：叫號機的號碼和空出來的櫃台，是兩個各自的來源，要一個配一個。range 號碼，每拿到一個號碼，就用 next 向櫃台要一個：</p>
+    <pre class="code" data-src="chapters/13-iterators/pull.go#assign,pullDemo"><code>func assign(nums iter.Seq[int], counters iter.Seq[string]) iter.Seq2[int, string] {
+	return func(yield func(int, string) bool) {
+		next, stop := iter.Pull(counters)
+		defer stop()
+		for n := range nums {
+			c, ok := next()
+			if !ok || !yield(n, c) {
+				return
+			}
+		}
+	}
+}
+
+func pullDemo() {
+	nums := slices.Values([]int{17, 18, 19, 20})
+	counters := slices.Values([]string{"1 號櫃台", "2 號櫃台", "3 號櫃台"})
+	for n, c := range assign(nums, counters) {
+		fmt.Println(n, "→", c)
+	}
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/13-iterators#Example_pullDemo"><code>17 → 1 號櫃台
+18 → 2 號櫃台
+19 → 3 號櫃台</code></pre>
+    <p>櫃台只有 3 個，next 第 4 次回傳 ok 為 false，assign 就 return，20 號沒有被配到。assign 本身也是一個疊代器，所以它也遵守 yield 的約定，而且用 defer 確保櫃台那邊的 stop 一定會被呼叫。</p>
+    <p>Pull 比直接 range 多了一層轉換。能用 range 寫的，就用 range；只有需要「自己控制節奏」，例如同時從兩個以上的疊代器取值、比較或合併時，才用 Pull。練習 6 會用它合併兩條排好序的資料。</p>
+  </section>
+
+  <section aria-labelledby="choose">
+    <h2 id="choose">7. 疊代器、slice 與 channel</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 196" role="img" aria-label="三種交出一串值的方式：slice 全部先放進記憶體；疊代器要一個算一個、可以無限、在同一個 goroutine；channel 跨 goroutine 傳值、要 close、有同步成本">
+        <title>三種交出一串值的方式</title>
+        <rect class="soft" x="8" y="12" width="148" height="172" rx="10"/>
+        <text class="mono bold" x="82" y="42" text-anchor="middle">[]T</text>
+        <text class="sm" x="82" y="80" text-anchor="middle">全部先放進記憶體</text>
+        <text class="sm" x="82" y="106" text-anchor="middle">可以用索引</text>
+        <text class="sm" x="82" y="132" text-anchor="middle">可以重複讀</text>
+        <rect class="acc" x="166" y="12" width="148" height="172" rx="10"/>
+        <text class="mono bold" x="240" y="42" text-anchor="middle">iter.Seq[T]</text>
+        <text class="sm" x="240" y="80" text-anchor="middle">要一個才算一個</text>
+        <text class="sm" x="240" y="106" text-anchor="middle">可以無限、提早停</text>
+        <text class="sm" x="240" y="132" text-anchor="middle">同一個 goroutine</text>
+        <rect class="soft" x="324" y="12" width="148" height="172" rx="10"/>
+        <text class="mono bold" x="398" y="42" text-anchor="middle">chan T</text>
+        <text class="sm" x="398" y="80" text-anchor="middle">跨 goroutine 傳值</text>
+        <text class="sm" x="398" y="106" text-anchor="middle">由送的一方 close</text>
+        <text class="sm" x="398" y="132" text-anchor="middle">每個值都要同步</text>
+      </svg>
+      <figcaption>三種都能「交出一串值」，差在值什麼時候算出來、在哪個 goroutine 算。</figcaption>
+    </figure>
+    <p>函式要交出一串值時，有三種選擇，怎麼選：</p>
+    <ul class="notes">
+      <li><strong>回傳 slice</strong>：資料本來就在記憶體裡、數量不大，或是使用端需要索引、長度、排序、讀好幾次。這是最簡單的選擇，不確定的時候先用它。</li>
+      <li><strong>回傳疊代器</strong>：資料量大或無限、每個值的計算有成本、使用端常常只要前幾個，或是你想把內部的資料結構藏起來（第 3 節）。疊代器在使用端的 goroutine 裡執行，沒有並行，也沒有同步的成本。</li>
+      <li><strong>回傳 channel</strong>：值由另一個 goroutine 產生，真的需要並行，例如一邊下載一邊處理。channel 每傳一個值都要同步，而且要有人負責 close、要處理 goroutine 洩漏，詳見 <a href="14-goroutines.html">14 goroutine</a> 和 <a href="15-channels.html">15 channel</a>。在 Go 1.23 以前，有人會用 goroutine 加 channel 來寫「產生器」，現在這種用途應該改用疊代器。</li>
+    </ul>
+    <p>疊代器還有一個 slice 沒有的性質要注意：有些疊代器<strong>只能用一次</strong>：</p>
+    <pre class="code" data-src="chapters/13-iterators/reuse.go#reuseDemo"><code>func reuseDemo() {
+	seq := callNumbers(1, 3)
+	fmt.Println(slices.Collect(seq), slices.Collect(seq))
+
+	sc := bufio.NewScanner(strings.NewReader("排骨飯\n紅茶\n"))
+	once := func(yield func(string) bool) {
+		for sc.Scan() {
+			if !yield(sc.Text()) {
+				return
+			}
+		}
+	}
+	fmt.Println(slices.Collect(once), slices.Collect(once))
+}</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out" data-example="chapters/13-iterators#Example_reuseDemo"><code>[1 2 3] [1 2 3]
+[排骨飯 紅茶] []</code></pre>
+    <p>callNumbers 的疊代器每次被 range，都從 1 重新數起，所以兩次 Collect 結果一樣。once 讀的是一個 bufio.Scanner，第一次就把資料讀完了，Scanner 不會倒帶，第二次什麼都拿不到。從檔案、網路、標準輸入這類「資料流」讀的疊代器，通常都是這樣。標準庫的文件會寫明「It returns a single-use iterator」，例如 <code>strings.Lines</code> 和 <code>strings.SplitSeq</code>。自己寫的單次疊代器，也應該在註解裡說清楚。</p>
+
+    <section class="deep" aria-labelledby="errors">
+      <p class="tag">深入：第一次讀可以先跳過</p>
+      <h3 id="errors">7.1 會失敗的疊代器</h3>
+      <p>從檔案一行一行讀時，讀到一半可能出錯，但 yield 沒有地方放 error。常見的做法有兩種：</p>
+      <ul class="notes">
+        <li>回傳 <code>iter.Seq2[T, error]</code>，每一圈都交出值和錯誤，使用端在迴圈裡檢查 err。錯誤跟著出錯的位置走，但每一圈都得寫檢查。</li>
+        <li>學 bufio.Scanner：疊代器只交出值，出錯就停止，另外提供一個方法讓使用端在迴圈結束後查詢錯誤。迴圈本體比較乾淨，但使用端很容易忘了查。</li>
+      </ul>
+      <p>兩種都有人用，挑一種，並在文件裡寫清楚（<a href="11-errors.html">11 錯誤處理</a>）。</p>
+    </section>
+  </section>
+
+  <section aria-labelledby="pitfalls">
+    <h2 id="pitfalls">常見錯誤</h2>
+    <h3 id="pit-ignore-yield">1. 不理會 yield 的回傳值</h3>
+    <div class="compare">
+      <p class="label bad">錯：使用端 break 之後還繼續交出值，執行期 panic</p>
+      <pre class="code bad" data-src="chapters/13-iterators/earlystop.go#rudeNumbers"><code>func rudeNumbers() iter.Seq[int] {
+	return func(yield func(int) bool) {
+		for n := 1; n &lt;= 3; n++ {
+			yield(n)
+		}
+	}
+}</code></pre>
+      <p class="label good">對：yield 回傳 false 就 return</p>
+      <pre class="code good" data-src="chapters/13-iterators/rangefunc.go#callNumbers"><code>func callNumbers(from, to int) iter.Seq[int] {
+	return func(yield func(int) bool) {
+		for n := from; n &lt;= to; n++ {
+			if !yield(n) {
+				return
+			}
+		}
+	}
+}</code></pre>
+    </div>
+    <p>全部跑完時兩者看起來一樣，只有 break 時才會 panic “range function continued iteration after function for loop body returned false”（第 2 節）。測試一定要有提早離開的案例。</p>
+
+    <h3 id="pit-recursion">2. 遞迴時沒有把 false 往上傳</h3>
+    <p>只在最底層檢查 yield 不夠，每一層遞迴都要知道「使用端喊停了」，否則上一層的迴圈會繼續走下一個子節點，再呼叫一次 yield，一樣 panic。讓遞迴的輔助函式回傳 bool，見第 3 節的 walk。</p>
+
+    <h3 id="pit-order">3. 以為 maps.Keys 有固定順序</h3>
+    <p>maps.Keys、maps.Values、maps.All 的順序和 range map 一樣，每次都可能不同。要固定的順序就用 <code>slices.Sorted(maps.Keys(m))</code>。</p>
+
+    <h3 id="pit-stop">4. 用了 iter.Pull 卻沒有呼叫 stop</h3>
+    <p>沒拿完就不要了，疊代器會一直停在 yield 那裡等，它的 defer 永遠不會執行，檔案不會關、資源不會釋放。拿到 next 和 stop 之後，下一行就寫 <code>defer stop()</code>。</p>
+
+    <h3 id="pit-single-use">5. 把單次疊代器 range 兩次</h3>
+    <p>第二次什麼都拿不到，或從上次停下來的地方繼續，不會報錯（第 7 節）。需要讀好幾次，就先 <code>slices.Collect</code> 成 slice。</p>
+
+    <h3 id="pit-reuse-buffer">6. 交出去的 slice 被下一輪改掉</h3>
+    <p>疊代器每次交出一個 slice 時，如果重複使用同一個底層陣列（例如每次都 <code>buf = buf[:0]</code>），使用端把前一個 slice 留下來，內容會被下一輪蓋掉（<a href="06-arrays-slices.html#shared">06 章</a>）。要嘛每次交出新的 slice，要嘛在文件裡寫明「只在這一圈有效」。練習 5 就是要你處理這件事。</p>
   </section>
 
   <section aria-labelledby="java">
@@ -137,22 +733,133 @@ func main() {
       <table class="vs">
         <thead><tr><th scope="col">主題</th><th scope="col">Java</th><th scope="col">Go</th></tr></thead>
         <tbody>
-          <tr><th scope="row">疊代介面</th><td class="java"><code>Iterator&lt;T&gt;</code> 的 <code>hasNext()</code> / <code>next()</code></td><td><code>iter.Seq[T]</code>：一個接收 yield 的函式</td></tr>
-          <tr><th scope="row">迴圈</th><td class="java">for-each 要實作 <code>Iterable</code></td><td><code>for v := range seq</code></td></tr>
-          <tr><th scope="row">惰性串流</th><td class="java"><code>Stream</code> API</td><td>把 <code>iter.Seq</code> 接起來，或用 <code>slices</code>、<code>maps</code> 的函式</td></tr>
-          <tr><th scope="row">提早結束</th><td class="java"><code>break</code> 之後 iterator 不會知道</td><td><code>break</code> 讓 yield 回傳 false，疊代器可以收尾</td></tr>
-          <tr><th scope="row">拉取式</th><td class="java"><code>next()</code> 本來就是</td><td><code>iter.Pull</code> 轉成 next 和 stop</td></tr>
+          <tr><th scope="row">疊代介面</th><td class="java"><code>Iterator&lt;T&gt;</code> 的 <code>hasNext()</code> / <code>next()</code></td><td><code>iter.Seq[T]</code>：一個接收 yield 的函式，不是 interface</td></tr>
+          <tr><th scope="row">寫一個疊代器</th><td class="java">寫一個 class，用欄位記住走到哪裡</td><td>寫普通的迴圈，每個值呼叫一次 yield，狀態留在區域變數</td></tr>
+          <tr><th scope="row">迴圈</th><td class="java">for-each 要實作 <code>Iterable</code></td><td><code>for v := range seq</code>，型別提供 <code>All()</code> 方法</td></tr>
+          <tr><th scope="row">惰性串流</th><td class="java"><code>Stream</code> API 內建 map、filter、limit</td><td>把 <code>iter.Seq</code> 接起來；標準庫沒有 Map、Filter，幾行自己寫</td></tr>
+          <tr><th scope="row">提早結束</th><td class="java"><code>break</code> 之後 iterator 不會知道，收尾要靠 try-with-resources</td><td><code>break</code> 讓 yield 回傳 false，疊代器的 defer 負責收尾</td></tr>
+          <tr><th scope="row">拉取式</th><td class="java"><code>next()</code> 本來就是</td><td><code>iter.Pull</code> 轉成 next 和 stop，stop 一定要呼叫</td></tr>
+          <tr><th scope="row">平行</th><td class="java"><code>parallelStream()</code></td><td>疊代器在使用端的 goroutine 執行；要並行就用 goroutine 和 channel</td></tr>
         </tbody>
       </table>
     </div>
   </section>
 
+  <section aria-labelledby="exercises">
+    <h2 id="exercises">練習</h2>
+    <p>題目在 <code>exercises/13-iterators/exercises.go</code>。每一題的測試都會「取幾個就 break」，所以每個疊代器都要遵守 yield 的約定。</p>
+    <pre class="shell"><code>go test ./exercises/13-iterators/                  <span class="c"># 跑全部練習</span>
+go test ./exercises/13-iterators/ -run TestEvery  <span class="c"># 只跑一題</span>
+go test -tags solution ./exercises/13-iterators/   <span class="c"># 跑參考解答</span></code></pre>
+    <ol class="exercises">
+      <li>
+        <h3><span class="level l1">入門</span>練習 1：發車時刻</h3>
+        <p>公車從某個時間開始，每隔固定的分鐘數發一班車。時間用「從午夜起算的分鐘數」表示。</p>
+        <pre class="code" data-src="exercises/13-iterators/exercises.go#Every"><code>func Every(from, to, step int) iter.Seq[int] {
+	// TODO: 實作
+	return func(yield func(int) bool) {}
+}</code></pre>
+        <p><code>Every(360, 420, 15)</code> 是早上 6 點到 7 點每 15 分鐘一班。測試：<code>TestEvery</code>。</p>
+        <details><summary>提示</summary><p>和第 1 節的 callNumbers 一樣，只是每次加 step。step 小於等於 0 時要先 return，否則迴圈永遠不會結束。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l1">入門</span>練習 2：加上行號</h3>
+        <p>把收據的每一行加上行號交出去，交出的是 <code>iter.Seq2</code>。</p>
+        <pre class="code" data-src="exercises/13-iterators/exercises.go#Numbered"><code>func Numbered(s string) iter.Seq2[int, string] {
+	// TODO: 實作
+	return func(yield func(int, string) bool) {}
+}</code></pre>
+        <p>測試：<code>TestNumbered</code>。</p>
+        <details><summary>提示</summary><p>用 <code>strings.Lines</code> 拿到每一行（第 4 節），它包含結尾的換行，用 <code>strings.TrimSuffix(line, "\n")</code> 去掉。行號用一個計數器。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l2">進階</span>練習 3：叫號機按了兩次</h3>
+        <p>叫號機偶爾會重複送出同一個號碼，連續重複的只留一個。</p>
+        <pre class="code" data-src="exercises/13-iterators/exercises.go#Dedup"><code>func Dedup[T comparable](seq iter.Seq[T]) iter.Seq[T] {
+	// TODO: 實作
+	return func(yield func(T) bool) {}
+}</code></pre>
+        <p>測試：<code>TestDedup</code>。</p>
+        <details><summary>提示</summary><p>記住上一個交出去的值。第一個值沒有「上一個」，不能拿零值來比，測試的第一個值剛好就是空字串。多用一個 bool 記錄「是不是第一個」。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l2">進階</span>練習 4：捷運區間</h3>
+        <p>給一串站名，交出每一段相鄰兩站的區間。</p>
+        <pre class="code" data-src="exercises/13-iterators/exercises.go#Segments"><code>func Segments[T any](seq iter.Seq[T]) iter.Seq2[T, T] {
+	// TODO: 實作
+	return func(yield func(T, T) bool) {}
+}</code></pre>
+        <p>測試：<code>TestSegments</code>。</p>
+        <details><summary>提示</summary><p>和練習 3 一樣記住上一個值和「有沒有上一個」。從第二個值開始，每拿到一個就交出（上一個, 這一個）。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l2">進階</span>練習 5：外送分批</h3>
+        <p>外送員一趟最多帶 n 份，把訂單每 n 份分成一批。</p>
+        <pre class="code" data-src="exercises/13-iterators/exercises.go#Batch"><code>func Batch[T any](seq iter.Seq[T], n int) iter.Seq[[]T] {
+	// TODO: 實作
+	return func(yield func([]T) bool) {}
+}</code></pre>
+        <p>測試會把每一批都留下來再檢查，所以重用同一個 slice 會失敗。測試：<code>TestBatch</code>。</p>
+        <details><summary>提示</summary><p>用一個容量 n 的 slice 收集，收滿就 yield，然後 <code>make</code> 一個新的，不要用 <code>buf[:0]</code>（常見錯誤 6）。迴圈結束後，buf 裡還有剩的也要交出。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l3">挑戰</span>練習 6：合併兩家分店的發票</h3>
+        <p>兩家分店的發票號碼各自排好了序，合併成一條，結果也要排好序。</p>
+        <pre class="code" data-src="exercises/13-iterators/exercises.go#MergeSorted"><code>func MergeSorted[T cmp.Ordered](a, b iter.Seq[T]) iter.Seq[T] {
+	// TODO: 實作
+	return func(yield func(T) bool) {}
+}</code></pre>
+        <p>測試會檢查提早結束時，兩個來源都有被停止。測試：<code>TestMergeSorted</code>。</p>
+        <details><summary>提示</summary><p>兩邊各用一次 iter.Pull，拿到後馬上 <code>defer stop()</code>。先各拿一個值，只要還有一邊 ok 就繼續：交出比較小的那個（另一邊已經用完時，交出還有的那邊），再從交出的那一邊拿下一個（第 6 節）。</p></details>
+      </li>
+      <li>
+        <h3><span class="level fix">找錯</span>練習 7：只要兩個座位</h3>
+        <p>全部取完沒問題，取兩個就 break 時 panic。</p>
+        <pre class="code" data-src="exercises/13-iterators/exercises.go#Seats"><code>func Seats(row string, n int) iter.Seq[string] {
+	return func(yield func(string) bool) {
+		for i := 1; i &lt;= n; i++ {
+			yield(fmt.Sprintf("%s%d", row, i))
+		}
+	}
+}</code></pre>
+        <p>測試：<code>TestSeats</code>。</p>
+        <details><summary>提示</summary><p>常見錯誤 1。</p></details>
+      </li>
+    </ol>
+    <p><a href="https://github.com/xinqilin/GO-Playground/blob/main/exercises/13-iterators/solution.go">參考解答</a>：先自己寫完再看。測試通過的寫法都是對的。</p>
+  </section>
+
+  <section aria-labelledby="recap">
+    <h2 id="recap">重點回顧</h2>
+    <ul class="recap">
+      <li>疊代器是收一個 yield 函式的函式；<code>iter.Seq[V]</code> 交出一個值，<code>iter.Seq2[K, V]</code> 交出兩個值。</li>
+      <li>range 一個函式時，迴圈本體被包成 yield，由疊代器呼叫；這是 push 的模式。</li>
+      <li>yield 回傳 false 表示使用端離開了迴圈，疊代器必須立刻 return，不然會 panic。</li>
+      <li>疊代器的 defer 會在迴圈結束前執行，適合用來收尾。</li>
+      <li>型別用 <code>All</code>、<code>Keys</code>、<code>Values</code>、<code>Backward</code> 這類方法交出疊代器；遞迴時要把 false 一層一層往上傳。</li>
+      <li><code>slices.Collect</code>、<code>slices.Sorted</code>、<code>maps.Keys</code>、<code>strings.Lines</code> 等函式讓疊代器和 slice、map 互相轉換。</li>
+      <li>疊代器可以串成惰性的管線，用不到的值不會被產生，來源可以是無限的。</li>
+      <li><code>iter.Pull</code> 換成 next 和 stop，用來同時從多個來源取值；stop 一定要呼叫。</li>
+      <li>不確定就回傳 slice；資料大、無限或要藏起內部結構就用疊代器；真的需要並行才用 channel。有些疊代器只能用一次。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="further">
+    <h2 id="further">延伸閱讀</h2>
+    <ul class="notes">
+      <li>Go 語言規格：<a href="https://go.dev/ref/spec#For_range">For statements with range clause</a>（range 一個函式的規則）。</li>
+      <li>套件文件：<a href="https://pkg.go.dev/iter">iter</a>，特別是 <a href="https://pkg.go.dev/iter#hdr-Naming_Conventions">Naming Conventions</a>、<a href="https://pkg.go.dev/iter#hdr-Single_Use_Iterators">Single-Use Iterators</a>、<a href="https://pkg.go.dev/iter#hdr-Pulling_Values">Pulling Values</a>；以及 <a href="https://pkg.go.dev/slices">slices</a>、<a href="https://pkg.go.dev/maps">maps</a>、<a href="https://pkg.go.dev/strings#Lines">strings.Lines</a>。</li>
+      <li>Go blog：<a href="https://go.dev/blog/range-functions">Range Over Function Types</a>。</li>
+    </ul>
+  </section>
+
   <section aria-labelledby="run">
     <h2 id="run">動手跑</h2>
     <p class="label">在 repo 根目錄</p>
-    <pre class="shell"><code>go run ./chapters/13-iterators
-go test ./chapters/13-iterators</code></pre>
-    <p><a href="https://github.com/xinqilin/GO-Playground/tree/main/chapters/13-iterators">在 GitHub 看完整程式碼</a></p>
+    <pre class="shell"><code>go run ./chapters/13-iterators                <span class="c"># 執行本章所有示範</span>
+go test ./chapters/13-iterators               <span class="c"># 驗證頁面上的每一段輸出</span>
+go test ./exercises/13-iterators/             <span class="c"># 做練習</span></code></pre>
+    <p><a href="https://github.com/xinqilin/GO-Playground/tree/main/chapters/13-iterators">在 GitHub 看本章完整程式碼</a>，或看<a href="https://github.com/xinqilin/GO-Playground/tree/main/exercises/13-iterators">練習題</a>。</p>
   </section>
 </main>
 

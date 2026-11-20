@@ -1,0 +1,861 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>命令列工具｜Go 圖解手冊</title>
+<meta name="description" content="用 Go 寫命令列工具：os.Args 與 shell 怎麼切參數、flag.FlagSet、子命令、標準輸入與管線、結束碼與 stderr、旗標 > 環境變數 > 預設值的設定順序、用 signal.NotifyContext 處理 Ctrl-C，整個工具都能用測試呼叫，附可執行的練習題。">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<header class="site">
+  <a href="index.html">Go 圖解手冊</a>
+  <span class="count">21 / 33</span>
+</header>
+
+<main class="page long">
+  <header class="hero">
+    <div class="num" aria-hidden="true">21</div>
+    <p class="eyebrow">Part 4 · 標準庫實戰 · 第 21 章</p>
+    <h1>命令列工具</h1>
+    <p class="analogy">櫃台的點單機：客人用固定的格式下單，看不懂的單子退回去並說明原因；做好的便當從出餐口出去，客訴從另一個窗口處理；打烊鈴一響，手上這份做完就收工，不會丟著瓦斯爐不管。</p>
+  </header>
+
+  <nav class="toc-inline" aria-labelledby="toc-title">
+    <p class="label" id="toc-title">本章內容</p>
+    <ol>
+      <li><a href="#goals">本章你會學到</a></li>
+      <li><a href="#args">os.Args：shell 交給你的參數</a></li>
+      <li><a href="#flag">flag 套件</a></li>
+      <li><a href="#subcommands">子命令</a></li>
+      <li><a href="#stdin">標準輸入與管線</a></li>
+      <li><a href="#exit">結束碼與 stderr</a></li>
+      <li><a href="#config">旗標、環境變數、預設值</a></li>
+      <li><a href="#signal">Ctrl-C 與 os/signal</a></li>
+      <li><a href="#pitfalls">常見錯誤</a></li>
+      <li><a href="#java">從 Java 來的你</a></li>
+      <li><a href="#exercises">練習</a></li>
+      <li><a href="#recap">重點回顧</a></li>
+      <li><a href="#further">延伸閱讀</a></li>
+    </ol>
+  </nav>
+
+  <section aria-labelledby="goals">
+    <h2 id="goals">本章你會學到</h2>
+    <ul class="notes">
+      <li>shell 怎麼把一行指令切成 os.Args，引號和 <code>*.txt</code> 是誰處理的。</li>
+      <li>用 flag.FlagSet 解析旗標，自訂用法說明，分辨「使用者要看說明」和「用錯了」。</li>
+      <li>用一個 switch 加上每個子命令自己的 FlagSet，做出 <code>tally total</code>、<code>tally top</code>。</li>
+      <li>沒給檔名就讀標準輸入，讓工具可以接在管線裡。</li>
+      <li>結果寫 stdout、錯誤寫 stderr、用結束碼告訴 shell 成功或失敗；main 只呼叫 run。</li>
+      <li>設定的優先順序：命令列旗標 &gt; 環境變數 &gt; 內建預設值。</li>
+      <li>用 signal.NotifyContext 把 Ctrl-C 變成 ctx 的取消，收好尾再結束。</li>
+    </ul>
+    <p>先備：<a href="02-input-output.html#streams">02 章的標準輸入、輸出與錯誤</a>、<a href="18-context.html#cause">18 章的取消原因</a>、<a href="20-files.html#open">20 章的開檔</a>。</p>
+    <p>這一章的程式本身就是一個完整的工具 <code>tally</code>，加總便當店的營業額。每一行輸入是「品項 金額」。main 只把作業系統的東西接上 <code>run</code>，run 不碰 os.Args、os.Exit，所以測試可以像呼叫一般函式一樣呼叫它。頁面上的輸出都是測試用這個小工具跑出來的：</p>
+    <pre class="code" data-src="chapters/21-cli/main_test.go#sales,try"><code>const sales = "排骨飯 90\n雞腿飯 100\n排骨飯 90\n滷肉飯 60\n"
+
+func try(ctx context.Context, stdin string, env map[string]string, args ...string) {
+	var stdout, stderr strings.Builder
+	code := run(ctx, args, sys{
+		stdin:  strings.NewReader(stdin),
+		stdout: &amp;stdout,
+		stderr: &amp;stderr,
+		getenv: func(key string) string { return env[key] },
+	})
+
+	prompt := []string{"$"}
+	for _, k := range slices.Sorted(maps.Keys(env)) {
+		prompt = append(prompt, k+"="+env[k])
+	}
+	fmt.Println(strings.Join(slices.Concat(prompt, []string{"tally"}, args), " "))
+	fmt.Print(stdout.String())
+	for line := range strings.Lines(stderr.String()) {
+		fmt.Println(strings.TrimRight("stderr｜"+line, " \n"))
+	}
+	fmt.Println("結束碼", code)
+}</code></pre>
+  </section>
+
+  <section aria-labelledby="args">
+    <h2 id="args">1. os.Args：shell 交給你的參數</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 182" role="img" aria-label="一行指令 ./tally total -tax 10 加上用引號包住的檔名，被 shell 依照空白切成五段，分別是 os.Args 的第 0 到第 4 個元素；引號裡的空白不切">
+        <title>shell 把一行指令切成好幾段</title>
+        <text class="sm mono" x="240" y="28" text-anchor="middle">$ ./tally total -tax 10 "週一 營業額.txt"</text>
+        <text class="sm" x="240" y="60" text-anchor="middle">shell 依空白切成好幾段；引號裡的空白不切</text>
+        <rect class="soft" x="44" y="78" width="70" height="34" rx="6"/>
+        <text class="sm mono" x="79" y="100" text-anchor="middle">./tally</text>
+        <rect class="acc" x="124" y="78" width="60" height="34" rx="6"/>
+        <text class="sm mono" x="154" y="100" text-anchor="middle">total</text>
+        <rect class="acc" x="194" y="78" width="52" height="34" rx="6"/>
+        <text class="sm mono" x="220" y="100" text-anchor="middle">-tax</text>
+        <rect class="acc" x="256" y="78" width="40" height="34" rx="6"/>
+        <text class="sm mono" x="276" y="100" text-anchor="middle">10</text>
+        <rect class="acc" x="306" y="78" width="130" height="34" rx="6"/>
+        <text class="sm" x="371" y="100" text-anchor="middle">週一 營業額.txt</text>
+        <text class="sm mono t-acc" x="79" y="134" text-anchor="middle">[0]</text>
+        <text class="sm mono t-acc" x="154" y="134" text-anchor="middle">[1]</text>
+        <text class="sm mono t-acc" x="220" y="134" text-anchor="middle">[2]</text>
+        <text class="sm mono t-acc" x="276" y="134" text-anchor="middle">[3]</text>
+        <text class="sm mono t-acc" x="371" y="134" text-anchor="middle">[4]</text>
+        <text class="sm" x="240" y="168" text-anchor="middle">os.Args[0] 是程式本身，os.Args[1:] 才是使用者給的參數</text>
+      </svg>
+      <figcaption>程式拿到的是一個字串 slice。引號、萬用字元、變數在程式啟動前就被 shell 處理掉了。</figcaption>
+    </figure>
+    <p>在終端機打的一行指令，程式拿到的是 <code>os.Args</code>，一個 <code>[]string</code>。第一個元素是程式本身的路徑，後面才是參數。用一個只會印出 os.Args 的小程式看看：</p>
+    <pre class="code" data-src="chapters/21-cli/args/main.go"><code>// args 把 os.Args 的每一個元素印出來，看 shell 把命令列切成了哪幾段。
+//
+// 執行（先編譯，os.Args[0] 才會是簡短的 ./args）：
+//
+//	go build -o args ./chapters/21-cli/args
+//	./args total -tax 10 "週一 營業額.txt"
+package main
+
+import (
+	"fmt"
+	"os"
+)
+
+func main() {
+	for i, a := range os.Args {
+		fmt.Printf("os.Args[%d] = %q\n", i, a)
+	}
+}</code></pre>
+    <p class="label">在一個有 sales.txt 的目錄裡執行</p>
+    <pre class="out"><code>$ ./args total -tax 10 "週一 營業額.txt"
+os.Args[0] = "./args"
+os.Args[1] = "total"
+os.Args[2] = "-tax"
+os.Args[3] = "10"
+os.Args[4] = "週一 營業額.txt"
+$ ./args *.txt
+os.Args[0] = "./args"
+os.Args[1] = "sales.txt"</code></pre>
+    <ul class="notes">
+      <li>引號是給 shell 看的：<code>"週一 營業額.txt"</code> 變成一個參數，引號本身不會傳進來。</li>
+      <li><code>*.txt</code> 也是 shell 展開的，程式拿到的是展開後的檔名。在 Windows 的命令提示字元裡，萬用字元不會被展開，程式拿到的就是 <code>*.txt</code> 這個字串。</li>
+      <li>用 <code>go run</code> 執行時，os.Args[0] 是 go 編譯在暫存目錄裡的執行檔路徑，又長又不固定，所以這裡先 <code>go build -o args</code> 再執行。</li>
+      <li>除了把 <code>os.Args[1:]</code> 交給 run，程式的其他地方都不應該直接讀 os.Args：參數從函式的參數進來，測試才能換成自己的。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="flag">
+    <h2 id="flag">2. flag 套件</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 166" role="img" aria-label="參數 -tax 10 a.txt -n 3：前兩個被解析成旗標 tax 等於 10；從 a.txt 開始，第一個不是旗標的參數起，後面全部是 fs.Args()，連 -n 3 也是">
+        <title>旗標只解析到第一個不是旗標的參數</title>
+        <text class="sm t-acc" x="130" y="36" text-anchor="middle">旗標：tax = 10</text>
+        <text class="sm t-hot" x="215" y="36">從這裡停</text>
+        <rect class="acc" x="104" y="50" width="52" height="32" rx="6"/>
+        <text class="sm mono" x="130" y="71" text-anchor="middle">-tax</text>
+        <rect class="acc" x="166" y="50" width="40" height="32" rx="6"/>
+        <text class="sm mono" x="186" y="71" text-anchor="middle">10</text>
+        <path class="wire hot-ln dash" d="M211 42 V90"/>
+        <rect class="soft" x="216" y="50" width="64" height="32" rx="6"/>
+        <text class="sm mono" x="248" y="71" text-anchor="middle">a.txt</text>
+        <rect class="soft" x="290" y="50" width="40" height="32" rx="6"/>
+        <text class="sm mono" x="310" y="71" text-anchor="middle">-n</text>
+        <rect class="soft" x="340" y="50" width="36" height="32" rx="6"/>
+        <text class="sm mono" x="358" y="71" text-anchor="middle">3</text>
+        <text class="sm" x="240" y="108" text-anchor="middle">第一個不是旗標的參數起，後面全部放進 fs.Args()</text>
+        <text class="sm" x="240" y="134" text-anchor="middle">寫法：-tax 10、-tax=10、--tax 10 都可以</text>
+        <text class="sm" x="240" y="156" text-anchor="middle">布林旗標只能寫 -outdoor 或 -outdoor=false</text>
+      </svg>
+      <figcaption>flag 從頭開始解析，遇到第一個不是旗標的參數（或 <code>--</code>）就停下來，後面的參數原封不動留給你。</figcaption>
+    </figure>
+    <p>自己切 os.Args 很快就會變得一團亂：<code>-tax 10</code>、<code>-tax=10</code>、少給值、給了不認得的旗標，每一種都要處理。標準庫的 <code>flag</code> 套件都做好了。簡單的小程式可以直接用全域的 <code>flag.Int</code> 加 <code>flag.Parse()</code>；要測試、要子命令的工具，自己開一個 <code>flag.FlagSet</code>：</p>
+    <pre class="code" data-src="chapters/21-cli/commands.go#total"><code>func total(ctx context.Context, args []string, s sys) int {
+	fs := flag.NewFlagSet("tally total", flag.ContinueOnError)
+	fs.SetOutput(s.stderr)
+
+	tax, err := envInt(s.getenv, "TALLY_TAX", 5)
+	if err != nil {
+		fmt.Fprintf(s.stderr, "tally total：%v\n", err)
+		return exitUsage
+	}
+	fs.IntVar(&amp;tax, "tax", tax, "稅率（百分比），也可以用環境變數 TALLY_TAX 設定")
+	fs.Usage = func() {
+		fmt.Fprintln(fs.Output(), "用法：tally total [-tax 百分比] [檔案…]")
+		fs.PrintDefaults()
+	}
+	if code, ok := parse(fs, args); !ok {
+		return code
+	}
+
+	sum := 0
+	err = readSales(ctx, fs.Args(), s.stdin, func(_ string, price int) {
+		sum += price
+	})
+	if err != nil {
+		return fail(ctx, s.stderr, "tally total", err)
+	}
+
+	withTax := (sum*(100+tax) + 50) / 100 // 四捨五入到整數元
+	fmt.Fprintf(s.stdout, "合計 %d 元，含稅 %d%% 共 %d 元\n", sum, tax, withTax)
+	return exitOK
+}</code></pre>
+    <pre class="code" data-src="chapters/21-cli/cli.go#parse"><code>func parse(fs *flag.FlagSet, args []string) (int, bool) {
+	err := fs.Parse(args)
+	switch {
+	case err == nil:
+		return exitOK, true
+	case errors.Is(err, flag.ErrHelp):
+		return exitOK, false // 使用者自己要看說明，不算失敗
+	default:
+		return exitUsage, false
+	}
+}</code></pre>
+    <ul class="notes">
+      <li><code>flag.ContinueOnError</code>：解析失敗時回傳錯誤，讓 run 自己決定結束碼。全域的 flag.Parse 用的是 ExitOnError，會直接結束程式（-h 結束碼 0，其他錯誤 2），測試沒辦法呼叫。</li>
+      <li><code>fs.SetOutput(s.stderr)</code>：flag 的錯誤訊息和用法說明寫到這裡。不設定的話會寫到真的 os.Stderr，測試抓不到。</li>
+      <li><code>fs.Usage</code> 換成自己的說明，再呼叫 <code>fs.PrintDefaults()</code> 列出每個旗標、型別和預設值。</li>
+      <li>-tax 的預設值不是寫死的 5，而是 envInt 算出來的值，第 6 節會說明。</li>
+    </ul>
+    <p>正常的用法：</p>
+    <pre class="out" data-example="chapters/21-cli#Example_total"><code>$ tally total
+合計 340 元，含稅 5% 共 357 元
+結束碼 0
+$ tally total -tax=10
+合計 340 元，含稅 10% 共 374 元
+結束碼 0</code></pre>
+    <p>值的型別不對時，flag 寫出錯誤和用法說明，run 回傳 2。使用者自己要求 <code>-h</code> 時，說明一樣寫到 stderr，但結束碼是 0，因為這不是錯誤：</p>
+    <pre class="out" data-example="chapters/21-cli#Example_badFlag"><code>$ tally total -tax abc
+stderr｜invalid value "abc" for flag -tax: parse error
+stderr｜用法：tally total [-tax 百分比] [檔案…]
+stderr｜  -tax int
+stderr｜    	稅率（百分比），也可以用環境變數 TALLY_TAX 設定 (default 5)
+結束碼 2</code></pre>
+    <pre class="out" data-example="chapters/21-cli#Example_help"><code>$ tally top -h
+stderr｜用法：tally top [-n 個數] [檔案…]
+stderr｜  -n int
+stderr｜    	列出幾個品項 (default 3)
+結束碼 0</code></pre>
+    <p>flag 遇到第一個不是旗標的參數就停下來（這裡是代表標準輸入的 <code>-</code>），後面的 <code>-tax 10</code> 被當成兩個檔名：</p>
+    <pre class="out" data-example="chapters/21-cli#Example_flagOrder"><code>$ tally total - -tax 10
+stderr｜tally total：open -tax: no such file or directory
+結束碼 1</code></pre>
+    <ul class="notes">
+      <li>很多 Unix 工具允許旗標寫在檔名後面，Go 的 flag 不允許。旗標一定寫在前面；檔名本身以 - 開頭時，先寫 <code>--</code>，後面的就都不會被當成旗標。</li>
+      <li>內建的型別有 Bool、Int、Int64、Uint、Float64、String、Duration（<code>-timeout 1m30s</code>）。其他型別用 <code>fs.Func</code>（Go 1.16 起）傳一個解析函式，或用 <code>fs.TextVar</code>（Go 1.19 起）接任何實作 encoding.TextUnmarshaler 的型別。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="subcommands">
+    <h2 id="subcommands">3. 子命令</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 186" role="img" aria-label="tally 底下有兩個子命令：total 有自己的 FlagSet，只認得 -tax；top 有自己的 FlagSet，只認得 -n">
+        <title>每個子命令有自己的旗標</title>
+        <rect class="acc" x="190" y="16" width="100" height="36" rx="8"/>
+        <text class="small mono bold" x="240" y="40" text-anchor="middle">tally</text>
+        <path class="wire" d="M240 52 V72 H140 V84"/>
+        <path class="tip" d="M140 96 L134 84 L146 84 Z"/>
+        <path class="wire" d="M240 72 H340 V84"/>
+        <path class="tip" d="M340 96 L334 84 L346 84 Z"/>
+        <rect class="soft" x="60" y="96" width="160" height="56" rx="8"/>
+        <text class="small mono" x="140" y="119" text-anchor="middle">total</text>
+        <text class="sm" x="140" y="141" text-anchor="middle">只認得 -tax</text>
+        <rect class="soft" x="260" y="96" width="160" height="56" rx="8"/>
+        <text class="small mono" x="340" y="119" text-anchor="middle">top</text>
+        <text class="sm" x="340" y="141" text-anchor="middle">只認得 -n</text>
+        <text class="sm" x="240" y="178" text-anchor="middle">run 看 args[0] 選子命令，剩下的交給那個子命令自己的 FlagSet</text>
+      </svg>
+      <figcaption>子命令就是「第一個參數決定做什麼」。每個子命令開自己的 FlagSet，旗標不會互相干擾，用法說明也分開。</figcaption>
+    </figure>
+    <p><code>go build</code>、<code>go test</code>、<code>git commit</code> 都是子命令的設計：一個工具做好幾件相關的事。寫法很直接，run 用 switch 看第一個參數，把剩下的參數交給對應的函式：</p>
+    <pre class="code" data-src="chapters/21-cli/cli.go#usage,sys,run"><code>const usage = `用法：tally &lt;子命令&gt; [旗標] [檔案…]
+
+子命令：
+  total   加總營業額
+  top     列出賣最多的品項
+
+沒有給檔案、或檔名是 - 時，從標準輸入讀。
+每一行是「品項 金額」，例如：排骨飯 90
+`
+
+type sys struct {
+	stdin          io.Reader
+	stdout, stderr io.Writer
+	getenv         func(string) string
+}
+
+func run(ctx context.Context, args []string, s sys) int {
+	if len(args) == 0 {
+		fmt.Fprint(s.stderr, usage)
+		return exitUsage
+	}
+	switch cmd, rest := args[0], args[1:]; cmd {
+	case "total":
+		return total(ctx, rest, s)
+	case "top":
+		return top(ctx, rest, s)
+	case "help", "-h", "-help", "--help":
+		fmt.Fprint(s.stdout, usage)
+		return exitOK
+	default:
+		fmt.Fprintf(s.stderr, "tally：不認得的子命令 %q\n\n%s", cmd, usage)
+		return exitUsage
+	}
+}</code></pre>
+    <p>top 和 total 的結構一樣：開 FlagSet、解析、讀輸入、輸出結果。份數一樣時照品項名稱排，輸出才會固定：</p>
+    <pre class="code" data-src="chapters/21-cli/commands.go#top"><code>func top(ctx context.Context, args []string, s sys) int {
+	fs := flag.NewFlagSet("tally top", flag.ContinueOnError)
+	fs.SetOutput(s.stderr)
+	n := fs.Int("n", 3, "列出幾個品項")
+	fs.Usage = func() {
+		fmt.Fprintln(fs.Output(), "用法：tally top [-n 個數] [檔案…]")
+		fs.PrintDefaults()
+	}
+	if code, ok := parse(fs, args); !ok {
+		return code
+	}
+	if *n &lt; 1 {
+		fmt.Fprintln(s.stderr, "tally top：-n 至少要是 1")
+		return exitUsage
+	}
+
+	counts := map[string]int{}
+	err := readSales(ctx, fs.Args(), s.stdin, func(item string, _ int) {
+		counts[item]++
+	})
+	if err != nil {
+		return fail(ctx, s.stderr, "tally top", err)
+	}
+
+	items := slices.Collect(maps.Keys(counts))
+	slices.SortFunc(items, func(a, b string) int {
+		return cmp.Or(cmp.Compare(counts[b], counts[a]), strings.Compare(a, b))
+	})
+	for i, item := range items[:min(*n, len(items))] {
+		fmt.Fprintf(s.stdout, "%d. %s %d 份\n", i+1, item, counts[item])
+	}
+	return exitOK
+}</code></pre>
+    <pre class="out" data-example="chapters/21-cli#Example_subcommands"><code>$ tally top -n 2
+1. 排骨飯 2 份
+2. 滷肉飯 1 份
+結束碼 0
+$ tally sum
+stderr｜tally：不認得的子命令 "sum"
+stderr｜
+stderr｜用法：tally &lt;子命令&gt; [旗標] [檔案…]
+stderr｜
+stderr｜子命令：
+stderr｜  total   加總營業額
+stderr｜  top     列出賣最多的品項
+stderr｜
+stderr｜沒有給檔案、或檔名是 - 時，從標準輸入讀。
+stderr｜每一行是「品項 金額」，例如：排骨飯 90
+結束碼 2</code></pre>
+    <ul class="notes">
+      <li>不認得的子命令：說明哪裡錯，附上完整的用法，回傳 2。</li>
+      <li><code>tally help</code>、<code>tally -h</code> 是使用者主動要看說明，寫到 stdout、回傳 0；被動的錯誤說明才寫 stderr。</li>
+      <li>要讓所有子命令共用的旗標（例如 <code>tally -v total</code>），先用一個最上層的 FlagSet 解析，再拿它的 <code>fs.Args()</code> 選子命令。</li>
+      <li>子命令再多，結構還是一樣：一個 switch 加上每個子命令一個函式。標準庫的 flag 已經足夠寫出完整的工具，Go 自己的 go 指令就是用它做的。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="stdin">
+    <h2 id="stdin">4. 標準輸入與管線</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 200" role="img" aria-label="三種把資料交給 tally 的方式：管線、重新導向、在參數給檔名；前兩種程式讀的都是 os.Stdin，第三種程式自己開檔；最後都變成 io.Reader 交給 readSales">
+        <title>三種輸入，同一個 io.Reader</title>
+        <rect class="soft" x="16" y="16" width="200" height="44" rx="6"/>
+        <text class="sm mono" x="116" y="34" text-anchor="middle">cat a.txt | tally total</text>
+        <text class="sm" x="116" y="52" text-anchor="middle">管線：前一個程式的輸出</text>
+        <rect class="soft" x="16" y="72" width="200" height="44" rx="6"/>
+        <text class="sm mono" x="116" y="90" text-anchor="middle">tally total &lt; a.txt</text>
+        <text class="sm" x="116" y="108" text-anchor="middle">重新導向：shell 打開檔案</text>
+        <rect class="soft" x="16" y="128" width="200" height="44" rx="6"/>
+        <text class="sm mono" x="116" y="146" text-anchor="middle">tally total a.txt b.txt</text>
+        <text class="sm" x="116" y="164" text-anchor="middle">參數：tally 自己打開檔案</text>
+        <path class="wire" d="M216 38 H236 V150 H216"/>
+        <path class="wire" d="M216 94 H248"/>
+        <path class="tip" d="M260 94 L248 88 L248 100 Z"/>
+        <rect class="acc" x="260" y="72" width="96" height="44" rx="8"/>
+        <text class="sm mono" x="308" y="99" text-anchor="middle">io.Reader</text>
+        <path class="wire" d="M356 94 H368"/>
+        <path class="tip" d="M380 94 L368 88 L368 100 Z"/>
+        <rect class="box" x="380" y="72" width="84" height="44" rx="8"/>
+        <text class="sm mono" x="422" y="99" text-anchor="middle">readSales</text>
+        <text class="sm" x="240" y="192" text-anchor="middle">前兩種程式讀的都是 os.Stdin，分不出來；第三種要自己開檔</text>
+      </svg>
+      <figcaption>沒給檔名就讀標準輸入，工具就能接在管線裡；給了檔名就一個一個打開。兩種最後都只是一個 io.Reader。</figcaption>
+    </figure>
+    <p>Unix 工具的傳統：給了檔名就讀檔，沒給就讀標準輸入，檔名是 <code>-</code> 也代表標準輸入。這樣一個工具可以單獨用，也可以接在管線中間，和 grep、sort 這些工具組合：</p>
+    <pre class="code" data-src="chapters/21-cli/input.go#readSales,readSalesFrom"><code>func readSales(ctx context.Context, names []string, stdin io.Reader, add func(item string, price int)) error {
+	if len(names) == 0 {
+		names = []string{"-"}
+	}
+	for _, name := range names {
+		if err := readSalesFrom(ctx, name, stdin, add); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func readSalesFrom(ctx context.Context, name string, stdin io.Reader, add func(string, int)) error {
+	r, label := stdin, "標準輸入"
+	if name != "-" {
+		f, err := os.Open(name)
+		if err != nil {
+			return err
+		}
+		defer f.Close()
+		r, label = f, name
+	}
+
+	sc := bufio.NewScanner(r)
+	for line := 1; sc.Scan(); line++ {
+		if ctx.Err() != nil {
+			return context.Cause(ctx)
+		}
+		text := strings.TrimSpace(sc.Text())
+		if text == "" {
+			continue
+		}
+		i := strings.LastIndexByte(text, ' ')
+		price, err := strconv.Atoi(text[i+1:])
+		if i &lt; 0 || err != nil {
+			return fmt.Errorf("%s 第 %d 行：看不懂「%s」", label, line, text)
+		}
+		add(text[:i], price)
+	}
+	return sc.Err()
+}</code></pre>
+    <pre class="out" data-example="chapters/21-cli#Example_files"><code>$ tally total testdata/mon.txt testdata/tue.txt
+合計 340 元，含稅 5% 共 357 元
+結束碼 0
+$ tally top testdata/mon.txt -
+1. 排骨飯 1 份
+2. 滷肉飯 1 份
+3. 雞腿飯 1 份
+結束碼 0
+$ tally total testdata/bad.txt
+stderr｜tally total：testdata/bad.txt 第 2 行：看不懂「雞腿飯 一百」
+結束碼 1
+$ tally total testdata/nope.txt
+stderr｜tally total：open testdata/nope.txt: no such file or directory
+結束碼 1</code></pre>
+    <p>在真的終端機裡，三種寫法得到的結果都一樣（先 <code>go build -o tally ./chapters/21-cli</code>）：</p>
+    <pre class="out"><code>$ cat sales.txt | ./tally top -n 2
+1. 排骨飯 2 份
+2. 滷肉飯 1 份
+$ ./tally total -tax 10 &lt; sales.txt
+合計 340 元，含稅 10% 共 374 元</code></pre>
+    <ul class="notes">
+      <li>錯誤訊息帶上檔名和行號（<code>testdata/bad.txt 第 2 行</code>），使用者不用猜是哪裡錯了。</li>
+      <li>每個檔案在 readSalesFrom 裡開、在 readSalesFrom 結束時關。如果把 defer 寫在 readSales 的迴圈裡，所有檔案要等全部讀完才關（<a href="20-files.html#pit-defer-loop">20 章</a>）。</li>
+      <li>品項名稱裡可能有空白（「排骨 便當 90」），所以用 <code>LastIndexByte</code> 找最後一個空白，最後一段才是金額。</li>
+      <li>沒接管線、也沒給檔名時，程式在等你從鍵盤輸入，看起來像是當掉了。輸入完按 Ctrl-D（Windows 是 Ctrl-Z 再按 Enter）表示結束。想在這種情況印提示，可以檢查 <code>os.Stdin.Stat()</code> 的 Mode 有沒有 <code>os.ModeCharDevice</code>：有的話，標準輸入是終端機，不是管線或檔案。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="exit">
+    <h2 id="exit">5. 結束碼與 stderr</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 196" role="img" aria-label="程式有一個入口 stdin、三個出口：stdout 放結果給下一個程式，stderr 放錯誤給人看，結束碼給 shell 判斷成功或失敗">
+        <title>一個入口，三個出口</title>
+        <rect class="soft" x="16" y="76" width="110" height="44" rx="8"/>
+        <text class="sm mono" x="71" y="95" text-anchor="middle">stdin</text>
+        <text class="sm" x="71" y="113" text-anchor="middle">輸入</text>
+        <path class="wire" d="M126 98 H158"/>
+        <path class="tip" d="M170 98 L158 92 L158 104 Z"/>
+        <rect class="acc" x="170" y="70" width="140" height="56" rx="10"/>
+        <text class="small mono bold" x="240" y="104" text-anchor="middle">tally</text>
+        <path class="wire" d="M310 86 H326 V38 H338"/>
+        <path class="tip" d="M350 38 L338 32 L338 44 Z"/>
+        <path class="wire" d="M310 98 H338"/>
+        <path class="tip" d="M350 98 L338 92 L338 104 Z"/>
+        <path class="wire" d="M310 110 H326 V158 H338"/>
+        <path class="tip" d="M350 158 L338 152 L338 164 Z"/>
+        <rect class="soft" x="350" y="16" width="114" height="44" rx="6"/>
+        <text class="sm mono" x="407" y="35" text-anchor="middle">stdout</text>
+        <text class="sm" x="407" y="53" text-anchor="middle">結果給下一個</text>
+        <rect class="hot" x="350" y="76" width="114" height="44" rx="6"/>
+        <text class="sm mono" x="407" y="95" text-anchor="middle">stderr</text>
+        <text class="sm" x="407" y="113" text-anchor="middle">錯誤給人看</text>
+        <rect class="soft" x="350" y="136" width="114" height="44" rx="6"/>
+        <text class="sm" x="407" y="155" text-anchor="middle">結束碼</text>
+        <text class="sm" x="407" y="173" text-anchor="middle">給 shell 判斷</text>
+      </svg>
+      <figcaption>stdout 接到檔案或下一個程式時，stderr 還是顯示在終端機上。結束碼不會印出來，但 shell、CI、腳本都靠它判斷成功或失敗。</figcaption>
+    </figure>
+    <p>程式結束時交給作業系統一個整數，叫<strong>結束碼</strong>（exit code）：0 代表成功，其他值代表失敗。shell 的 <code>&amp;&amp;</code>、<code>||</code>、CI 的每一個步驟都看它。tally 用的慣例：</p>
+    <pre class="code" data-src="chapters/21-cli/cli.go#exitOK,fail"><code>const (
+	exitOK          = 0   // 成功
+	exitError       = 1   // 執行時出錯，例如檔案打不開
+	exitUsage       = 2   // 用法錯誤，例如旗標的值不對
+	exitInterrupted = 130 // 被 Ctrl-C 中斷：128 加上 SIGINT 的編號 2
+)
+
+func fail(ctx context.Context, stderr io.Writer, prog string, err error) int {
+	fmt.Fprintf(stderr, "%s：%v\n", prog, err)
+	if ctx.Err() != nil {
+		return exitInterrupted
+	}
+	return exitError
+}</code></pre>
+    <p>結束碼只能在 main 裡交出去：<code>os.Exit(code)</code>。它會<strong>立刻</strong>結束程式，連 defer 都不執行。所以 main 寫得越短越好，所有工作都在 run 裡做完、defer 都在 run 裡跑完，main 拿到結束碼再呼叫 os.Exit：</p>
+    <pre class="code" data-src="chapters/21-cli/main.go"><code>// 第 21 章：命令列工具。
+//
+// 這一章的程式本身就是一個完整的命令列工具 tally，加總便當店的營業額：
+//
+//	printf '排骨飯 90\n雞腿飯 100\n' | go run ./chapters/21-cli total -tax 5
+//
+// main 只負責把作業系統的東西（參數、標準輸入輸出、環境變數、訊號）接上 run；
+// run 不碰 os.Args、os.Exit，所以 main_test.go 可以用 Example 呼叫它，
+// 鎖住每一種用法的輸出和結束碼，頁面上的輸出就是從那裡同步過去的。
+package main
+
+import (
+	"context"
+	"os"
+	"os/signal"
+	"syscall"
+)
+
+func main() {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	go func() {
+		&lt;-ctx.Done()
+		stop() // 第一次 Ctrl-C 之後恢復預設行為：再按一次就直接結束
+	}()
+
+	code := run(ctx, os.Args[1:], sys{
+		stdin:  os.Stdin,
+		stdout: os.Stdout,
+		stderr: os.Stderr,
+		getenv: os.Getenv,
+	})
+	stop()
+	os.Exit(code) // os.Exit 不會執行 defer，所以 main 裡不放任何 defer
+}</code></pre>
+    <p>在 shell 裡實際看看結束碼和兩個出口（<code>$?</code> 是上一個指令的結束碼）：</p>
+    <pre class="out"><code>$ ./tally total nope.txt; echo "結束碼 $?"
+tally total：open nope.txt: no such file or directory
+結束碼 1
+$ ./tally total &lt; sales.txt &gt; result.txt; echo "結束碼 $?"; cat result.txt
+結束碼 0
+合計 340 元，含稅 5% 共 357 元
+$ ./tally total nope.txt 2&gt; errors.txt; echo "結束碼 $?"; cat errors.txt
+結束碼 1
+tally total：open nope.txt: no such file or directory
+$ ./tally total &lt; sales.txt &amp;&amp; echo 成功才會印這行
+合計 340 元，含稅 5% 共 357 元
+成功才會印這行
+$ ./tally total nope.txt || echo "失敗時改做這行"
+tally total：open nope.txt: no such file or directory
+失敗時改做這行</code></pre>
+    <ul class="notes">
+      <li><code>&gt;</code> 只導走 stdout，錯誤訊息照樣出現在終端機；<code>2&gt;</code> 導走的是 stderr。結果和錯誤分開，下一個程式才不會把錯誤訊息當成資料。</li>
+      <li><code>log.Fatal</code> 等於印出訊息再 <code>os.Exit(1)</code>，一樣不執行 defer。它和 os.Exit 都只該出現在 main 裡；在其他函式裡回傳錯誤。</li>
+      <li>常見的慣例：1 是一般錯誤，2 是用法錯誤（flag 自己也這樣用），被訊號中斷時是 128 加上訊號編號，所以 Ctrl-C（SIGINT 是 2）是 130。</li>
+    </ul>
+    <p>注意：<code>go run</code> 會把程式的非 0 結束碼一律變成 1，另外印一行 <code>exit status N</code>。要檢查真正的結束碼，先 go build 再執行：</p>
+    <pre class="out"><code>$ go run ./chapters/21-cli top -n 0; echo "結束碼 $?"
+tally top：-n 至少要是 1
+exit status 2
+結束碼 1
+$ ./tally top -n 0; echo "結束碼 $?"
+tally top：-n 至少要是 1
+結束碼 2</code></pre>
+  </section>
+
+  <section aria-labelledby="config">
+    <h2 id="config">6. 旗標、環境變數、預設值</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 172" role="img" aria-label="三層設定由上到下：命令列旗標 -tax 10 最優先，其次是環境變數 TALLY_TAX=8，最後是程式內建的預設值 5">
+        <title>越上面越優先</title>
+        <rect class="acc" x="40" y="16" width="360" height="36" rx="8"/>
+        <text class="sm" x="60" y="39">命令列旗標</text>
+        <text class="sm mono" x="250" y="39">-tax 10</text>
+        <rect class="soft" x="40" y="62" width="360" height="36" rx="8"/>
+        <text class="sm" x="60" y="85">環境變數</text>
+        <text class="sm mono" x="250" y="85">TALLY_TAX=8</text>
+        <rect class="soft" x="40" y="108" width="360" height="36" rx="8"/>
+        <text class="sm" x="60" y="131">程式內建的預設值</text>
+        <text class="sm mono" x="250" y="131">5</text>
+        <path class="wire acc-ln" d="M432 140 V30"/>
+        <path class="tip acc-tip" d="M432 18 L426 30 L438 30 Z"/>
+        <text class="sm t-acc" x="446" y="90">優先</text>
+        <text class="sm" x="220" y="166" text-anchor="middle">上面沒有給，才輪到下一層</text>
+      </svg>
+      <figcaption>每次執行都不一樣的值用旗標；同一台機器、同一個環境固定的值用環境變數；兩個都沒給就用內建的預設值。</figcaption>
+    </figure>
+    <p>同一個設定常常有三個來源。慣例是越靠近這一次執行的越優先：這次在命令列寫的，蓋過這台機器設定的環境變數，再蓋過程式內建的值。用 flag 做起來只要一個小技巧：<strong>用環境變數算出旗標的預設值</strong>。命令列有給，flag 會蓋掉它；沒給，就留著環境變數或內建的值：</p>
+    <pre class="code" data-src="chapters/21-cli/input.go#envInt"><code>func envInt(getenv func(string) string, key string, def int) (int, error) {
+	v := getenv(key)
+	if v == "" {
+		return def, nil
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil {
+		return 0, fmt.Errorf("環境變數 %s=%q 不是整數", key, v)
+	}
+	return n, nil
+}</code></pre>
+    <pre class="out" data-example="chapters/21-cli#Example_config"><code>$ TALLY_TAX=10 tally total
+合計 340 元，含稅 10% 共 374 元
+結束碼 0
+$ TALLY_TAX=10 tally total -tax 0
+合計 340 元，含稅 0% 共 340 元
+結束碼 0
+$ TALLY_TAX=十 tally total
+stderr｜tally total：環境變數 TALLY_TAX="十" 不是整數
+結束碼 2</code></pre>
+    <ul class="notes">
+      <li>run 讀環境變數用的是傳進來的 <code>getenv</code>，main 接上 os.Getenv，測試接上一個 map。另一種做法是在測試裡用 <code>t.Setenv</code>，但它會改到整個程式的環境，不能和 t.Parallel 一起用。</li>
+      <li>os.Getenv 分不出「沒設定」和「設成空字串」，需要分的話用 <code>os.LookupEnv</code>，它多回傳一個 bool。</li>
+      <li>環境變數的值看不懂時，錯誤訊息要說出變數名稱和值：使用者通常早就忘了自己設過它。</li>
+      <li>密碼、token 這類秘密不要用旗標傳：同一台機器的其他使用者可能用 ps 看到完整的指令。用環境變數或檔案。</li>
+      <li>設定很多時，常見的第四層是設定檔，放在環境變數和預設值之間。讀 JSON 設定檔見「<a href="23-json.html">JSON 與資料編碼</a>」那一章。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="signal">
+    <h2 id="signal">7. Ctrl-C 與 os/signal</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 220" role="img" aria-label="按下 Ctrl-C，作業系統送出 SIGINT，signal.NotifyContext 取消 ctx，run 在讀下一行之前發現並收尾，最後以結束碼 130 結束；第二次按 Ctrl-C 時，stop 已經恢復預設行為，程式直接結束">
+        <title>Ctrl-C 變成 ctx 的取消</title>
+        <rect class="soft" x="40" y="12" width="300" height="30" rx="6"/>
+        <text class="sm" x="190" y="32" text-anchor="middle">使用者按下 Ctrl-C</text>
+        <path class="wire" d="M190 42 V46"/>
+        <path class="tip" d="M190 54 L184 44 L196 44 Z"/>
+        <rect class="soft" x="40" y="54" width="300" height="30" rx="6"/>
+        <text class="sm" x="190" y="74" text-anchor="middle">作業系統送出 SIGINT</text>
+        <path class="wire" d="M190 84 V88"/>
+        <path class="tip" d="M190 96 L184 86 L196 86 Z"/>
+        <rect class="acc" x="40" y="96" width="300" height="30" rx="6"/>
+        <text class="sm" x="190" y="116" text-anchor="middle">NotifyContext 取消 ctx</text>
+        <path class="wire" d="M190 126 V130"/>
+        <path class="tip" d="M190 138 L184 128 L196 128 Z"/>
+        <rect class="soft" x="40" y="138" width="300" height="30" rx="6"/>
+        <text class="sm" x="190" y="158" text-anchor="middle">run 讀下一行之前發現，收尾</text>
+        <path class="wire" d="M190 168 V172"/>
+        <path class="tip" d="M190 180 L184 170 L196 170 Z"/>
+        <rect class="acc" x="40" y="180" width="300" height="30" rx="6"/>
+        <text class="sm" x="190" y="200" text-anchor="middle">結束碼 130</text>
+        <rect class="hot" x="356" y="96" width="108" height="72" rx="8"/>
+        <text class="sm" x="410" y="120" text-anchor="middle">再按一次</text>
+        <text class="sm mono" x="410" y="140" text-anchor="middle">Ctrl-C</text>
+        <text class="sm" x="410" y="160" text-anchor="middle">直接結束</text>
+      </svg>
+      <figcaption>訊號變成 ctx 的取消，程式就能用第 18 章的方法收尾。第一次之後恢復預設行為，卡住時再按一次還是能結束。</figcaption>
+    </figure>
+    <p>按下 Ctrl-C，作業系統送給程式一個 SIGINT 訊號。Go 程式預設收到它就立刻結束，defer 不會執行，暫存檔留在那裡、寫到一半的檔案停在一半。<code>signal.NotifyContext</code>（Go 1.16 起）把訊號換成 <a href="18-context.html">ctx 的取消</a>，程式就能自己決定怎麼收尾。第 5 節的 main 已經這樣做了：</p>
+    <ul class="notes">
+      <li>監聽 <code>os.Interrupt</code>（Ctrl-C）和 <code>syscall.SIGTERM</code>（<code>kill</code> 指令、容器平台要關閉程式時送的訊號）。SIGKILL 沒辦法攔截，程式一定會被砍掉。</li>
+      <li>第一次收到訊號之後呼叫 stop，恢復預設行為：收尾卡住時，使用者再按一次 Ctrl-C 還是能結束程式。</li>
+      <li>Go 1.26 起，NotifyContext 取消時會附上原因，<code>context.Cause(ctx)</code> 的訊息是 <code>interrupt signal received</code>，說明收到的是哪個訊號（<a href="18-context.html#cause">18 章</a>）。</li>
+    </ul>
+    <p>ctx 被取消不會讓任何程式碼自動停下來，要有人去看它。readSalesFrom 每讀一行先看一次 ctx（第 4 節），取消之後回傳原因，fail 看到 ctx 已經取消，回傳 130。在 Example 裡用一個已經取消的 ctx 模擬：</p>
+    <pre class="out" data-example="chapters/21-cli#Example_interrupted"><code>$ tally total
+stderr｜tally total：interrupt signal received
+結束碼 130</code></pre>
+    <p>真的訊號也測得到：測試對自己的程式送一個 SIGINT，NotifyContext 把它攔下來，run 讀下一行時發現，回傳 130：</p>
+    <pre class="code" data-src="chapters/21-cli/signal_unix_test.go#TestInterruptSignal"><code>func TestInterruptSignal(t *testing.T) {
+	ctx, stop := signal.NotifyContext(t.Context(), os.Interrupt)
+	defer stop()
+
+	stdin, w := io.Pipe()
+	var stderr strings.Builder
+	done := make(chan int)
+	go func() {
+		done &lt;- run(ctx, []string{"total"}, sys{
+			stdin: stdin, stdout: io.Discard, stderr: &amp;stderr,
+			getenv: func(string) string { return "" },
+		})
+	}()
+
+	fmt.Fprintln(w, "排骨飯 90") // 等 run 讀走第一行才會回來
+	if err := syscall.Kill(syscall.Getpid(), syscall.SIGINT); err != nil {
+		t.Fatal(err)
+	}
+	&lt;-ctx.Done()
+	fmt.Fprintln(w, "雞腿飯 100") // run 讀到這一行之前先看 ctx，就停下來了
+	w.Close()
+
+	if code := &lt;-done; code != exitInterrupted || !strings.Contains(stderr.String(), "interrupt signal received") {
+		t.Errorf("結束碼 %d，stderr %q；want 130 而且說明收到 interrupt", code, stderr.String())
+	}
+}</code></pre>
+    <ul class="notes">
+      <li>這個測試檔開頭寫了 <code>//go:build unix</code>，只在 Unix 系統上編譯。Windows 也會把 Ctrl-C 送成 os.Interrupt，但沒有 syscall.Kill 可以在測試裡模擬。</li>
+      <li>io.Pipe 是同步的：寫進去的一行要等 run 讀走才回來，所以送訊號的時間點是確定的，測試不會時好時壞。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="pitfalls">
+    <h2 id="pitfalls">常見錯誤</h2>
+    <h3 id="pit-exit-deep">1. 在 main 以外呼叫 os.Exit 或 log.Fatal</h3>
+    <p>defer 不會執行，檔案沒關、暫存檔沒刪；而且呼叫它的函式沒辦法測試，一測整個測試程式就結束了。函式回傳錯誤，只有 main 決定結束碼（第 5 節）。</p>
+
+    <h3 id="pit-stdout-err">2. 錯誤訊息寫到 stdout</h3>
+    <p>結果導到檔案或接到下一個程式時，錯誤訊息混進資料裡。stdout 只放結果（<a href="02-input-output.html#pit-stderr">02 章</a>、練習 5）。</p>
+
+    <h3 id="pit-exit-zero">3. 失敗了還回傳 0</h3>
+    <p>腳本和 CI 以為成功了，繼續做下一步。每一條失敗的路都要回傳非 0 的結束碼；使用者自己要求的 -h 才回傳 0。</p>
+
+    <h3 id="pit-flag-order">4. 旗標寫在檔名後面</h3>
+    <p>Go 的 flag 遇到第一個不是旗標的參數就停，後面的 <code>-tax 10</code> 變成檔名（第 2 節）。說明文件裡的用法要把旗標寫在前面。</p>
+
+    <h3 id="pit-go-run">5. 用 go run 檢查結束碼</h3>
+    <p>go run 把非 0 的結束碼都變成 1。檢查結束碼用編譯出來的執行檔（第 5 節）。</p>
+
+    <h3 id="pit-global-flag">6. 在要測試的程式碼裡用全域的 flag</h3>
+    <p>全域的 flag.CommandLine 整個程式只有一份：同一個旗標定義兩次會 panic（flag redefined），解析失敗會直接結束測試程式。用 flag.NewFlagSet 加 ContinueOnError，每次呼叫都是新的。</p>
+
+    <h3 id="pit-ignore-ctx">7. 攔了 Ctrl-C 卻沒有人檢查 ctx</h3>
+    <p>NotifyContext 攔下訊號之後，預設的「立刻結束」就不會發生了。如果沒有任何地方檢查 ctx，按 Ctrl-C 等於沒按。長時間的迴圈、等待都要看 ctx（第 7 節、練習 3）。</p>
+  </section>
+
+  <section aria-labelledby="java">
+    <h2 id="java">從 Java 來的你</h2>
+    <div class="table-wrap">
+      <table class="vs">
+        <thead><tr><th scope="col">主題</th><th scope="col">Java</th><th scope="col">Go</th></tr></thead>
+        <tbody>
+          <tr><th scope="row">參數</th><td class="java"><code>main(String[] args)</code>，args[0] 是第一個參數</td><td><code>os.Args</code>，os.Args[0] 是程式本身，參數從 [1] 開始</td></tr>
+          <tr><th scope="row">解析旗標</th><td class="java">標準庫沒有，常用第三方函式庫</td><td>標準庫的 <code>flag</code></td></tr>
+          <tr><th scope="row">結束碼</th><td class="java"><code>System.exit(code)</code></td><td><code>os.Exit(code)</code>，不執行 defer</td></tr>
+          <tr><th scope="row">環境變數</th><td class="java"><code>System.getenv</code></td><td><code>os.Getenv</code>、<code>os.LookupEnv</code></td></tr>
+          <tr><th scope="row">標準輸入輸出</th><td class="java"><code>System.in</code>、<code>System.out</code>、<code>System.err</code></td><td><code>os.Stdin</code>、<code>os.Stdout</code>、<code>os.Stderr</code></td></tr>
+          <tr><th scope="row">關閉前收尾</th><td class="java"><code>Runtime.addShutdownHook</code></td><td><code>signal.NotifyContext</code> 加上檢查 ctx</td></tr>
+          <tr><th scope="row">發佈</th><td class="java">jar 加上要先安裝的 JVM</td><td>一個執行檔，直接複製過去就能跑</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>Go 很適合寫命令列工具的原因主要是最後一列：go build 出來的是單一執行檔，啟動不用暖機，搭配交叉編譯（「工具鏈」那一章）可以一次做出各個作業系統的版本。</p>
+  </section>
+
+  <section aria-labelledby="exercises">
+    <h2 id="exercises">練習</h2>
+    <p>題目在 <code>exercises/21-cli/exercises.go</code>。每一題都和本章的 run 一樣，不碰 os.Args、os.Exit，參數和輸入輸出都從函式的參數進來。</p>
+    <pre class="shell"><code>go test ./exercises/21-cli/                      <span class="c"># 跑全部練習</span>
+go test ./exercises/21-cli/ -run TestLoadConfig  <span class="c"># 只跑一題</span>
+go test -tags solution ./exercises/21-cli/       <span class="c"># 跑參考解答</span></code></pre>
+    <ol class="exercises">
+      <li>
+        <h3><span class="level l1">入門</span>練習 1：訂位單</h3>
+        <p>把訂位的參數解析成 Booking。</p>
+        <pre class="code" data-src="exercises/21-cli/doc.go#Booking"><code>type Booking struct {
+	Name    string // -name，一定要有
+	People  int    // -people，預設 2，1 到 12 人
+	Time    string // -time，預設 "18:00"，格式是 15:04
+	Outdoor bool   // -outdoor，要不要坐戶外
+	Note    string // 旗標後面剩下的參數，用一個空格接起來
+}</code></pre>
+        <pre class="code" data-src="exercises/21-cli/exercises.go#ParseBooking"><code>func ParseBooking(args []string) (Booking, error) {
+	// TODO: 實作
+	return Booking{}, nil
+}</code></pre>
+        <p>測試：<code>TestParseBooking</code>。測試會檢查函式有沒有偷偷印東西到 os.Stderr。</p>
+        <details><summary>提示</summary><p><code>fs.StringVar(&amp;b.Name, …)</code> 這類 Var 函式可以直接寫進 struct 的欄位。<code>fs.SetOutput(io.Discard)</code> 讓 flag 不印東西。時間用 <code>time.Parse("15:04", b.Time)</code> 檢查格式。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l2">進階</span>練習 2：點餐機的設定</h3>
+        <p>三個設定、三層來源。</p>
+        <pre class="code" data-src="exercises/21-cli/doc.go#Config"><code>type Config struct {
+	Port  int    // -port，環境變數 KIOSK_PORT，預設 8080
+	Shop  string // -shop，環境變數 KIOSK_SHOP，預設 "總店"
+	Debug bool   // -debug，環境變數 KIOSK_DEBUG（strconv.ParseBool 認得的值），預設 false
+}</code></pre>
+        <pre class="code" data-src="exercises/21-cli/exercises.go#LoadConfig"><code>func LoadConfig(args []string, getenv func(string) string) (Config, error) {
+	// TODO: 實作
+	return Config{}, nil
+}</code></pre>
+        <p>測試：<code>TestLoadConfig</code>。</p>
+        <details><summary>提示</summary><p>先放內建預設值，再用環境變數蓋過去，最後把結果當成旗標的預設值解析（第 6 節）。KIOSK_DEBUG 用 <code>strconv.ParseBool</code>。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l2">進階</span>練習 3：按下 Ctrl-C 就停</h3>
+        <p>一行一行轉抄，取消之後一行都不再寫。</p>
+        <pre class="code" data-src="exercises/21-cli/exercises.go#Relay"><code>func Relay(ctx context.Context, r io.Reader, w io.Writer) (int, error) {
+	// TODO: 實作
+	return 0, nil
+}</code></pre>
+        <p>測試：<code>TestRelay</code>。測試用一個特別的 Writer，在收到第 2 行時取消 ctx。</p>
+        <details><summary>提示</summary><p>和 readSalesFrom 一樣：Scanner 每讀到一行，先檢查 <code>ctx.Err()</code>，再寫。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l3">挑戰</span>練習 4：自己的 wc</h3>
+        <p>數行數或字數，一個檔案壞了不影響其他檔案，但結束碼要反映出來。</p>
+        <pre class="code" data-src="exercises/21-cli/exercises.go#Count"><code>func Count(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
+	// TODO: 實作
+	return 0
+}</code></pre>
+        <p>測試：<code>TestCount</code>。</p>
+        <details><summary>提示</summary><p>把「數一個輸入」寫成獨立的函式，裡面 defer Close。數字數可以用 <code>sc.Split(bufio.ScanWords)</code>。有任何一個檔案失敗就把結束碼記成 1，迴圈繼續跑。</p></details>
+      </li>
+      <li>
+        <h3><span class="level fix">找錯</span>練習 5：排行榜的用法錯誤</h3>
+        <p>用對的時候沒問題，用錯的時候 shell 卻以為成功了。</p>
+        <pre class="code" data-src="exercises/21-cli/exercises.go#Report"><code>func Report(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("report", flag.ContinueOnError)
+	n := fs.Int("n", 3, "最多列出幾個")
+	if err := fs.Parse(args); err != nil {
+		fmt.Fprintln(stdout, err)
+		return 1
+	}
+	if fs.NArg() == 0 {
+		fmt.Fprintln(stdout, "report：至少要給一個品項")
+		return 0
+	}
+	for i, item := range fs.Args() {
+		if i == *n {
+			break
+		}
+		fmt.Fprintln(stdout, item)
+	}
+	return 0
+}</code></pre>
+        <p>測試：<code>TestReport</code>。</p>
+        <details><summary>提示</summary><p>常見錯誤 2 和 3，另外 flag 自己的訊息也要寫到 stderr 參數，而不是真的 os.Stderr。</p></details>
+      </li>
+    </ol>
+    <p><a href="https://github.com/xinqilin/GO-Playground/blob/main/exercises/21-cli/solution.go">參考解答</a>：先自己寫完再看。測試通過的寫法都是對的。</p>
+  </section>
+
+  <section aria-labelledby="recap">
+    <h2 id="recap">重點回顧</h2>
+    <ul class="recap">
+      <li>os.Args[0] 是程式本身；引號、萬用字元是 shell 處理的。main 只把 os.Args[1:] 交給 run。</li>
+      <li>用 flag.NewFlagSet 加 ContinueOnError、SetOutput，flag 才能測試；errors.Is(err, flag.ErrHelp) 分辨 -h。</li>
+      <li>flag 解析到第一個不是旗標的參數就停，旗標寫在前面。</li>
+      <li>子命令：switch 看第一個參數，每個子命令一個 FlagSet。</li>
+      <li>沒給檔名或檔名是 - 時讀標準輸入，工具就能接在管線裡。</li>
+      <li>結果寫 stdout、錯誤寫 stderr；0 成功、1 錯誤、2 用法錯誤、130 被 Ctrl-C 中斷。</li>
+      <li>os.Exit 和 log.Fatal 不執行 defer，只在 main 裡用；go run 會改掉結束碼。</li>
+      <li>設定的優先順序：旗標 &gt; 環境變數 &gt; 預設值，用環境變數算出旗標的預設值就做得到。</li>
+      <li>signal.NotifyContext 把 Ctrl-C 變成 ctx 的取消，程式裡要有人檢查 ctx。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="further">
+    <h2 id="further">延伸閱讀</h2>
+    <ul class="notes">
+      <li>套件文件：<a href="https://pkg.go.dev/flag">flag</a>、<a href="https://pkg.go.dev/os">os</a>、<a href="https://pkg.go.dev/os/signal">os/signal</a>。</li>
+      <li>Go 1.26 版本說明：<a href="https://go.dev/doc/go1.26#ossignalpkgossignal">os/signal</a>（NotifyContext 的取消原因）。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="run">
+    <h2 id="run">動手跑</h2>
+    <p class="label">在 repo 根目錄</p>
+    <pre class="shell"><code>printf '排骨飯 90\n雞腿飯 100\n' | go run ./chapters/21-cli total   <span class="c"># 直接用 tally</span>
+go build -o tally ./chapters/21-cli                                <span class="c"># 編譯成執行檔，才看得到真正的結束碼</span>
+go test ./chapters/21-cli                                          <span class="c"># 驗證頁面上的每一段輸出</span>
+go test ./exercises/21-cli/                                        <span class="c"># 做練習</span></code></pre>
+    <p><a href="https://github.com/xinqilin/GO-Playground/tree/main/chapters/21-cli">在 GitHub 看本章完整程式碼</a>，或看<a href="https://github.com/xinqilin/GO-Playground/tree/main/exercises/21-cli">練習題</a>。</p>
+  </section>
+</main>
+
+<nav class="pager" aria-label="章節導覽">
+  <a class="prev" href="20-files.html">← 20 檔案與 I/O</a>
+  <a class="home" href="index.html">目錄</a>
+  <a class="next" href="22-time.html">22 時間 →</a>
+</nav>
+</body>
+</html>
