@@ -224,6 +224,9 @@ table.vs { width: 100%; border-collapse: collapse; font-size: 16px; line-height:
 .cover h1 { margin: 0; font-size: 52px; line-height: 1.1; text-wrap: balance; }
 .cover .lede { margin: 18px 0 0; max-width: 36rem; font-size: 20px; line-height: 1.7; color: var(--muted); }
 .cover .start { display: inline-block; margin-top: 20px; font-weight: 700; }
+.cover .starts { display: grid; justify-items: start; gap: 8px; margin: 20px 0 0; }
+.cover .starts .start { margin-top: 0; }
+.cover .eyebrow span { white-space: nowrap; }
 .route { margin: 28px 0 0; }
 .route svg { display: block; width: 100%; height: auto; color: var(--fg); font-family: var(--font-body); }
 
