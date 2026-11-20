@@ -75,6 +75,7 @@ go test -race -tags solution ./...          # 全部測試，練習題改用參�
 | 21 | 命令列工具 | [看圖](https://bill-lin.dev/GO-Playground/21-cli.html) | [chapters/21-cli](chapters/21-cli) |
 | 22 | 時間 | [看圖](https://bill-lin.dev/GO-Playground/22-time.html) | [chapters/22-time](chapters/22-time) |
 | 23 | JSON 與資料編碼 | [看圖](https://bill-lin.dev/GO-Playground/23-json.html) | [chapters/23-json](chapters/23-json) |
+| 24 | 文字處理 | [看圖](https://bill-lin.dev/GO-Playground/24-text.html) | [chapters/24-text](chapters/24-text) |
 | 22 | 標準庫精選 | [看圖](https://bill-lin.dev/GO-Playground/22-stdlib.html) | [chapters/22-stdlib](chapters/22-stdlib) |
 | 26 | HTTP 服務 | [看圖](https://bill-lin.dev/GO-Playground/26-http.html) | [chapters/26-http](chapters/26-http) |
 
