@@ -98,7 +98,7 @@ go test -race -tags solution ./...          # 全部測試，練習題改用參�
 | P1 | 費氏數列：五種寫法、整數溢位、math/big、benchmark | [看圖](https://bill-lin.dev/GO-Playground/project-fibonacci.html) | [projects/fibonacci](projects/fibonacci) |
 | P2 | 字詞統計：多檔輸入、中英文斷詞、排行、自訂旗標型別 | [看圖](https://bill-lin.dev/GO-Playground/project-wordcount.html) | [projects/wordcount](projects/wordcount) |
 | P3 | 並行網址檢查器：worker pool、逾時、限速、退避重試、synctest | [看圖](https://bill-lin.dev/GO-Playground/project-urlchecker.html) | [projects/urlchecker](projects/urlchecker) |
-| P4 | 待辦事項 API：REST、middleware、優雅關機 | [看圖](https://bill-lin.dev/GO-Playground/project-todoapi.html) | [projects/todoapi](projects/todoapi) |
+| P4 | 待辦事項 API：三層架構、驗證、並行修改、原子存檔、優雅關機 | [看圖](https://bill-lin.dev/GO-Playground/project-todoapi.html) | [projects/todoapi](projects/todoapi) |
 
 ## 每一章的結構
 
