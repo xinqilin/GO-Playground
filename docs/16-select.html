@@ -73,7 +73,7 @@
       </svg>
       <figcaption>select 一次等好幾個 channel 操作，哪一個先能進行，就執行那一個 case。</figcaption>
     </figure>
-    <p>上一章的收和送，一次只能等一個 channel。<strong>select</strong> 長得像 switch，但每個 case 都是一個 channel 的送或收，它會等到其中一個能進行，然後只執行那一個：</p>
+    <p><a href="15-channels.html">上一章</a>的收和送，一次只能等一個 channel。<strong>select</strong> 長得像 switch，但每個 case 都是一個 channel 的送或收，它會等到其中一個能進行，然後只執行那一個：</p>
     <pre class="code" data-src="chapters/16-select/select.go#readyDemo"><code>func readyDemo() {
 	pickup := make(chan string, 1)
 	delivery := make(chan string, 1)
@@ -195,7 +195,7 @@ func deadlineDemo() {
     <p class="label">輸出</p>
     <pre class="out" data-example="chapters/16-select#Example_deadlineDemo"><code>[排骨飯 雞腿飯]</code></pre>
     <p>channel 裡的兩份收完之後，ch 沒有 close、也沒有新的值，select 只剩 deadline 能等，20 毫秒一到就回傳。如果把 <code>time.After(limit)</code> 寫進 select 裡，每收到一份就重新計時，只要來源一直有新的值進來，就永遠不會因為時間到而停下來（練習 7）。</p>
-    <p>和時間有關的行為，用真的時間測試又慢又不穩定。上一章用過的 <code>testing/synctest</code> 在泡泡裡提供<strong>假時間</strong>：time.Sleep、time.After 都不會真的等，只要泡泡裡所有的 goroutine 都在等，時間就直接跳到下一個計時器響的時刻，結果每次都一樣：</p>
+    <p>和時間有關的行為，用真的時間測試又慢又不穩定。<a href="15-channels.html">上一章</a>用過的 <code>testing/synctest</code> 在泡泡裡提供<strong>假時間</strong>：time.Sleep、time.After 都不會真的等，只要泡泡裡所有的 goroutine 都在等，時間就直接跳到下一個計時器響的時刻，結果每次都一樣：</p>
     <pre class="code" data-src="chapters/16-select/main_test.go#TestCollectUntilIsOverallDeadline"><code>func TestCollectUntilIsOverallDeadline(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		ch := make(chan string, 10)
@@ -221,7 +221,7 @@ func deadlineDemo() {
       <p class="tag">深入：第一次讀可以先跳過</p>
       <h3 id="timers">2.1 time.After、Timer 與 Go 1.23</h3>
       <p>Go 1.23 以前，用 time.After 建立、還沒響的計時器，要等到它響了才會被回收，所以在跑很多圈的迴圈裡用 time.After，會累積大量的計時器，官方文件當時建議改用 <code>time.NewTimer</code>，不用時呼叫 Stop。Go 1.23 起，沒有人再參考的計時器就算沒有 Stop 也會被回收，time.After 的文件改成「沒有理由在 time.After 夠用時改用 NewTimer」。這個新行為只在 go.mod 寫 go 1.23 以上時生效，舊文章裡的警告是寫給以前的版本看的。</p>
-      <p>需要重複使用同一個計時器時，用 <code>t := time.NewTimer(d)</code>，在 select 裡等 <code>t.C</code>，要重新計時就呼叫 <code>t.Reset(d)</code>。Go 1.23 起，Reset 之後保證不會從 t.C 收到舊的那次計時，以前必須先 Stop、再把 t.C 清空，現在不用了。每隔固定時間就要做一次事，用 <code>time.Ticker</code>；「時間」那一章會再細談。</p>
+      <p>需要重複使用同一個計時器時，用 <code>t := time.NewTimer(d)</code>，在 select 裡等 <code>t.C</code>，要重新計時就呼叫 <code>t.Reset(d)</code>。Go 1.23 起，Reset 之後保證不會從 t.C 收到舊的那次計時，以前必須先 Stop、再把 t.C 清空，現在不用了。每隔固定時間就要做一次事，用 <code>time.Ticker</code>；<a href="22-time.html#timers">22 章「時間」</a>會再細談。</p>
     </section>
   </section>
 

@@ -234,7 +234,7 @@ func main() {
     <pre class="out" data-example="chapters/pre-2-values#Example_reassign"><code>0
 1
 2</code></pre>
-    <p>在數學課，<code>count = count + 1</code> 是不可能成立的式子。但在程式裡，<code>=</code> 叫做<strong>指定</strong>（assignment），意思是一個動作：先把右邊算出來，再把結果放進左邊的盒子。所以這一行讀作「拿出 count 目前的值，加 1，再放回 count」。每執行一次，count 就多 1。這種「每次加 1 來數數」的變數叫<strong>計數器</strong>，先修 3 的迴圈會一直用到。</p>
+    <p>在數學課，<code>count = count + 1</code> 是不可能成立的式子。但在程式裡，<code>=</code> 叫做<strong>指定</strong>（assignment），意思是一個動作：先把右邊算出來，再把結果放進左邊的盒子。所以這一行讀作「拿出 count 目前的值，加 1，再放回 count」。每執行一次，count 就多 1。這種「每次加 1 來數數」的變數叫<strong>計數器</strong>，<a href="pre-3-decisions.html">先修 3</a> 的迴圈會一直用到。</p>
     <p>注意順序：右邊用的是<strong>執行這一行之前</strong>的值。第一次 count 是 0，算出 1 放回去；第二次 count 已經是 1，算出 2。</p>
 
     <h3>簡寫</h3>
@@ -482,7 +482,7 @@ true</code></pre>
       <li>第二行：消費 120 元已經滿 100，但不是會員；<code>&amp;&amp;</code> 要兩邊都成立，所以是 false，不打折。</li>
       <li>第三行：<code>!member</code> 是「不是會員」，member 是 false，反過來就是 true。</li>
     </ul>
-    <p>把中文的規則翻成程式時，一個條件一個條件寫，再用 <code>&amp;&amp;</code>、<code>||</code> 接起來。「12 歲以下」要想清楚包不包含 12：題目說「未滿 12 歲」就是 <code>age &lt; 12</code>，說「12 歲以下」通常是 <code>age &lt;= 12</code>。邊界上的那一個值，是最容易寫錯的地方，練習 3 的測試就特別檢查了 11、12、64、65 這幾個年齡。下一章，這些 true 和 false 會用來決定程式要走哪一條路。</p>
+    <p>把中文的規則翻成程式時，一個條件一個條件寫，再用 <code>&amp;&amp;</code>、<code>||</code> 接起來。「12 歲以下」要想清楚包不包含 12：題目說「未滿 12 歲」就是 <code>age &lt; 12</code>，說「12 歲以下」通常是 <code>age &lt;= 12</code>。邊界上的那一個值，是最容易寫錯的地方，練習 3 的測試就特別檢查了 11、12、64、65 這幾個年齡。<a href="pre-3-decisions.html">下一章</a>，這些 true 和 false 會用來決定程式要走哪一條路。</p>
   </section>
 
   <section aria-labelledby="trace">
@@ -510,7 +510,7 @@ true</code></pre>
     <p class="label">輸出</p>
     <pre class="out" data-example="chapters/pre-2-values#Example_traceMe"><code>7 1</code></pre>
     <p>追蹤時最常犯的錯，是用了「看起來」的值，而不是「這時候」的值。最後一行的 x 已經是 7，不是一開始的 3。只要每一步都回頭查表格上一列的值，就不會出錯。</p>
-    <p>追蹤表看起來很笨，卻是寫程式的人一輩子都在用的技巧。程式的結果和你預期的不同時，就是腦中的追蹤表和電腦實際做的事不一樣了；找出是哪一列開始不同，就找到了 bug。程式更長的時候，可以在中間加幾行 <code>fmt.Println</code> 印出變數，讓電腦替你填表格，先修 4 會再練習這個方法。練習 4 是一題追蹤題。</p>
+    <p>追蹤表看起來很笨，卻是寫程式的人一輩子都在用的技巧。程式的結果和你預期的不同時，就是腦中的追蹤表和電腦實際做的事不一樣了；找出是哪一列開始不同，就找到了 bug。程式更長的時候，可以在中間加幾行 <code>fmt.Println</code> 印出變數，讓電腦替你填表格，<a href="pre-4-problems.html">先修 4</a> 會再練習這個方法。練習 4 是一題追蹤題。</p>
   </section>
 
   <section aria-labelledby="pitfalls">
@@ -540,7 +540,7 @@ true</code></pre>
     <pre class="shell"><code>go test ./exercises/pre-2-values/                    <span class="c"># 跑全部練習</span>
 go test ./exercises/pre-2-values/ -run TestElapsed   <span class="c"># 只跑一題</span>
 go test -tags solution ./exercises/pre-2-values/     <span class="c"># 跑參考解答</span></code></pre>
-    <p>這幾題的函式會用 <code>return</code> 一次交回好幾個值，例如 <code>return 33, 1</code>，順序就是函式第一行括號裡寫的順序。函式的寫法在先修 4 會正式介紹。</p>
+    <p>這幾題的函式會用 <code>return</code> 一次交回好幾個值，例如 <code>return 33, 1</code>，順序就是函式第一行括號裡寫的順序。函式的寫法在<a href="pre-4-problems.html">先修 4</a> 會正式介紹。</p>
     <ol class="exercises">
       <li>
         <h3><span class="level l1">入門</span>練習 1：經過幾分鐘</h3>

@@ -291,7 +291,7 @@ func (c *Cache[K, V]) removeLocked(el *list.Element) {
       <li><strong>用到時才丟（lazy）</strong>：不需要背景的 goroutine 定時掃描，程式簡單，也沒有要關閉的東西。代價是過期但沒人查的資料會繼續佔著位置，Len 和 Keys 也算它們；有 LRU 的上限，它們最後還是會被擠掉。延伸挑戰 3 加上背景清理。</li>
       <li><strong>!time.Now().Before(expires)</strong>：「現在不早於期限」，也就是剛好滿 10 分鐘就算過期。TestTTL 測了差 1 奈秒和剛好滿兩個邊界。</li>
       <li><strong>單調時鐘</strong>：time.Now() 帶著單調時鐘的讀數，Before 會用它比較。有人把系統時間往回調一小時，快取的期限也不會亂掉（<a href="22-time.html#compare">22 章</a>）。</li>
-      <li><strong>不用注入時鐘</strong>：程式直接呼叫 time.Now()。在 synctest 的泡泡裡，time.Now 和 time.Sleep 都是假的，十分鐘一瞬間就過了，而且精確到奈秒。專題 4 注入 now 函式，是因為輸出要印出固定的日期；這裡只在乎經過多久，用 synctest 就夠了。</li>
+      <li><strong>不用注入時鐘</strong>：程式直接呼叫 time.Now()。在 synctest 的泡泡裡，time.Now 和 time.Sleep 都是假的，十分鐘一瞬間就過了，而且精確到奈秒。<a href="project-todoapi.html">專題 4</a> 注入 now 函式，是因為輸出要印出固定的日期；這裡只在乎經過多久，用 synctest 就夠了。</li>
     </ul>
   </section>
 

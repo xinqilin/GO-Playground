@@ -94,8 +94,8 @@ func passFailDemo() {
     <pre class="out" data-example="chapters/pre-3-decisions#Example_passFailDemo"><code>72 分：及格
 59 分：不及格
 60 分：及格</code></pre>
-    <p><code>if</code> 後面接一個條件，也就是先修 2 學過、結果是 true 或 false 的比較。條件成立（true）就執行緊接著的大括號 <code>{ … }</code>；不成立（false）就執行 <code>else</code> 後面的大括號。兩邊只會執行其中一邊，不會兩邊都做，也不會兩邊都不做。</p>
-    <p>這裡第一次出現帶參數的函式：<code>passFail(72)</code> 把 72 交給 passFail，函式裡的 <code>score</code> 就是 72。同一段判斷用三個不同的分數各跑一次，就看得到三種結果。函式的寫法在先修 4 會詳細介紹，現在只要知道括號裡的值會放進 score 就好。</p>
+    <p><code>if</code> 後面接一個條件，也就是<a href="pre-2-values.html">先修 2</a> 學過、結果是 true 或 false 的比較。條件成立（true）就執行緊接著的大括號 <code>{ … }</code>；不成立（false）就執行 <code>else</code> 後面的大括號。兩邊只會執行其中一邊，不會兩邊都做，也不會兩邊都不做。</p>
+    <p>這裡第一次出現帶參數的函式：<code>passFail(72)</code> 把 72 交給 passFail，函式裡的 <code>score</code> 就是 72。同一段判斷用三個不同的分數各跑一次，就看得到三種結果。函式的寫法在<a href="pre-4-problems.html">先修 4</a> 會詳細介紹，現在只要知道括號裡的值會放進 score 就好。</p>
     <p>60 分剛好及格，因為條件是 <code>&gt;=</code>（大於或等於）。如果寫成 <code>&gt;</code>，60 分就不及格了。測試條件時，一定要試<strong>剛好在邊界上</strong>的值。</p>
 
     <h3>只有 if，沒有 else</h3>
@@ -218,7 +218,7 @@ func gradeDemo() {
 }</code></pre>
     <p class="label">輸出</p>
     <pre class="out" data-example="chapters/pre-3-decisions#Example_wrongGradeDemo"><code>95 丙</code></pre>
-    <p>95 分拿到「丙」。因為第一個問的是 <code>score &gt;= 60</code>，95 分當然成立，於是就停在這裡，後面的條件根本沒機會被問到。這種程式能編譯、能執行、沒有任何錯誤訊息，只是答案錯了，正是先修 1 說的邏輯錯誤。規則是：<strong>範圍大的條件會蓋住範圍小的</strong>，所以要從最嚴格的條件（90 以上）問起。</p>
+    <p>95 分拿到「丙」。因為第一個問的是 <code>score &gt;= 60</code>，95 分當然成立，於是就停在這裡，後面的條件根本沒機會被問到。這種程式能編譯、能執行、沒有任何錯誤訊息，只是答案錯了，正是<a href="pre-1-running.html">先修 1</a> 說的邏輯錯誤。規則是：<strong>範圍大的條件會蓋住範圍小的</strong>，所以要從最嚴格的條件（90 以上）問起。</p>
   </section>
 
   <section aria-labelledby="tree">

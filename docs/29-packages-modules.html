@@ -429,7 +429,7 @@ go1.27 false true</code></pre>
     <ul class="notes">
       <li>版本號要比數字，不是比字串：go1.9 比 go1.10 舊，v1.9.0 比 v1.10.0 舊（練習 2）。rc 這種預發行版比正式版舊。</li>
       <li><strong>v2 以後要改 module 路徑</strong>：不相容的新版，module 路徑要加上 <code>/v2</code>，例如 <code>example.com/bento/v2</code>。對 Go 來說它是另一個 module，同一個程式可以同時用 v1 和 v2，舊的使用者不會因為 go get -u 突然被升到不相容的版本。標準庫的 math/rand/v2、encoding/json/v2 也是同樣的做法。</li>
-      <li><strong>pseudo-version</strong>：相依的 module 沒有打版本標籤時，go 指令用 commit 的時間和雜湊組出一個版本，例如 28 章 go.mod 裡的 <code>v0.0.0-20230129092748-24d4a6f8daec</code>。</li>
+      <li><strong>pseudo-version</strong>：相依的 module 沒有打版本標籤時，go 指令用 commit 的時間和雜湊組出一個版本，例如 <a href="28-database.html">28 章</a> go.mod 裡的 <code>v0.0.0-20230129092748-24d4a6f8daec</code>。</li>
     </ul>
   </section>
 
@@ -641,7 +641,7 @@ type Require struct {
 	// TODO: 實作
 	return Version{}, nil
 }</code></pre>
-        <p>測試：<code>TestParse</code>，包含 28 章 go.mod 裡的 pseudo-version。</p>
+        <p>測試：<code>TestParse</code>，包含 <a href="28-database.html">28 章</a> go.mod 裡的 pseudo-version。</p>
         <details><summary>提示</summary><p><code>strings.CutPrefix</code> 去掉 v，<code>strings.Cut(rest, "-")</code> 分出預發行標記，再 Split 成三段。strconv.Atoi 接受 +1，要自己擋掉。</p></details>
       </li>
       <li>
@@ -671,7 +671,7 @@ type Require struct {
 	// TODO: 實作
 	return nil, nil
 }</code></pre>
-        <p>測試：<code>TestParseRequires</code>，輸入改寫自 28 章的 go.mod。</p>
+        <p>測試：<code>TestParseRequires</code>，輸入改寫自 <a href="28-database.html">28 章</a>的 go.mod。</p>
         <details><summary>提示</summary><p>一行一行讀，用 <code>strings.Cut(line, "//")</code> 分出註解，<code>strings.Fields</code> 切欄位。用一個 bool 記住「現在在 require 區塊裡」，遇到 <code>)</code> 就離開。</p></details>
       </li>
       <li>

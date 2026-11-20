@@ -192,7 +192,7 @@ func parseAccess(line string) (Entry, error) {
 
   <section aria-labelledby="json">
     <h2 id="json">3. JSON 日誌和壞掉的行</h2>
-    <p>專題 4 的 API 用 slog.NewJSONHandler 寫日誌，每一行是一個 JSON 物件。同一個工具也要能讀它：</p>
+    <p><a href="project-todoapi.html">專題 4</a> 的 API 用 slog.NewJSONHandler 寫日誌，每一行是一個 JSON 物件。同一個工具也要能讀它：</p>
     <pre class="code" data-src="projects/logstats/parse.go#slogLine,parseJSON"><code>type slogLine struct {
 	Time   time.Time `json:"time"`
 	Msg    string    `json:"msg"`
@@ -213,7 +213,7 @@ func parseJSON(line string) (Entry, error) {
 	return Entry{Time: l.Time, Method: l.Method, Path: l.Path, Status: l.Status, Took: time.Duration(l.Took)}, nil
 }</code></pre>
     <ul class="notes">
-      <li><strong>只宣告用得到的欄位</strong>：level、addr、err 這些欄位在 struct 裡沒有，解碼時直接略過。這和專題 4 的 API 相反：那裡用 RejectUnknownMembers 拒絕不認得的欄位，因為客戶端拼錯欄位名稱應該被告知；這裡是讀別人寫的資料，要寬鬆一點。</li>
+      <li><strong>只宣告用得到的欄位</strong>：level、addr、err 這些欄位在 struct 裡沒有，解碼時直接略過。這和<a href="project-todoapi.html">專題 4</a> 的 API 相反：那裡用 RejectUnknownMembers 拒絕不認得的欄位，因為客戶端拼錯欄位名稱應該被告知；這裡是讀別人寫的資料，要寬鬆一點。</li>
       <li><strong>took 用 int64 讀</strong>：slog 把 time.Duration 寫成奈秒的整數。json/v2 在 Go 1.27 對 time.Duration 沒有預設的格式，直接解碼到 Duration 會得到錯誤，所以先用 int64 讀，再自己轉換。</li>
       <li><strong>不是請求的紀錄</strong>：「開始服務」「內部錯誤」這些訊息沒有狀態碼，回傳 errSkip 表示「略過，不是錯誤」。</li>
     </ul>

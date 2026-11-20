@@ -442,7 +442,7 @@ func closeDemo() {
       <li>receiptFile 是一個假的 <code>io.WriteCloser</code>，用來模擬「寫入成功、關閉失敗」，不必真的把磁碟塞滿（<a href="10-interfaces.html#design">10 章的假實作</a>）。</li>
       <li>saveReceipt 的回傳值有名字 <code>(err error)</code>，defer 裡的函式在 return 之後執行，還能修改它（<a href="04-functions.html#defer">04 章</a>）。</li>
       <li><code>errors.Join(err, w.Close())</code>：兩個都是 nil 就是 nil；只有一個有錯就是那一個；兩個都有錯就兩個都留著。</li>
-      <li>只讀不寫的檔案，Close 失敗通常不影響結果，直接 <code>defer f.Close()</code> 是常見而且可以接受的寫法。檔案的完整用法在「檔案與 I/O」那一章。</li>
+      <li>只讀不寫的檔案，Close 失敗通常不影響結果，直接 <code>defer f.Close()</code> 是常見而且可以接受的寫法。檔案的完整用法在 <a href="20-files.html">20 章「檔案與 I/O」</a>。</li>
     </ul>
   </section>
 

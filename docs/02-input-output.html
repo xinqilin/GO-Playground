@@ -339,7 +339,7 @@ main.go:8:2: fmt.Printf call needs 1 arg but has 2 args</code></pre>
       </svg>
       <figcaption>型別有 <code>String() string</code> 方法，fmt 印它時就會呼叫這個方法；用 <code>%d</code> 明確要求數字時才不會。</figcaption>
     </figure>
-    <p>第 01 章用 <code>iota</code> 定義的列舉，印出來只是數字。只要替型別加上一個 <code>String() string</code> <strong>方法</strong>，fmt 就會改印這個方法回傳的文字：</p>
+    <p><a href="01-variables.html">第 01 章</a>用 <code>iota</code> 定義的列舉，印出來只是數字。只要替型別加上一個 <code>String() string</code> <strong>方法</strong>，fmt 就會改印這個方法回傳的文字：</p>
     <pre class="code" data-src="chapters/02-input-output/stringer.go#Size,Small,Size.String,stringerDemo"><code>type Size int
 
 const (
@@ -672,7 +672,7 @@ Flush 後："叫號：A01"</code></pre>
     <p class="label">輸出</p>
     <pre class="out" data-example="chapters/02-input-output#Example_copyDemo"><code>整份菜單原封不動地複製過去
 40 &lt;nil&gt;</code></pre>
-    <p><code>io.Copy(dst, src)</code> 把 Reader 的內容全部搬到 Writer，回傳搬了多少 byte。13 個中文字各 3 個 byte，加上換行，共 40 個。它內部會分批搬，不會把整個來源一次讀進記憶體，所以複製一個好幾 GB 的檔案也沒問題。檔案的讀寫在之後的「檔案與 I/O」那一章會細講。</p>
+    <p><code>io.Copy(dst, src)</code> 把 Reader 的內容全部搬到 Writer，回傳搬了多少 byte。13 個中文字各 3 個 byte，加上換行，共 40 個。它內部會分批搬，不會把整個來源一次讀進記憶體，所以複製一個好幾 GB 的檔案也沒問題。檔案的讀寫在 <a href="20-files.html">20 章「檔案與 I/O」</a>會細講。</p>
   </section>
 
   <section aria-labelledby="pitfalls">
@@ -754,7 +754,7 @@ go test -tags solution ./exercises/02-input-output/     <span class="c"># 跑參
 	return ""
 }</code></pre>
         <p>例如 <code>Percent(1, 3)</code> 是 <code>"33.3%"</code>，<code>Percent(3, 3)</code> 是 <code>"100.0%"</code>。測試：<code>TestPercent</code>。</p>
-        <details><summary>提示</summary><p>先轉成 <code>float64</code> 再算（第 01 章練習 3 的教訓），格式是 <code>%.1f</code>，百分比符號要寫成 <code>%%</code>。</p></details>
+        <details><summary>提示</summary><p>先轉成 <code>float64</code> 再算（<a href="01-variables.html#exercises">第 01 章練習 3</a> 的教訓），格式是 <code>%.1f</code>，百分比符號要寫成 <code>%%</code>。</p></details>
       </li>
       <li>
         <h3><span class="level l1">入門</span>練習 2：網頁色碼</h3>

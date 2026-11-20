@@ -582,7 +582,7 @@ func writeJSON(w http.ResponseWriter, status int, v any) error {
     <ul class="notes">
       <li><strong>201 加上 Location</strong>：新增成功時告訴客戶端新資源在哪裡，客戶端不用自己組網址。刪除成功回 204 No Content，沒有內容。</li>
       <li><strong>Deterministic</strong>：json/v2 為了速度，預設不排序 map 的 key，每次輸出的順序可能不同。錯誤回應的 fields 是 map，加上 <code>json.Deterministic(true)</code> 才每次一樣，Example 也才能比對（<a href="23-json.html#pit-map-order">23 章</a>）。</li>
-      <li><strong>decodeJSON</strong> 檢查 Content-Type、用 MaxBytesReader 限制大小、拒絕不認得的欄位，和 26 章的寫法相同。</li>
+      <li><strong>decodeJSON</strong> 檢查 Content-Type、用 MaxBytesReader 限制大小、拒絕不認得的欄位，和 <a href="26-http.html">26 章</a>的寫法相同。</li>
     </ul>
   </section>
 

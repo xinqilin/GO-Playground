@@ -587,7 +587,7 @@ github.com/xinqilin/GO-Playground/chapters/15-channels.orders.func1()</code></pr
     <p>容量 10 的時候卡住，改成 100 就不卡了，直到某天進來 101 個。先找出為什麼沒有人收，緩衝只在你說得出容量的理由時才用。</p>
 
     <h3 id="pit-len">7. 用 len 判斷能不能收</h3>
-    <p>檢查和收之間，別的 goroutine 可能已經把值拿走了，收的時候還是會卡住。要「有就收、沒有就算了」，用下一章 select 的 default。</p>
+    <p>檢查和收之間，別的 goroutine 可能已經把值拿走了，收的時候還是會卡住。要「有就收、沒有就算了」，用<a href="16-select.html#default">下一章 select 的 default</a>。</p>
   </section>
 
   <section aria-labelledby="java">

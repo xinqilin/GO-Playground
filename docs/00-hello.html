@@ -196,7 +196,7 @@ func main() {
       <li><strong>最上面的註解</strong>：緊貼在 <code>package</code> 上方的註解是這個 package 的說明文件，<code>go doc</code> 會把它顯示出來（第 8 節）。註解有兩種寫法：<code>//</code> 到行尾，或 <code>/* … */</code> 包住一段；實務上幾乎都用 <code>//</code>。</li>
       <li><strong><code>package main</code></strong>：每個 .go 檔的第一行（註解除外）都要宣告它屬於哪個 package。名字叫 <code>main</code> 的 package 很特別：它會被編譯成可以執行的程式，其他名字的 package 則是給別人 import 的函式庫。</li>
       <li><strong><code>import "fmt"</code></strong>：把標準庫的 fmt 套件借進來用，fmt 負責格式化輸出。import 的是路徑，用的時候寫路徑的最後一段當前綴，也就是 <code>fmt.Println</code>。要 import 好幾個時，用括號包成一組：<code>import ( "fmt" "os" )</code>，每個路徑各佔一行。</li>
-      <li><strong><code>func main()</code></strong>：程式的入口，沒有參數，也沒有回傳值。main 跑完，整支程式就結束；命令列參數要從 <code>os.Args</code> 拿（命令列工具那一章）。</li>
+      <li><strong><code>func main()</code></strong>：程式的入口，沒有參數，也沒有回傳值。main 跑完，整支程式就結束；命令列參數要從 <code>os.Args</code> 拿（<a href="21-cli.html#args">21 章 命令列工具</a>）。</li>
       <li><strong>每一行敘述的結尾不用分號</strong>：編譯器會自動補上，所以 Go 程式碼幾乎看不到分號（規則在第 <a href="03-control-flow.html#pit-brace">03 章常見錯誤 1</a>）。</li>
     </ul>
     <p><code>fmt.Println</code> 可以一次印好幾個值，不管是字串、整數還是布林值，它會在值和值之間補一個空白，最後換行。所以第二行輸出的「已付款：」和 <code>true</code> 中間多了一個空白。想精準控制格式時，要用 <code>fmt.Printf</code>，第 <a href="02-input-output.html">02 章</a>會介紹。</p>
@@ -240,7 +240,7 @@ func main() {
 func greeting(name string) string {
 	return "哈囉，" + name + "！"
 }</code></pre>
-    <p>Go 的規則是：<strong>一個資料夾就是一個 package</strong>。同一個資料夾裡的 .go 檔都要宣告同一個 package 名稱，編譯時會被當成一個整體，彼此的函式、變數、型別可以直接使用，不用 import，也不用管哪個檔案先寫。程式變大時，就照主題把程式拆成幾個檔案，例如第 03 章把 if、for、switch 的示範分別放在 if.go、loops.go、switch.go。</p>
+    <p>Go 的規則是：<strong>一個資料夾就是一個 package</strong>。同一個資料夾裡的 .go 檔都要宣告同一個 package 名稱，編譯時會被當成一個整體，彼此的函式、變數、型別可以直接使用，不用 import，也不用管哪個檔案先寫。程式變大時，就照主題把程式拆成幾個檔案，例如<a href="03-control-flow.html">第 03 章</a>把 if、for、switch 的示範分別放在 if.go、loops.go、switch.go。</p>
     <p>正因為如此，執行時要指定「整個資料夾」，而不是單一檔案：</p>
     <pre class="shell"><code>go run .          <span class="c"># 編譯目前資料夾裡的整個 package</span>
 go run main.go    <span class="c"># 只編譯 main.go 這一個檔案</span></code></pre>

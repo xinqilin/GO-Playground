@@ -334,7 +334,7 @@ func CookAll(orders []string, cook func(string)) {
       <li>五個改寫：<code>interface{}</code> 換成 any（Go 1.18 起）；sort.Slice 換成 slices.Sort（Go 1.21 起），連 import 都一起改；手寫的搜尋迴圈換成 slices.Contains；HasPrefix 加 TrimPrefix 換成 strings.CutPrefix（Go 1.20 起）；wg.Add 加 go func 換成 wg.Go（Go 1.25 起，<a href="14-goroutines.html">14 章</a>）。</li>
       <li>go fix 只會用 go.mod 的 go 版本允許的功能。同一個檔案，go.mod 改成 <code>go 1.21</code> 再跑一次，就只剩前四個建議：wg.Go 要 Go 1.25 才有。</li>
       <li>函式庫的作者可以在要淘汰的函式上加 <code>//go:fix inline</code>，使用者執行 go fix 時，呼叫的地方會自動換成新的寫法。</li>
-      <li>這本手冊有幾章故意保留舊寫法做對照（例如 03 章的三段式 for、14 章的 wg.Add），go fix 會對它們提出建議，這是預期中的。</li>
+      <li>這本手冊有幾章故意保留舊寫法做對照（例如 <a href="03-control-flow.html">03 章</a>的三段式 for、<a href="14-goroutines.html#waitgroup">14 章</a>的 wg.Add），go fix 會對它們提出建議，這是預期中的。</li>
     </ul>
   </section>
 

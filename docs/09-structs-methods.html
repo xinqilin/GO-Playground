@@ -733,7 +733,7 @@ func notInheritance() {
     <p class="label">輸出</p>
     <pre class="out" data-example="chapters/09-structs-methods#Example_notInheritance"><code>貴賓
 歡迎光臨，客人</code></pre>
-    <p>在有繼承的語言裡，子類別覆寫 Title 之後，父類別的 Welcome 也會改呼叫新的 Title。Go 的嵌入不是這樣：<code>v.Welcome()</code> 只是 <code>v.Greeter.Welcome()</code> 的簡寫，Welcome 收到的 receiver 是裡面那個 Greeter，它根本不知道外面還包著一個 VIPGreeter。嵌入是<strong>組合</strong>（composition）：「BentoShop 有一個 Shop」，不是「BentoShop 是一種 Shop」。需要「同一個呼叫、依型別做不同的事」時，Go 用的是 interface，下一章的主題。</p>
+    <p>在有繼承的語言裡，子類別覆寫 Title 之後，父類別的 Welcome 也會改呼叫新的 Title。Go 的嵌入不是這樣：<code>v.Welcome()</code> 只是 <code>v.Greeter.Welcome()</code> 的簡寫，Welcome 收到的 receiver 是裡面那個 Greeter，它根本不知道外面還包著一個 VIPGreeter。嵌入是<strong>組合</strong>（composition）：「BentoShop 有一個 Shop」，不是「BentoShop 是一種 Shop」。需要「同一個呼叫、依型別做不同的事」時，Go 用的是 interface，<a href="10-interfaces.html">下一章</a>的主題。</p>
   </section>
 
   <section aria-labelledby="tags">
