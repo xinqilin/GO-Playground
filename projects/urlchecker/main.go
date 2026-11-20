@@ -121,6 +121,8 @@ func describe(err error) string {
 
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	context.AfterFunc(ctx, stop) // 第一次 Ctrl-C 之後恢復預設行為：再按一次就直接結束
+
 	f := httpFetcher{client: &http.Client{}} // 逾時由 context 控制
 	code := run(ctx, os.Args[1:], os.Stdin, os.Stdout, os.Stderr, f)
 	stop()

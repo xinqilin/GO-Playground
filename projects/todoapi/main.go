@@ -27,6 +27,7 @@ func main() {
 
 	logger := slog.New(slog.NewJSONHandler(os.Stderr, nil))
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	context.AfterFunc(ctx, stop) // 第一次訊號之後恢復預設行為：Shutdown 等太久時，再按一次 Ctrl-C 就直接結束
 	err := run(ctx, *addr, *data, logger)
 	stop()
 	if err != nil {

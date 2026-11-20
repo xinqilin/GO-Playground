@@ -595,6 +595,7 @@ func writeJSON(w http.ResponseWriter, status int, v any) error {
 
 	logger := slog.New(slog.NewJSONHandler(os.Stderr, nil))
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	context.AfterFunc(ctx, stop) // 第一次訊號之後恢復預設行為：Shutdown 等太久時，再按一次 Ctrl-C 就直接結束
 	err := run(ctx, *addr, *data, logger)
 	stop()
 	if err != nil {
@@ -644,6 +645,7 @@ func run(ctx context.Context, addr, dataPath string, logger *slog.Logger) error 
       <li><strong>在 run 裡組合三層</strong>：Store、service、api 都在這裡建立，依賴一層一層傳進去，沒有全域變數。測試用同樣的方式組合，只是換成固定的時鐘和丟掉的 log。</li>
       <li><strong>JSON 格式的 log 寫到 stderr</strong>：每個請求一筆，有方法、路徑、狀態碼和花了多久。log 收集系統可以直接依欄位查詢，例如找出所有 status 是 500 的請求（<a href="25-logging.html">25 章</a>）。</li>
       <li><strong>伺服器的逾時</strong>：http.Server 的四個逾時預設都是 0，也就是沒有上限；一個很慢的客戶端就能一直佔著連線（<a href="26-http.html#pit-no-timeout">26 章</a>）。</li>
+      <li><strong>context.AfterFunc(ctx, stop)</strong>：第一次 Ctrl-C 或 SIGTERM 就停止攔截訊號。Shutdown 最多等 10 秒讓進行中的請求做完，不想等的話再按一次 Ctrl-C，程式直接結束（<a href="21-cli.html#signal">21 章</a>）。</li>
       <li><strong>關機時沒有東西要補存</strong>：每次修改都是寫好檔案才回應，Shutdown 只要等進行中的請求做完。如果資料只在記憶體裡、關機時才存檔，程式被強制結束（例如 kill -9 或停電）就會遺失資料（<a href="26-http.html#shutdown">26 章</a>）。</li>
     </ul>
     <p>大部分的測試直接呼叫 handler，不經過網路。最後一個測試用真的 http.Client 走完整個流程：Go 1.27 起的 httptest.NewTestServer 預設用記憶體裡的網路，不用開 port：</p>

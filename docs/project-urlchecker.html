@@ -421,6 +421,8 @@ func sleep(ctx context.Context, d time.Duration) error {
     <h2 id="cancel">6. Ctrl-C：取消整個檢查</h2>
     <pre class="code" data-src="projects/urlchecker/main.go#main"><code>func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	context.AfterFunc(ctx, stop) // 第一次 Ctrl-C 之後恢復預設行為：再按一次就直接結束
+
 	f := httpFetcher{client: &amp;http.Client{}} // 逾時由 context 控制
 	code := run(ctx, os.Args[1:], os.Stdin, os.Stdout, os.Stderr, f)
 	stop()
@@ -428,8 +430,8 @@ func sleep(ctx context.Context, d time.Duration) error {
 }</code></pre>
     <ul class="notes">
       <li><strong>signal.NotifyContext</strong>：收到 Ctrl-C（os.Interrupt）時取消回傳的 ctx（<a href="21-cli.html#signal">21 章</a>）。這個 ctx 是整棵 context 樹的根，正在等的請求、退避中的 sleep、還在等節拍的 worker 都會馬上結束。</li>
-      <li><strong>stop()</strong> 停止攔截訊號：之後再按一次 Ctrl-C，就是預設的行為，直接結束程式。</li>
-      <li><strong>os.Exit 不會執行 defer</strong>，所以 stop() 寫在 os.Exit 之前，而不是 defer stop()。</li>
+      <li><strong>context.AfterFunc(ctx, stop)</strong>：第一次 Ctrl-C 取消 ctx 的同時呼叫 stop()，停止攔截訊號。收尾卡住時再按一次，就是預設的行為，直接結束程式。沒有這一行的話，stop() 要等 run 回傳才會執行，在那之前再按幾次 Ctrl-C 都會被攔下來。</li>
+      <li><strong>os.Exit 不會執行 defer</strong>，所以沒有收到訊號、正常結束時的 stop() 寫在 os.Exit 之前，而不是 defer stop()。</li>
     </ul>
     <p>取消之後，派工的迴圈仍然會把剩下的 index 送完，但 worker 拿到之後，waitTurn 立刻回傳 ctx.Err()，一個請求都不會送出：</p>
     <pre class="code" data-src="projects/urlchecker/check_test.go#TestCheckCanceled"><code>func TestCheckCanceled(t *testing.T) {
