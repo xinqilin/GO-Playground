@@ -47,10 +47,11 @@ func OpenStore(path string) (*Store, error) {
 	if err := json.Unmarshal(data, &fd); err != nil {
 		return nil, fmt.Errorf("讀取 %s：%w", path, err)
 	}
+	s.nextID = max(fd.NextID, 1)
 	for _, t := range fd.Todos {
 		s.todos[t.ID] = t
+		s.nextID = max(s.nextID, t.ID+1) // next_id 不見了或被改小時，也不能發出已經有人用的編號
 	}
-	s.nextID = max(fd.NextID, 1)
 	return s, nil
 }
 

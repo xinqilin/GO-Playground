@@ -107,3 +107,28 @@ func TestOpenStoreCorrupt(t *testing.T) {
 		t.Errorf("檔案壞掉時應該回報檔名，got %v", err)
 	}
 }
+
+// TestOpenStoreNextIDTooSmall：檔案被手動改過，next_id 不見了或比現有的 ID 小，新的待辦也不能蓋掉舊的。
+func TestOpenStoreNextIDTooSmall(t *testing.T) {
+	for name, data := range map[string]string{
+		"沒有 next_id": `{"todos": [{"id": 1, "title": "訂便當"}, {"id": 5, "title": "繳電費"}]}`,
+		"next_id 太小": `{"next_id": 2, "todos": [{"id": 1, "title": "訂便當"}, {"id": 5, "title": "繳電費"}]}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "todos.json")
+			if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			s, err := OpenStore(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got, err := s.Add(Todo{Title: "買牛奶"}); err != nil || got.ID != 6 {
+				t.Errorf("Add = %+v, %v；編號應該是 6", got, err)
+			}
+			if got, _ := s.Get(1); got.Title != "訂便當" {
+				t.Errorf("第 1 筆被蓋掉了：%+v", got)
+			}
+		})
+	}
+}

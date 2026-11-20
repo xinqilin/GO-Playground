@@ -496,10 +496,11 @@ func OpenStore(path string) (*Store, error) {
 	if err := json.Unmarshal(data, &amp;fd); err != nil {
 		return nil, fmt.Errorf("讀取 %s：%w", path, err)
 	}
+	s.nextID = max(fd.NextID, 1)
 	for _, t := range fd.Todos {
 		s.todos[t.ID] = t
+		s.nextID = max(s.nextID, t.ID+1) // next_id 不見了或被改小時，也不能發出已經有人用的編號
 	}
-	s.nextID = max(fd.NextID, 1)
 	return s, nil
 }</code></pre>
     <p>新增兩筆、刪掉第 2 筆之後的檔案，以及重新啟動後新增的第一筆：</p>
@@ -518,6 +519,7 @@ func OpenStore(path string) (*Store, error) {
 重新啟動後的新編號：3</code></pre>
     <ul class="notes">
       <li><strong>next_id 要存</strong>：檔案裡只剩第 1 筆，但 next_id 是 3。如果只存清單、啟動時用最大的 ID 加 1，被刪掉的 2 就會再發給新的待辦；別人手上的舊網址 /todos/2 會突然指到另一筆資料。</li>
+      <li><strong>next_id 也不能全信</strong>：檔案可能被人手動改過，next_id 不見了或比現有的 ID 還小。如果照單全收，新的待辦會拿到已經有人用的編號，安靜地蓋掉那一筆。所以 OpenStore 取 next_id 和「最大的 ID 加 1」裡比較大的那個（TestOpenStoreNextIDTooSmall）。</li>
       <li><strong>檔案不存在不是錯誤</strong>：第一次啟動時從空的開始。用 errors.Is(err, fs.ErrNotExist) 判斷，而不是先用 os.Stat 檢查再打開：檢查和打開之間，檔案可能被別人建立或刪掉。</li>
       <li><strong>檔案壞掉就停下來</strong>：JSON 格式不對時，OpenStore 回傳錯誤，服務不會啟動。如果當成空的繼續跑，下一次存檔就會把壞掉但可能救得回來的資料整個蓋掉。</li>
     </ul>
