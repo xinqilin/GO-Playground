@@ -1,0 +1,566 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>TTL＋LRU 快取｜Go 圖解手冊</title>
+<meta name="description" content="用泛型、map 加 container/list 寫一個有筆數上限（LRU）和存活時間（TTL）的快取：一把鎖保護、Get 為什麼不能用 RLock、同一個 key 同時沒命中時只載入一次，再用 synctest 測過期、用 benchmark 看出一把鎖的極限。">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<header class="site">
+  <a href="index.html">Go 圖解手冊</a>
+  <span class="count">專題 7 / 7</span>
+</header>
+
+<main class="page long">
+  <header class="hero">
+    <div class="num" aria-hidden="true">P7</div>
+    <p class="eyebrow">專題 7 · 泛型、container/list、Mutex、time、synctest、benchmark</p>
+    <h1>TTL＋LRU 快取</h1>
+    <p class="analogy">分店的收銀機每結一次帳，就要問總店一次便當的價格，每次等 300ms。價格一天才改一兩次，大可以記在分店：但記多少？記多久？中午十個客人同時點排骨飯，要問總店十次嗎？這個專題寫一個回答這三個問題的快取。</p>
+  </header>
+
+  <nav class="toc-inline" aria-labelledby="toc-title">
+    <p class="label" id="toc-title">本專題內容</p>
+    <ol>
+      <li><a href="#goal">這個專題做什麼</a></li>
+      <li><a href="#why">上限和期限</a></li>
+      <li><a href="#generic">泛型的快取型別</a></li>
+      <li><a href="#lru">LRU：map 加雙向串列</a></li>
+      <li><a href="#ttl">TTL：過期的資料</a></li>
+      <li><a href="#lock">一把鎖，而且不能是 RLock</a></li>
+      <li><a href="#load">同時沒找到：只載入一次</a></li>
+      <li><a href="#bench">量一量：一把鎖的極限</a></li>
+      <li><a href="#challenges">延伸挑戰</a></li>
+      <li><a href="#recap">重點回顧</a></li>
+      <li><a href="#further">延伸閱讀</a></li>
+    </ol>
+  </nav>
+
+  <section aria-labelledby="goal">
+    <h2 id="goal">這個專題做什麼</h2>
+    <p>快取最多記 3 種便當，每筆 10 分鐘後過期。依序查 8 次，方括號裡是查完之後快取裡的內容，由最近用過排到最久沒用：</p>
+    <p class="label">在 repo 根目錄</p>
+    <pre class="shell"><code>go run ./projects/cache</code></pre>
+    <pre class="out"><code>排骨飯 100 元　從總店　［排骨飯］
+雞腿飯 110 元　從總店　［雞腿飯 排骨飯］
+排骨飯 100 元　從快取　［排骨飯 雞腿飯］
+魚排飯 105 元　從總店　［魚排飯 排骨飯 雞腿飯］
+控肉飯 95 元　從總店　［控肉飯 魚排飯 排骨飯］
+雞腿飯 110 元　從總店　［雞腿飯 控肉飯 魚排飯］
+控肉飯 95 元　從快取　［控肉飯 雞腿飯 魚排飯］
+炒泡麵：查不到（炒泡麵：沒有這個品項）
+找到 2 次、沒找到 6 次、問總店 6 次、擠掉 2 筆、過期 0 筆
+總共花了 1.8s（問總店 6 次，每次 300ms）</code></pre>
+    <ul class="notes">
+      <li><strong>第 3 行</strong>：排骨飯已經在快取裡，不用等，而且它變成「最近用過的」，排到最前面。</li>
+      <li><strong>第 5 行</strong>：控肉飯進來時已經有 3 筆，最久沒用的雞腿飯被擠掉。</li>
+      <li><strong>第 6 行</strong>：所以再查雞腿飯，又要問總店一次，這次擠掉的是排骨飯。</li>
+      <li><strong>炒泡麵</strong>：總店回傳錯誤，錯誤不存進快取，下次還會再問。</li>
+    </ul>
+    <p>程式分成兩個檔案：cache.go 是通用的快取，main.go 是總店的模擬和上面的示範。測試在 cache_test.go 和 bench_test.go。先備：<a href="07-maps.html">07 章 map</a>、<a href="12-generics.html">12 章泛型</a>、<a href="17-sync.html#mutex">17 章 Mutex</a>、<a href="22-time.html#compare">22 章單調時鐘</a>、<a href="30-testing.html#synctest">30 章 synctest</a>、<a href="31-performance.html">31 章效能</a>。</p>
+  </section>
+
+  <section aria-labelledby="why">
+    <h2 id="why">1. 上限和期限</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 190" role="img" aria-label="收銀機先問快取，快取有就立刻回答；沒有才問總店，等 300ms，再把答案記在快取裡。快取有兩個限制：最多 3 筆，滿了丟掉最久沒用的；每筆 10 分鐘，過了就當作沒有">
+        <title>快取在收銀機和總店之間</title>
+        <rect class="soft" x="8" y="40" width="100" height="50" rx="8"/>
+        <text class="sm" x="58" y="70" text-anchor="middle">收銀機</text>
+        <path class="wire acc-ln" d="M108 65 H168"/>
+        <rect class="acc" x="168" y="30" width="144" height="70" rx="8"/>
+        <text class="sm mono" x="240" y="56" text-anchor="middle">Cache</text>
+        <text class="sm" x="240" y="76" text-anchor="middle">有：立刻回答</text>
+        <path class="wire hot-ln dash" d="M312 65 H372"/>
+        <text class="sm t-hot" x="342" y="56" text-anchor="middle">300ms</text>
+        <rect class="soft" x="372" y="40" width="100" height="50" rx="8"/>
+        <text class="sm" x="422" y="70" text-anchor="middle">總店</text>
+        <rect class="soft" x="40" y="128" width="190" height="50" rx="8"/>
+        <text class="sm" x="135" y="148" text-anchor="middle">LRU：最多 3 筆</text>
+        <text class="sm" x="135" y="166" text-anchor="middle">滿了丟掉最久沒用的</text>
+        <rect class="soft" x="250" y="128" width="190" height="50" rx="8"/>
+        <text class="sm" x="345" y="148" text-anchor="middle">TTL：每筆 10 分鐘</text>
+        <text class="sm" x="345" y="166" text-anchor="middle">過了就當作沒有</text>
+        <path class="wire faint" d="M200 100 L135 128 M280 100 L345 128"/>
+      </svg>
+      <figcaption>快取用記憶體換時間。上限決定最多用多少記憶體，期限決定最多會拿到多舊的資料。</figcaption>
+    </figure>
+    <ul class="notes">
+      <li><strong>只用 map 的快取</strong>：每查一種新的東西就多一筆，永遠不會變小。查詢的 key 來自使用者（網址、搜尋字）時，記憶體會一直長下去，最後程式被系統砍掉。這是很常見的記憶體洩漏。</li>
+      <li><strong>LRU（least recently used）</strong>：滿了丟掉最久沒用的。它假設「最近用過的，等一下也很可能再用」，這對大部分的查詢都成立。</li>
+      <li><strong>TTL（time to live）</strong>：總店改了價格，分店最晚 10 分鐘後就會知道。期限越短資料越新，問總店的次數也越多。</li>
+      <li><strong>同時沒找到</strong>：中午十個人同時點一種剛過期的便當，十個人都去問總店，總店一下子收到十倍的請求。第 6 節處理這件事。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="generic">
+    <h2 id="generic">2. 泛型的快取型別</h2>
+    <pre class="code" data-src="projects/cache/cache.go#Cache,entry,call,Stats,New"><code>type Cache[K comparable, V any] struct {
+	mu      sync.Mutex
+	size    int
+	ttl     time.Duration
+	order   *list.List          // 最近用過的在最前面；每個元素的 Value 是 *entry[K, V]
+	items   map[K]*list.Element // key → order 裡的元素
+	loading map[K]*call[V]      // 正在載入的 key
+	stats   Stats
+}
+
+type entry[K comparable, V any] struct {
+	key     K // 從串列尾端丟掉一筆時，要用它刪掉 map 裡的 key
+	val     V
+	expires time.Time // 零值表示不會過期
+}
+
+type call[V any] struct {
+	done chan struct{}
+	val  V
+	err  error
+}
+
+type Stats struct {
+	Hits        int // 有找到
+	Misses      int // 沒找到，包括過期的
+	Loads       int // GetOrLoad 呼叫 load 的次數
+	Evictions   int // 滿了被丟掉的筆數
+	Expirations int // 過期被丟掉的筆數
+}
+
+func New[K comparable, V any](size int, ttl time.Duration) *Cache[K, V] {
+	if size &lt; 1 {
+		panic("cache: size 必須大於 0")
+	}
+	return &amp;Cache[K, V]{
+		size:    size,
+		ttl:     ttl,
+		order:   list.New(),
+		items:   map[K]*list.Element{},
+		loading: map[K]*call[V]{},
+	}
+}</code></pre>
+    <ul class="notes">
+      <li><strong>K comparable</strong>：key 要放進 map，所以必須能用 == 比較（<a href="12-generics.html">12 章</a>）。V 沒有限制，用 any。</li>
+      <li><strong>New[string, int](3, 10*time.Minute)</strong>：K 和 V 只出現在回傳值，不在參數裡，編譯器推論不出來，呼叫時要明確寫出型別（<a href="12-generics.html#pit-infer">12 章</a>）。</li>
+      <li><strong>size 小於 1 就 panic</strong>：容量是 0 的快取什麼都存不了，一定是呼叫的人寫錯了，就像 make 的長度是負數也會 panic。這和「總店查不到」這種執行時會發生的錯誤不同，不用回傳 error。</li>
+      <li><strong>ttl 的零值有意義</strong>：0 表示不會過期，只當 LRU 用。entry.expires 的零值也表示不會過期，不需要另外一個 bool。</li>
+      <li><strong>Stats 是一般的 struct</strong>：Stats() 回傳它的複本，呼叫的人拿去讀、拿去比較都不用擔心被改到。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="lru">
+    <h2 id="lru">3. LRU：map 加雙向串列</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 210" role="img" aria-label="map 讓我們用 key 直接找到串列裡的節點；雙向串列記住使用的順序，最近用過的在最前面。Get 找到之後把節點移到最前面；Set 新的 key 時加在最前面，超過上限就刪掉最後面的節點，也從 map 刪掉它的 key">
+        <title>兩個資料結構，各管一件事</title>
+        <text class="sm mono" x="8" y="24">items map[K]*list.Element</text>
+        <rect class="soft" x="8" y="34" width="90" height="26" rx="4"/><text class="sm" x="53" y="52" text-anchor="middle">排骨飯</text>
+        <rect class="soft" x="104" y="34" width="90" height="26" rx="4"/><text class="sm" x="149" y="52" text-anchor="middle">魚排飯</text>
+        <rect class="soft" x="200" y="34" width="90" height="26" rx="4"/><text class="sm" x="245" y="52" text-anchor="middle">雞腿飯</text>
+        <path class="wire" d="M53 60 V98 M149 60 V98 M245 60 V98"/>
+        <text class="sm mono" x="8" y="90">order *list.List</text>
+        <rect class="acc" x="8" y="98" width="90" height="34" rx="6"/><text class="sm" x="53" y="120" text-anchor="middle">排骨飯</text>
+        <rect class="soft" x="104" y="98" width="90" height="34" rx="6"/><text class="sm" x="149" y="120" text-anchor="middle">魚排飯</text>
+        <rect class="hot" x="200" y="98" width="90" height="34" rx="6"/><text class="sm" x="245" y="120" text-anchor="middle">雞腿飯</text>
+        <text class="sm t-acc" x="53" y="152" text-anchor="middle">Front</text>
+        <text class="sm t-hot" x="245" y="152" text-anchor="middle">Back</text>
+        <text class="sm" x="310" y="110">Get：MoveToFront</text>
+        <text class="sm" x="310" y="132">Set 新的：PushFront</text>
+        <text class="sm" x="310" y="154">太多了：刪掉 Back</text>
+        <text class="sm mute" x="8" y="190">每一個動作都只碰到固定幾個節點，和快取有多大無關</text>
+      </svg>
+      <figcaption>map 回答「它在哪裡」，串列回答「誰最久沒用」。兩個資料結構一起用，Get、Set、丟掉最舊的一筆都是 O(1)。</figcaption>
+    </figure>
+    <pre class="code" data-src="projects/cache/cache.go#Cache.getLocked,Cache.setLocked,Cache.removeLocked"><code>func (c *Cache[K, V]) getLocked(key K) (V, bool) {
+	el, ok := c.items[key]
+	if !ok {
+		c.stats.Misses++
+		var zero V
+		return zero, false
+	}
+	e := el.Value.(*entry[K, V])
+	if !e.expires.IsZero() &amp;&amp; !time.Now().Before(e.expires) {
+		c.removeLocked(el) // 過期的資料用到時才丟掉
+		c.stats.Expirations++
+		c.stats.Misses++
+		var zero V
+		return zero, false
+	}
+	c.order.MoveToFront(el)
+	c.stats.Hits++
+	return e.val, true
+}
+
+func (c *Cache[K, V]) setLocked(key K, val V) {
+	var expires time.Time
+	if c.ttl &gt; 0 {
+		expires = time.Now().Add(c.ttl)
+	}
+	if el, ok := c.items[key]; ok {
+		e := el.Value.(*entry[K, V])
+		e.val, e.expires = val, expires
+		c.order.MoveToFront(el)
+		return
+	}
+	c.items[key] = c.order.PushFront(&amp;entry[K, V]{key: key, val: val, expires: expires})
+	if c.order.Len() &gt; c.size {
+		c.removeLocked(c.order.Back())
+		c.stats.Evictions++
+	}
+}
+
+func (c *Cache[K, V]) removeLocked(el *list.Element) {
+	e := c.order.Remove(el).(*entry[K, V])
+	delete(c.items, e.key)
+}</code></pre>
+    <ul class="notes">
+      <li><strong>為什麼不用 slice 排順序</strong>：把中間的一筆移到最前面，要搬動它前面的每一個元素，是 O(n)。雙向串列只要改幾個指標。</li>
+      <li><strong>entry 裡也存 key</strong>：從串列尾端丟掉一筆時，只拿得到節點，要靠它的 key 才能從 map 刪掉。少了這一步，map 會留著指向已經不在串列裡的節點。</li>
+      <li><strong>container/list 不是泛型的</strong>：它在泛型出現之前就有了，Value 的型別是 any，取出來要用型別斷言 <code>el.Value.(*entry[K, V])</code>。斷言不會失敗，因為放進去的一定是這個型別；延伸挑戰 6 讓你寫一個不需要斷言的版本。</li>
+      <li><strong>更新也算使用</strong>：Set 一個已經存在的 key，會更新值、重新計時，並移到最前面。</li>
+    </ul>
+    <pre class="code" data-src="projects/cache/cache_test.go#ExampleCache_Keys"><code>func ExampleCache_Keys() {
+	c := New[string, int](3, 0)
+	for _, item := range []string{"排骨飯", "雞腿飯", "魚排飯"} {
+		c.Set(item, 0)
+	}
+	fmt.Println(c.Keys())
+	c.Get("排骨飯")
+	fmt.Println(c.Keys())
+	c.Set("控肉飯", 95)
+	fmt.Println(c.Keys())
+	// Output:
+	// [魚排飯 雞腿飯 排骨飯]
+	// [排骨飯 魚排飯 雞腿飯]
+	// [控肉飯 排骨飯 魚排飯]
+}</code></pre>
+    <pre class="out" data-example="projects/cache#ExampleCache_Keys"><code>[魚排飯 雞腿飯 排骨飯]
+[排骨飯 魚排飯 雞腿飯]
+[控肉飯 排骨飯 魚排飯]</code></pre>
+  </section>
+
+  <section aria-labelledby="ttl">
+    <h2 id="ttl">4. TTL：過期的資料</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 168" role="img" aria-label="時間軸：0 分鐘 Set，期限是 10 分鐘。5 分鐘時 Get 找到，但期限不會延後；滿 10 分鐘時 Get 發現過期，把它丟掉，回傳沒找到">
+        <title>期限從 Set 起算</title>
+        <path class="wire" d="M30 70 H450"/>
+        <circle class="acc" cx="40" cy="70" r="7"/>
+        <text class="sm mono" x="40" y="46" text-anchor="middle">Set</text>
+        <text class="sm mono" x="40" y="100" text-anchor="middle">0</text>
+        <circle class="acc" cx="210" cy="70" r="7"/>
+        <text class="sm mono" x="210" y="46" text-anchor="middle">Get 找到</text>
+        <text class="sm mono" x="210" y="100" text-anchor="middle">5 分</text>
+        <circle class="hot" cx="400" cy="70" r="7"/>
+        <text class="sm mono t-hot" x="400" y="46" text-anchor="middle">Get 過期</text>
+        <text class="sm mono" x="400" y="100" text-anchor="middle">10 分</text>
+        <path class="wire hot-ln dash" d="M400 112 V128"/>
+        <text class="sm" x="40" y="148">用到時才檢查：過期的資料一直沒人查，就留到被 LRU 擠掉</text>
+      </svg>
+      <figcaption>Get 不會延長期限：價格是在 Set 那一刻向總店問來的，資料多舊由那一刻決定，和之後有沒有人看無關。</figcaption>
+    </figure>
+    <pre class="code" data-src="projects/cache/cache_test.go#TestTTL"><code>func TestTTL(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		c := New[string, int](10, 10*time.Minute)
+		c.Set("排骨飯", 100)
+
+		time.Sleep(5 * time.Minute)
+		if _, ok := c.Get("排骨飯"); !ok {
+			t.Fatal("5 分鐘時應該還在")
+		}
+		time.Sleep(5*time.Minute - time.Nanosecond)
+		if _, ok := c.Get("排骨飯"); !ok {
+			t.Fatal("差 1 奈秒滿 10 分鐘時應該還在")
+		}
+		time.Sleep(time.Nanosecond)
+		if _, ok := c.Get("排骨飯"); ok {
+			t.Fatal("滿 10 分鐘時應該過期了")
+		}
+
+		c.Set("排骨飯", 105) // 重新存入，重新計時
+		time.Sleep(9 * time.Minute)
+		if v, ok := c.Get("排骨飯"); !ok || v != 105 {
+			t.Errorf("重新存入 9 分鐘後 = %d, %v，想要 105, true", v, ok)
+		}
+		if s := c.Stats(); s.Expirations != 1 || s.Hits != 3 || s.Misses != 1 {
+			t.Errorf("Stats() = %+v", s)
+		}
+	})
+}</code></pre>
+    <ul class="notes">
+      <li><strong>用到時才丟（lazy）</strong>：不需要背景的 goroutine 定時掃描，程式簡單，也沒有要關閉的東西。代價是過期但沒人查的資料會繼續佔著位置，Len 和 Keys 也算它們；有 LRU 的上限，它們最後還是會被擠掉。延伸挑戰 3 加上背景清理。</li>
+      <li><strong>!time.Now().Before(expires)</strong>：「現在不早於期限」，也就是剛好滿 10 分鐘就算過期。TestTTL 測了差 1 奈秒和剛好滿兩個邊界。</li>
+      <li><strong>單調時鐘</strong>：time.Now() 帶著單調時鐘的讀數，Before 會用它比較。有人把系統時間往回調一小時，快取的期限也不會亂掉（<a href="22-time.html#compare">22 章</a>）。</li>
+      <li><strong>不用注入時鐘</strong>：程式直接呼叫 time.Now()。在 synctest 的泡泡裡，time.Now 和 time.Sleep 都是假的，十分鐘一瞬間就過了，而且精確到奈秒。專題 4 注入 now 函式，是因為輸出要印出固定的日期；這裡只在乎經過多久，用 synctest 就夠了。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="lock">
+    <h2 id="lock">5. 一把鎖，而且不能是 RLock</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 176" role="img" aria-label="如果 Get 只拿讀鎖，兩個 goroutine 可以同時執行 Get，同時對同一條串列做 MoveToFront，兩邊同時改 prev 和 next 指標，串列可能斷掉或繞成一圈">
+        <title>Get 也會改資料</title>
+        <rect class="soft" x="8" y="16" width="164" height="40" rx="6"/>
+        <text class="sm" x="90" y="41" text-anchor="middle">goroutine 1：Get(a)</text>
+        <rect class="soft" x="8" y="66" width="164" height="40" rx="6"/>
+        <text class="sm" x="90" y="91" text-anchor="middle">goroutine 2：Get(b)</text>
+        <path class="wire hot-ln" d="M172 36 C210 36 210 60 240 60 M172 86 C210 86 210 64 240 64"/>
+        <rect class="hot" x="240" y="40" width="232" height="44" rx="6"/>
+        <text class="sm mono" x="356" y="58" text-anchor="middle">order.MoveToFront</text>
+        <text class="sm" x="356" y="76" text-anchor="middle">同時改 prev、next 指標</text>
+        <text class="sm" x="8" y="136">RLock 允許好幾個人同時拿，只適合「真的只讀」的操作。</text>
+        <text class="sm" x="8" y="158">Get 會移動節點、刪掉過期的、加統計，每一樣都是寫。</text>
+      </svg>
+      <figcaption>名字叫 Get 不代表它只讀。用不用讀鎖，要看函式實際上碰了什麼，不是看它叫什麼。</figcaption>
+    </figure>
+    <pre class="code" data-src="projects/cache/cache.go#Cache.Get,Cache.Set,Cache.Keys"><code>func (c *Cache[K, V]) Get(key K) (V, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.getLocked(key)
+}
+
+func (c *Cache[K, V]) Set(key K, val V) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.setLocked(key, val)
+}
+
+func (c *Cache[K, V]) Keys() []K {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	keys := make([]K, 0, c.order.Len())
+	for el := c.order.Front(); el != nil; el = el.Next() {
+		keys = append(keys, el.Value.(*entry[K, V]).key)
+	}
+	return keys
+}</code></pre>
+    <ul class="notes">
+      <li><strong>Mutex，不是 RWMutex</strong>：RWMutex 適合「讀很多、寫很少，而且讀真的不改任何東西」的情況（<a href="17-sync.html#rwmutex">17 章</a>）。LRU 的每一次 Get 都會寫，用讀鎖就是 data race，<code>go test -race</code> 會在 TestConcurrent 裡抓到。</li>
+      <li><strong>公開方法加鎖，Locked 方法不加</strong>：GetOrLoad 要在同一把鎖裡先找、找不到再登記「我要載入」，所以需要一個不加鎖的 getLocked 給它用。</li>
+      <li><strong>Keys 回傳新的 slice</strong>：不把內部的串列交出去。呼叫的人在鎖外面走訪內部的串列，就又是 data race。</li>
+      <li><strong>統計也在同一把鎖裡</strong>：Hits、Misses 和串列一起改，Stats() 拿到的永遠是某一個時間點一致的數字。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="load">
+    <h2 id="load">6. 同時沒找到：只載入一次</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 196" role="img" aria-label="十個 goroutine 同時查雞腿飯。第一個發現沒有，在 loading 裡登記一個 call，放開鎖去問總店；其他九個在 loading 裡找到這個 call，等它的 done channel 關閉。300ms 後，第一個把結果存進快取，關閉 done，十個人同時拿到 110 元">
+        <title>一個人去問，其他人等</title>
+        <rect class="acc" x="8" y="20" width="96" height="30" rx="6"/>
+        <text class="sm" x="56" y="40" text-anchor="middle">第 1 個</text>
+        <rect class="soft" x="8" y="62" width="96" height="30" rx="6"/>
+        <text class="sm" x="56" y="82" text-anchor="middle">第 2 個</text>
+        <text class="sm mute" x="56" y="110" text-anchor="middle">……</text>
+        <rect class="soft" x="8" y="120" width="96" height="30" rx="6"/>
+        <text class="sm" x="56" y="140" text-anchor="middle">第 10 個</text>
+        <path class="wire acc-ln" d="M104 35 H330"/>
+        <text class="sm" x="210" y="28" text-anchor="middle">放開鎖，呼叫 load</text>
+        <rect class="soft" x="330" y="20" width="140" height="30" rx="6"/>
+        <text class="sm" x="400" y="40" text-anchor="middle">總店 300ms</text>
+        <path class="wire" d="M104 77 H180 M104 135 H180 M180 77 V135"/>
+        <rect class="soft" x="180" y="88" width="150" height="36" rx="6"/>
+        <text class="sm mono" x="255" y="111" text-anchor="middle">&lt;-call.done</text>
+        <path class="wire acc-ln dash" d="M400 50 V106 H330"/>
+        <text class="sm" x="8" y="180">done 關閉時，十個人同時拿到同一個結果；總店只被問了一次</text>
+      </svg>
+      <figcaption>這叫 cache stampede：快取剛好過期或剛啟動時，大量請求同時穿過快取打到後端。去重之後，後端看到的請求數只和「不同的 key 有幾個」有關。</figcaption>
+    </figure>
+    <pre class="code" data-src="projects/cache/cache.go#Cache.GetOrLoad"><code>func (c *Cache[K, V]) GetOrLoad(ctx context.Context, key K, load func(context.Context, K) (V, error)) (V, error) {
+	c.mu.Lock()
+	if v, ok := c.getLocked(key); ok {
+		c.mu.Unlock()
+		return v, nil
+	}
+	if cl, ok := c.loading[key]; ok { // 已經有人在載入了：等他
+		c.mu.Unlock()
+		select {
+		case &lt;-cl.done:
+			return cl.val, cl.err
+		case &lt;-ctx.Done():
+			var zero V
+			return zero, ctx.Err()
+		}
+	}
+	cl := &amp;call[V]{done: make(chan struct{}), err: errPanicked} // load 沒有正常回傳時，err 就留在 errPanicked
+	c.loading[key] = cl
+	c.stats.Loads++
+	c.mu.Unlock() // load 可能很慢，不能拿著鎖等
+
+	defer func() { // load panic 時也會執行，等待的人不會永遠卡住
+		c.mu.Lock()
+		delete(c.loading, key)
+		if cl.err == nil {
+			c.setLocked(key, cl.val)
+		}
+		c.mu.Unlock()
+		close(cl.done)
+	}()
+	cl.val, cl.err = load(ctx, key)
+	return cl.val, cl.err
+}</code></pre>
+    <ul class="notes">
+      <li><strong>不拿著鎖等</strong>：load 要 300ms。拿著鎖等的話，這 300ms 內所有人的 Get，連查別種便當的都要排隊。所以先在 loading 登記，放開鎖再呼叫 load，完成之後再拿鎖存結果。</li>
+      <li><strong>done channel 傳結果</strong>：call 的 val 和 err 由載入的人寫入，寫完才 close(done)；等待的人在 &lt;-done 之後才讀。channel 的關閉保證讀的人一定看得到寫好的值（<a href="17-sync.html#hb">17 章</a>）。</li>
+      <li><strong>err 的初始值是 errPanicked</strong>：load 正常回傳時，這個值會被蓋掉；load panic 的話，賦值根本沒有發生，err 就留在 errPanicked。defer 照樣會執行：清掉 loading、不存結果、關閉 done。panic 繼續傳給第一個人，等待的人拿到錯誤，而不是永遠卡住。</li>
+      <li><strong>等待的人可以放棄</strong>：select 同時等 done 和自己的 ctx。TestWaiterGivesUp 確認放棄的人 100ms 就回傳，載入的人不受影響，結果照樣存進快取。</li>
+      <li><strong>錯誤不存</strong>：總店暫時連不上，不應該讓分店接下來 10 分鐘都以為「查不到」。代價是不存在的品項每次都會問總店，延伸挑戰 2 處理這件事。</li>
+    </ul>
+    <pre class="code" data-src="projects/cache/cache_test.go#TestGetOrLoadOnce"><code>func TestGetOrLoadOnce(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		h := &amp;headOffice{delay: 300 * time.Millisecond}
+		c := New[string, int](3, time.Minute)
+		start := time.Now()
+		var wg sync.WaitGroup
+		for range 10 {
+			wg.Go(func() {
+				p, err := c.GetOrLoad(context.Background(), "雞腿飯", h.price)
+				if p != 110 || err != nil {
+					t.Errorf("GetOrLoad = %d, %v", p, err)
+				}
+			})
+		}
+		wg.Wait()
+		if h.calls != 1 {
+			t.Errorf("問了總店 %d 次，想要 1 次", h.calls)
+		}
+		if d := time.Since(start); d != 300*time.Millisecond {
+			t.Errorf("花了 %v，想要 300ms", d)
+		}
+	})
+}</code></pre>
+    <ul class="notes">
+      <li><strong>剛好 300ms</strong>：synctest 的假時間讓「十個人一起等、總共只花一次的時間」可以精確地驗證；用真的時間只能寫「小於 600ms」這種模糊的條件。</li>
+      <li><strong>還沒解決的兩件事</strong>：load 用的是第一個人的 ctx，他放棄的話，其他人也一起拿到取消的錯誤；載入期間有人呼叫 Delete（例如總店剛改價），載入完成時還是會把舊的價格存進去。<code>golang.org/x/sync/singleflight</code> 是常用的去重套件，但後面這個問題要靠快取自己處理（延伸挑戰 4）。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="bench">
+    <h2 id="bench">7. 量一量：一把鎖的極限</h2>
+    <pre class="code" data-src="projects/cache/bench_test.go#BenchmarkGetParallel,BenchmarkMapParallel"><code>func BenchmarkGetParallel(b *testing.B) {
+	c := New[string, int](len(keys), 0)
+	for i, k := range keys {
+		c.Set(k, i)
+	}
+	b.RunParallel(func(pb *testing.PB) {
+		i := 0
+		for pb.Next() {
+			c.Get(keys[i%len(keys)])
+			i++
+		}
+	})
+}
+
+func BenchmarkMapParallel(b *testing.B) {
+	var mu sync.Mutex
+	m := map[string]int{}
+	for i, k := range keys {
+		m[k] = i
+	}
+	b.RunParallel(func(pb *testing.PB) {
+		i := 0
+		for pb.Next() {
+			mu.Lock()
+			_ = m[keys[i%len(keys)]]
+			mu.Unlock()
+			i++
+		}
+	})
+}</code></pre>
+    <pre class="shell"><code>go test -run='^$' -bench=. -benchmem ./projects/cache</code></pre>
+    <p class="label">輸出（數字依機器不同）</p>
+    <pre class="out"><code>goos: darwin
+goarch: arm64
+pkg: github.com/xinqilin/GO-Playground/projects/cache
+cpu: Apple M1 Pro
+BenchmarkGet-10            	51996790	        22.87 ns/op	       0 B/op	       0 allocs/op
+BenchmarkSetEvict-10       	13972381	        84.32 ns/op	      96 B/op	       2 allocs/op
+BenchmarkGetParallel-10    	 7117328	       167.0 ns/op	       0 B/op	       0 allocs/op
+BenchmarkMapParallel-10    	 8655585	       140.3 ns/op	       0 B/op	       0 allocs/op
+PASS
+ok  	github.com/xinqilin/GO-Playground/projects/cache	5.389s</code></pre>
+    <ul class="notes">
+      <li><strong>Get 沒有配置</strong>：找到之後只移動指標，0 allocs/op。</li>
+      <li><strong>SetEvict 每次配置兩次</strong>：一個 entry、一個 list.Element，合計 96 bytes。用 <code>-memprofile</code> 和 pprof 看，配置確實來自 setLocked 和 container/list 的 insertValue（<a href="31-performance.html#allocs">31 章</a>）。</li>
+      <li><strong>平行反而比較慢</strong>：RunParallel 的 ns/op 是「總時間 ÷ 總次數」。一個 goroutine 每次 Get 23ns；10 個 goroutine 一起跑，平均每次反而要 167ns，總吞吐量比一個人還差。時間花在搶鎖：同一時間只有一個人能拿到，其他人在排隊、在 CPU 之間交接。</li>
+      <li><strong>不是 LRU 的錯</strong>：對照組只有 map 加一把鎖，沒有串列、沒有期限，也要 140ns。瓶頸是那一把鎖本身。</li>
+      <li><strong>要不要改</strong>：一次 167ns，每秒還是能處理幾百萬次 Get，比問總店的 300ms 快了一百多萬倍。真的成為瓶頸時，常見的做法是分片：把 key 分到好幾個各有一把鎖的小快取（延伸挑戰 5）。改之前，先確認真實的負載真的卡在這裡（<a href="31-performance.html#pit-guess">31 章</a>）。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="challenges">
+    <h2 id="challenges">延伸挑戰</h2>
+    <p>這些題目沒有附測試。先寫測試描述你要的行為，跟時間有關的用 synctest。</p>
+    <ol class="exercises">
+      <li>
+        <h3><span class="level l1">入門</span>挑戰 1：Peek</h3>
+        <p>加一個 Peek(key)：回傳值，但不移到最前面、不算進統計。過期的資料 Peek 回傳沒找到，但不丟掉它。</p>
+        <details><summary>提示</summary><p>Peek 不改任何東西，看起來可以用讀鎖；但其他方法都用 Mutex，混用兩種鎖沒有意義。直接用同一把 Mutex。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l2">進階</span>挑戰 2：記住「查不到」</h3>
+        <p>總店回傳 errNoItem 時，把這個結果記 1 分鐘，這段時間內再查同一個品項直接回傳錯誤，不問總店；其他錯誤（例如逾時）還是不記。</p>
+        <details><summary>提示</summary><p>可以把 V 包成 struct{ val V; err error }，或在 GetOrLoad 多一個參數決定哪些錯誤要記。想想兩種期限（10 分鐘、1 分鐘）要怎麼放進同一個 entry。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l2">進階</span>挑戰 3：背景清理</h3>
+        <p>加一個 Run(ctx, every) 方法：每隔 every 掃描一次，丟掉所有過期的資料，ctx 取消時結束。用 synctest 測試：過了期限加一個 every 之後，Len() 變成 0。</p>
+        <details><summary>提示</summary><p>用 time.Ticker 和 select（<a href="16-select.html">16 章</a>）。掃描時要拿鎖，一次掃完整個串列的時間和筆數成正比；筆數很多時可以一次只掃一部分。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l2">進階</span>挑戰 4：載入期間的刪除</h3>
+        <p>先寫一個會失敗的測試：GetOrLoad 正在載入時呼叫 Delete，載入完成後 Get 應該找不到。再修改程式讓它通過。</p>
+        <details><summary>提示</summary><p>Delete 時如果這個 key 正在載入，在它的 call 上做個記號；載入完成時看到記號就不存。用 synctest.Wait 讓「載入中」這個時間點可以精確地控制。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l3">挑戰</span>挑戰 5：分片</h3>
+        <p>寫一個 Sharded[K, V]，裡面有 16 個 Cache，用 maphash.Comparable 算出 key 屬於哪一個。比較它和原本的 BenchmarkGetParallel。</p>
+        <details><summary>提示</summary><p>maphash.Comparable（Go 1.24 起）可以對任何 comparable 的值算雜湊，不用自己把 key 轉成字串。分片之後，LRU 變成「每一片各自的 LRU」，整體丟掉的不一定是全域最久沒用的；這是分片的代價。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l3">挑戰</span>挑戰 6：泛型的雙向串列</h3>
+        <p>不用 container/list，自己寫一個 node[K, V] 帶 prev、next 指標的雙向串列，拿掉所有型別斷言。用 BenchmarkSetEvict 比較配置次數。</p>
+        <details><summary>提示</summary><p>把 key、val、expires 直接放在節點裡，一個節點只要配置一次。用一個不存資料的哨兵節點，頭尾相連，插入和刪除就不用處理 nil 的特殊情況。</p></details>
+      </li>
+    </ol>
+  </section>
+
+  <section aria-labelledby="recap">
+    <h2 id="recap">重點回顧</h2>
+    <ul class="recap">
+      <li>快取要有上限和期限：上限控制記憶體，期限控制資料多舊。只用 map 的快取會一直長大。</li>
+      <li>LRU = map（找到節點）加雙向串列（記住順序），每個動作都是 O(1)；entry 要存 key，丟掉尾端時才刪得掉 map。</li>
+      <li>泛型型別的型別參數只出現在回傳值時，呼叫要寫明 New[K, V]；container/list 不是泛型的，取值要型別斷言。</li>
+      <li>用到時才檢查過期，程式簡單；過期的資料會佔位置到被擠掉。time.Now 帶單調時鐘，不怕系統時間被調整。</li>
+      <li>Get 會移動節點、改統計，所以用 Mutex，不是 RWMutex 的讀鎖。</li>
+      <li>同一個 key 同時沒找到，只讓一個人載入，其他人等 done channel；載入時不拿著鎖，panic 時用 defer 收尾。</li>
+      <li>synctest 讓 TTL 和「等了多久」都能精確到奈秒地測試，不用注入假的時鐘。</li>
+      <li>一把鎖在大量平行存取時會成為瓶頸；先量，再決定要不要分片。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="further">
+    <h2 id="further">延伸閱讀</h2>
+    <ul class="notes">
+      <li>套件文件：<a href="https://pkg.go.dev/container/list#List.MoveToFront">container/list</a>、<a href="https://pkg.go.dev/sync#RWMutex">sync.RWMutex</a>、<a href="https://pkg.go.dev/testing#B.RunParallel">B.RunParallel</a>、<a href="https://pkg.go.dev/hash/maphash#Comparable">maphash.Comparable</a>、<a href="https://pkg.go.dev/testing/synctest">testing/synctest</a>。</li>
+      <li>官方教學：<a href="https://go.dev/doc/tutorial/generics">Tutorial: Getting started with generics</a>。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="run">
+    <h2 id="run">動手跑</h2>
+    <p class="label">在 repo 根目錄</p>
+    <pre class="shell"><code>go run ./projects/cache
+go test -race ./projects/cache
+go test -run='^$' -bench=. -benchmem ./projects/cache</code></pre>
+    <p><a href="https://github.com/xinqilin/GO-Playground/tree/main/projects/cache">在 GitHub 看完整程式碼</a>。七個專題到這裡結束；回到<a href="index.html">目錄</a>，挑一章還沒做完的練習吧。</p>
+  </section>
+</main>
+
+<nav class="pager" aria-label="章節導覽">
+  <a class="prev" href="project-chat.html">← 專題：TCP 聊天室</a>
+  <a class="home" href="index.html">目錄</a>
+  <span></span>
+</nav>
+</body>
+</html>
