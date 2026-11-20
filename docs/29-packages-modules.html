@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>package 與 module｜Go 圖解手冊</title>
-<meta name="description" content="Go 的 package 與 module：import 路徑怎麼組成、大小寫決定匯出、internal 目錄，以及 go.mod 與 go.sum。">
+<meta name="description" content="Go 的 package 與 module：匯出規則、import 別名、初始化順序、internal 與 package 的設計、go.mod 與 go.sum、語意化版本與最小版本選擇、主版本路徑、replace 與 go.work、發佈與私有 module，附可執行的練習題。">
 <link rel="stylesheet" href="assets/style.css">
 </head>
 <body>
@@ -13,107 +13,577 @@
   <span class="count">29 / 33</span>
 </header>
 
-<main class="page">
+<main class="page long">
   <header class="hero">
     <div class="num" aria-hidden="true">29</div>
     <p class="eyebrow">Part 5 · 工程實務 · 第 29 章</p>
     <h1>package 與 module</h1>
-    <p class="analogy">module 是一整棟大樓，package 是裡面的房間；門牌就是 import 路徑。</p>
+    <p class="analogy">一家便當店：廚房、櫃台、外送各是一個部門（package），部門之間只透過窗口（大寫開頭的名稱）往來，廚房的食譜（internal）不給外人看。整家店是一個 module，進貨單（go.mod）寫著跟哪幾家供應商、拿哪一批貨，收貨簽單（go.sum）確認每一箱都沒被掉包。</p>
   </header>
 
-  <section aria-labelledby="look">
-    <h2 id="look">看圖</h2>
-    <div class="figs">
-      <figure class="fig">
-        <svg viewBox="0 0 480 248" role="img" aria-label="go.mod 宣告 module 路徑；底下的 29-packages-modules 是 package main，greet 是 package greet，internal/counter 只有上一層能 import；import 路徑等於 module 路徑加資料夾路徑">
-          <title>module 與 package 的關係</title>
-          <rect class="acc" x="16" y="16" width="448" height="40" rx="6"/>
-          <text class="small mono" x="32" y="41">go.mod：module github.com/xinqilin/GO-Playground</text>
-          <path class="wire" d="M40 56 V88 H60 M80 106 V188 H100 M80 138 H100"/>
-          <rect class="soft" x="60" y="70" width="190" height="36" rx="6"/>
-          <text class="small mono" x="72" y="93">29-packages-modules/</text>
-          <text class="sm" x="262" y="93">package main</text>
-          <rect class="acc" x="100" y="120" width="170" height="36" rx="6"/>
-          <text class="small mono" x="112" y="143">greet/</text>
-          <text class="sm" x="282" y="143">package greet</text>
-          <rect class="hot" x="100" y="170" width="170" height="36" rx="6"/>
-          <text class="small mono" x="112" y="193">internal/counter/</text>
-          <text class="sm t-hot" x="282" y="193">只有上一層能 import</text>
-          <text class="small mono t-acc" x="16" y="236">import ".../chapters/29-packages-modules/greet"</text>
-        </svg>
-        <figcaption>module 是整個專案，有一個 <code>go.mod</code>；package 是裡面的一個資料夾。import 路徑就是 module 路徑接上資料夾路徑。</figcaption>
-      </figure>
+  <nav class="toc-inline" aria-labelledby="toc-title">
+    <p class="label" id="toc-title">本章內容</p>
+    <ol>
+      <li><a href="#goals">本章你會學到</a></li>
+      <li><a href="#package">package 與 import</a></li>
+      <li><a href="#init">初始化的順序</a></li>
+      <li><a href="#design">internal 與 package 的設計</a></li>
+      <li><a href="#gomod">go.mod 與 go.sum</a></li>
+      <li><a href="#version">版本與最小版本選擇</a></li>
+      <li><a href="#workspace">本機開發：replace 與 go.work</a></li>
+      <li><a href="#publish">發佈、私有 module 與 vendor</a></li>
+      <li><a href="#pitfalls">常見錯誤</a></li>
+      <li><a href="#java">從 Java 來的你</a></li>
+      <li><a href="#exercises">練習</a></li>
+      <li><a href="#recap">重點回顧</a></li>
+      <li><a href="#further">延伸閱讀</a></li>
+    </ol>
+  </nav>
 
-      <figure class="fig">
-        <svg viewBox="0 0 480 206" role="img" aria-label="greet 套件像一間房子：大寫的 Hello 和 Prefix 開在外牆，main 可以使用；小寫的 normalize 在屋裡，main 用不到">
-          <title>大寫開門，小寫關門</title>
-          <rect class="soft" x="200" y="30" width="260" height="160" rx="12"/>
-          <text class="small mono" x="216" y="54">package greet</text>
-          <rect class="acc" x="190" y="74" width="120" height="34" rx="6"/>
-          <rect class="acc" x="190" y="120" width="120" height="34" rx="6"/>
-          <text class="small mono" x="250" y="96" text-anchor="middle">Hello()</text>
-          <text class="small mono" x="250" y="142" text-anchor="middle">Prefix</text>
-          <text class="sm" x="385" y="84" text-anchor="middle">只有自己人用</text>
-          <rect class="box" x="330" y="96" width="110" height="34" rx="6"/>
-          <text class="small mono" x="385" y="118" text-anchor="middle">normalize()</text>
-          <rect class="soft" x="16" y="86" width="100" height="40" rx="6"/>
-          <text class="mono" x="66" y="112" text-anchor="middle">main</text>
-          <path class="wire acc-ln" d="M116 98 H150 V91 H180 M150 98 V137 H180"/>
-          <path class="tip acc-tip" d="M190 91 L178 85 L178 97 Z"/>
-          <path class="tip acc-tip" d="M190 137 L178 131 L178 143 Z"/>
-          <path class="wire hot-ln dash" d="M66 126 V176 H385 V152"/>
-          <path class="wire hot-ln" d="M377 136 L393 152 M393 136 L377 152"/>
-        </svg>
-        <figcaption>名稱大寫開頭，就是開在外牆的門，其他套件進得來；小寫開頭的放在屋裡，只有同一個套件能用。</figcaption>
-      </figure>
-    </div>
+  <section aria-labelledby="goals">
+    <h2 id="goals">本章你會學到</h2>
+    <ul class="notes">
+      <li>package、目錄、import 路徑三者的關係；大寫開頭才匯出；import 別名。</li>
+      <li>程式開始之前發生的事：套件層級的變數依相依關係初始化，接著是 init。</li>
+      <li>用 internal 劃出 API 的邊界，怎麼替 package 命名、怎麼切，以及 import 循環。</li>
+      <li>看懂 go.mod 每一種指令和 go.sum 的用途。</li>
+      <li>語意化版本、最小版本選擇（MVS）、v2 以後的路徑、pseudo-version。</li>
+      <li>同時改兩個 module：replace 和 go.work。</li>
+      <li>發佈 module、私有 module 的設定，以及 vendor。</li>
+    </ul>
+    <p>先備：<a href="00-hello.html#module">00 章的 go mod init</a>、<a href="09-structs-methods.html#ctor">09 章的建構函式</a>。前面每一章都是單一 package，<a href="28-database.html">28 章</a>第一次用到第三方 module，這一章把背後的規則講清楚。</p>
   </section>
 
-  <section aria-labelledby="code">
-    <h2 id="code">最小範例</h2>
-    <p class="label">greet/greet.go（節錄）</p>
-    <pre class="code"><code>package greet
+  <section aria-labelledby="package">
+    <h2 id="package">1. package 與 import</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 220" role="img" aria-label="module 的路徑 github.com/xinqilin/GO-Playground 寫在 go.mod 裡。module 裡的每一個目錄是一個 package，import 路徑等於 module 路徑加上目錄路徑，例如 chapters/29-packages-modules/bento。程式裡用 package 名稱 bento 加上大寫開頭的名稱 New 來使用它">
+        <title>import 路徑 = module 路徑 + 目錄</title>
+        <rect class="acc" x="16" y="16" width="250" height="38" rx="8"/>
+        <text class="sm mono" x="141" y="40" text-anchor="middle">github.com/xinqilin/GO-Playground</text>
+        <rect class="soft" x="272" y="16" width="192" height="38" rx="8"/>
+        <text class="sm mono" x="368" y="40" text-anchor="middle">/chapters/29-…/bento</text>
+        <text class="sm" x="141" y="76" text-anchor="middle">module 路徑（go.mod）</text>
+        <text class="sm" x="368" y="76" text-anchor="middle">目錄</text>
+        <path class="wire" d="M240 86 V104"/>
+        <path class="tip" d="M240 116 L234 104 L246 104 Z"/>
+        <rect class="soft" x="90" y="116" width="300" height="38" rx="8"/>
+        <text class="sm mono" x="240" y="140" text-anchor="middle">m := bento.New()</text>
+        <text class="sm" x="240" y="180" text-anchor="middle">程式裡用的是 package 名稱，不是路徑</text>
+        <text class="sm t-acc" x="240" y="204" text-anchor="middle">大寫開頭才看得到：New、Menu、ErrBadPrice</text>
+      </svg>
+      <figcaption>一個目錄就是一個 package，目錄裡所有的 .go 檔共用同一個 package 名稱。名稱通常和目錄的最後一段一樣。</figcaption>
+    </figure>
+    <p>同一個 package 裡的檔案彼此看得到所有的名稱，不分大小寫；其他 package 只看得到<strong>大寫開頭</strong>的名稱。Go 沒有 public、private 關鍵字，這一條規則就是全部。這一章的 bento 是一個小 package，給 main 使用：</p>
+    <pre class="code" data-src="chapters/29-packages-modules/bento/bento.go"><code>// Package bento 管理便當店的菜單。
+//
+// 對這一章的 main 來說，它是「別人寫的 package」：main 只能用這裡大寫開頭的名稱。
+package bento
 
-var Prefix = "哈囉"
-
-func Hello(name string) string { <span class="c">// 大寫開頭：其他套件可以用</span>
-	return Prefix + "，" + normalize(name)
-}
-
-func normalize(name string) string { … } <span class="c">// 小寫開頭：只有 greet 自己能用</span></code></pre>
-    <p class="label">main.go（節錄）</p>
-    <pre class="code"><code>import (
-	"github.com/xinqilin/GO-Playground/chapters/29-packages-modules/greet"
-	"github.com/xinqilin/GO-Playground/chapters/29-packages-modules/internal/counter"
+import (
+	"errors"
+	"maps"
+	"slices"
 )
 
-func init() { fmt.Println("init：在 main 之前執行") }
+// ErrBadPrice 表示價格不合理。
+var ErrBadPrice = errors.New("價格要大於 0")
+
+// Menu 是一份菜單。欄位沒有匯出，外面只能透過方法讀寫，所以價格不可能被改成負的。
+type Menu struct {
+	prices map[string]int
+}
+
+// New 建立一份空的菜單。
+func New() *Menu {
+	return &amp;Menu{prices: make(map[string]int)}
+}
+
+// Add 加入一道菜；價格要大於 0。
+func (m *Menu) Add(dish string, price int) error {
+	if !valid(price) {
+		return ErrBadPrice
+	}
+	m.prices[dish] = price
+	return nil
+}
+
+// Price 回傳 dish 的價格；菜單上沒有時 ok 是 false。
+func (m *Menu) Price(dish string) (price int, ok bool) {
+	price, ok = m.prices[dish]
+	return price, ok
+}
+
+// Dishes 回傳排序好的菜名。
+func (m *Menu) Dishes() []string {
+	return slices.Sorted(maps.Keys(m.prices))
+}
+
+// valid 沒有匯出：它是 bento 自己的實作細節，以後要改規則也不會影響別人。
+func valid(price int) bool {
+	return price &gt; 0
+}</code></pre>
+    <pre class="code" data-src="chapters/29-packages-modules/packages.go#exportDemo"><code>func exportDemo() {
+	m := bento.New()
+	fmt.Println(m.Add("排骨飯", 90), m.Add("滷肉飯", 50))
+	fmt.Println(m.Add("空氣便當", 0))
+	// m.prices["排骨飯"] = -1 // 編譯錯誤：prices 沒有匯出
+	// bento.valid(-1)        // 編譯錯誤：valid 沒有匯出
+
+	price, ok := m.Price("排骨飯")
+	fmt.Println(price, ok, m.Dishes())
+
+	fmt.Print(receipt.Format([]receipt.Line{
+		{Dish: "排骨飯", Qty: 2, Price: price},
+		{Dish: "滷肉飯", Qty: 1, Price: 50},
+	}))
+}</code></pre>
+    <pre class="out" data-example="chapters/29-packages-modules#Example_exportDemo"><code>&lt;nil&gt; &lt;nil&gt;
+價格要大於 0
+90 true [排骨飯 滷肉飯]
+排骨飯 x2 180
+滷肉飯 x1 50
+合計 230</code></pre>
+    <p>Menu 的 prices 欄位沒有匯出，main 不可能把價格改成負的，所有的修改都要經過會檢查的 Add。在別的 package 碰沒有匯出的名稱是編譯錯誤，連標準庫也一樣：</p>
+    <pre class="code bad" data-compile-error><code>package main
+
+import "strings"
 
 func main() {
-	fmt.Println(greet.Hello("Gopher"))
-	fmt.Println(greet.Hello("  "))
-	greet.Prefix = "嗨"
-	fmt.Println(greet.Hello("Go"))
-	fmt.Println(counter.Next(), counter.Next())
+	var b strings.Builder
+	b.buf = append(b.buf, 0)
 }</code></pre>
-    <p class="label">輸出</p>
-    <pre class="out"><code>init：在 main 之前執行
-哈囉，Gopher
-哈囉，陌生人
-嗨，Go
-1 2</code></pre>
+    <p class="label">編譯錯誤</p>
+    <pre class="out err"><code>./main.go:7:19: b.buf undefined (cannot refer to unexported field buf)</code></pre>
+    <p>程式裡用的是 package 名稱，不是 import 路徑。兩個 package 名稱一樣時，其中一個要取別名：</p>
+    <pre class="code" data-src="chapters/29-packages-modules/packages.go#aliasDemo"><code>func aliasDemo() {
+	const note = "備註：&lt;b&gt;不要辣&lt;/b&gt;\n"
+	text := template.Must(template.New("t").Parse("{{.}}"))
+	html := htmltemplate.Must(htmltemplate.New("h").Parse("{{.}}"))
+	text.Execute(os.Stdout, note)
+	html.Execute(os.Stdout, note)
+}</code></pre>
+    <pre class="out" data-example="chapters/29-packages-modules#Example_aliasDemo"><code>備註：&lt;b&gt;不要辣&lt;/b&gt;
+備註：&amp;lt;b&amp;gt;不要辣&amp;lt;/b&amp;gt;</code></pre>
+    <ul class="notes">
+      <li>text/template 和 html/template 的 package 名稱都是 template。別名取在比較少用的那個上面。</li>
+      <li>路徑的最後一段是版本時，package 名稱是前一段：<code>math/rand/v2</code> 的名稱是 rand，<code>encoding/json/v2</code> 的名稱是 json。</li>
+      <li><code>_</code> 別名只執行那個 package 的 init，不用它的任何名稱，例如 <a href="28-database.html#open">28 章</a>註冊 SQLite driver。</li>
+      <li><code>.</code> 別名讓那個 package 的名稱不用加前綴就能用。讀程式的人看不出名稱從哪裡來，不要用。</li>
+      <li>import 了沒用到是編譯錯誤，存檔時讓編輯器（gopls）自動整理 import。</li>
+    </ul>
   </section>
 
-  <section aria-labelledby="notes">
-    <h2 id="notes">工程師筆記</h2>
+  <section aria-labelledby="init">
+    <h2 id="init">2. 初始化的順序</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 196" role="img" aria-label="程式開始時，先初始化被 import 的 package：它的套件層級變數，然後它的 init。接著是 main package：套件層級變數依照相依關係初始化，price 和 qty 先，total 後；然後執行 init；最後才是 main 函式">
+        <title>main 之前發生的事</title>
+        <rect class="soft" x="16" y="20" width="96" height="56" rx="8"/>
+        <text class="sm" x="64" y="44" text-anchor="middle">steps</text>
+        <text class="sm mono" x="64" y="66" text-anchor="middle">init</text>
+        <path class="wire" d="M112 48 H124"/>
+        <rect class="soft" x="124" y="20" width="160" height="56" rx="8"/>
+        <text class="sm" x="204" y="44" text-anchor="middle">main 的變數</text>
+        <text class="sm mono" x="204" y="66" text-anchor="middle">price → qty → total</text>
+        <path class="wire" d="M284 48 H296"/>
+        <rect class="soft" x="296" y="20" width="76" height="56" rx="8"/>
+        <text class="sm" x="334" y="44" text-anchor="middle">main 的</text>
+        <text class="sm mono" x="334" y="66" text-anchor="middle">init</text>
+        <path class="wire" d="M372 48 H384"/>
+        <rect class="acc" x="384" y="20" width="80" height="56" rx="8"/>
+        <text class="sm mono" x="424" y="53" text-anchor="middle">main()</text>
+        <text class="sm" x="16" y="116">1. 被 import 的 package 先初始化，每個只做一次</text>
+        <text class="sm" x="16" y="142">2. 變數依相依關係：total 用到 price、qty，所以最後</text>
+        <text class="sm" x="16" y="168">3. init 在同一個 package 的變數都好了之後才執行</text>
+      </svg>
+      <figcaption>這些都發生在 main 之前，而且只有一個 goroutine，不需要加鎖。但 init 失敗時沒有辦法回傳錯誤，只能 panic。</figcaption>
+    </figure>
+    <p>套件層級的變數不是單純由上往下初始化：一個變數用到的其他變數，一定先初始化。internal/steps 記下每一步的順序：</p>
+    <pre class="code" data-src="chapters/29-packages-modules/internal/steps/steps.go#Log,Record,init"><code>var Log []string
+
+func Record(name string, v int) int {
+	Log = append(Log, name)
+	return v
+}
+
+func init() {
+	Record("steps 的 init", 0)
+}</code></pre>
+    <pre class="code" data-src="chapters/29-packages-modules/initorder.go#total,price,qty,init,initOrderDemo"><code>var total = steps.Record("total", price*qty)
+
+var price = steps.Record("price", 90)
+
+var qty = steps.Record("qty", 2)
+
+func init() {
+	steps.Record("main 的 init", 0)
+}
+
+func initOrderDemo() {
+	fmt.Println(strings.Join(steps.Log, " → "))
+	fmt.Println("total =", total)
+}</code></pre>
+    <pre class="out" data-example="chapters/29-packages-modules#Example_initOrderDemo"><code>steps 的 init → price → qty → total → main 的 init
+total = 180</code></pre>
     <ul class="notes">
-      <li>一個資料夾就是一個 package，裡面的檔案 package 名稱要一樣；package 名稱通常就是資料夾的最後一段。</li>
-      <li><code>internal/</code> 底下的 package 只有它的上一層目錄樹能 import，用來藏實作細節。</li>
-      <li><code>go get</code> 新增依賴、<code>go mod tidy</code> 整理 <code>go.mod</code> 和 <code>go.sum</code>；<code>go.sum</code> 記錄依賴的校驗碼，要一起 commit。</li>
-      <li>不能循環 import：A import 了 B，B 就不能再 import A。遇到了通常代表要再切出一個 package。</li>
-      <li>package 名稱短、小寫、不加底線；避免 <code>util</code>、<code>common</code> 這種什麼都放的名字。</li>
-      <li><code>init()</code> 會在 main 之前自動執行。用多了會讓啟動順序難以追蹤，能不用就不用。</li>
+      <li>total 寫在最上面，卻最後才初始化，因為它要等 price 和 qty。變數之間形成循環（a 用到 b、b 用到 a）是編譯錯誤。</li>
+      <li>steps 被 main import，所以它的 init 最先執行。同一個 package 被好幾個地方 import，也只初始化一次。</li>
+      <li>init 不能被呼叫，也沒有參數和回傳值。一個檔案可以有好幾個 init，依照出現的順序執行。</li>
     </ul>
+    <p>init 很方便，但要節制：它在每一次程式啟動、每一次測試時都會執行，而且失敗了只能 panic。讀設定檔、連資料庫、呼叫網路這些可能失敗的事，放在 main 裡明確地呼叫，失敗時回傳錯誤（<a href="21-cli.html">21 章</a>的 run 函式就是這樣）。init 適合做的是註冊（像 driver）和計算固定的表格。</p>
+  </section>
+
+  <section aria-labelledby="design">
+    <h2 id="design">3. internal 與 package 的設計</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 214" role="img" aria-label="目錄樹：shop 底下有 kitchen 和 counter，kitchen 底下有 internal/recipe。kitchen 可以 import 自己底下的 internal/recipe；counter 不在 kitchen 底下，import 它會編譯失敗">
+        <title>internal 的範圍</title>
+        <text class="sm mono" x="24" y="30">example.com/shop</text>
+        <path class="wire" d="M40 38 V170"/>
+        <path class="wire" d="M40 64 H60"/>
+        <rect class="acc" x="60" y="48" width="170" height="80" rx="8"/>
+        <text class="sm mono" x="74" y="70">kitchen</text>
+        <text class="sm mono" x="90" y="96">internal/recipe</text>
+        <text class="sm t-acc" x="90" y="118">kitchen 可以用</text>
+        <path class="wire" d="M40 156 H60"/>
+        <rect class="hot" x="60" y="140" width="170" height="40" rx="8"/>
+        <text class="sm mono" x="74" y="165">counter</text>
+        <path class="wire dash" d="M230 160 H300 V96 H230"/>
+        <text class="sm t-hot" x="310" y="124">counter 不在 kitchen</text>
+        <text class="sm t-hot" x="310" y="146">底下：編譯失敗</text>
+        <text class="sm" x="240" y="206" text-anchor="middle">規則：只有 internal 上一層目錄底下的程式碼能 import 它</text>
+      </svg>
+      <figcaption>大寫開頭的名稱，整個世界都能用；用的人越多，以後越難改。internal 讓你在「自己的程式碼共用」和「公開給別人」之間多一個選擇。</figcaption>
+    </figure>
+    <p>本章的 internal/receipt 和 internal/steps 只有 chapters/29-packages-modules 底下的程式碼能用。internal 的規則由 go 指令檢查，不是慣例。testdata/internalerr 是一個專門用來示範的小 module：</p>
+    <pre class="code" data-src="chapters/29-packages-modules/testdata/internalerr/counter/counter.go"><code>// Package counter 在 kitchen 外面，不能 import kitchen/internal 底下的東西。
+package counter
+
+import "example.com/shop/kitchen/internal/recipe"
+
+// Peek 想偷看廚房的食譜。
+func Peek(dish string) int { return recipe.Steps(dish) }</code></pre>
+    <pre class="shell"><code>cd chapters/29-packages-modules/testdata/internalerr
+go build ./...</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out err"><code>package example.com/shop/counter
+	counter/counter.go:4:8: use of internal package example.com/shop/kitchen/internal/recipe not allowed</code></pre>
+    <p>package 怎麼切、怎麼命名，決定了程式好不好讀、好不好改：</p>
+    <ul class="notes">
+      <li><strong>依照提供的功能切</strong>，不是依照型別的種類。bento、receipt、steps 各自說得出「我負責什麼」；models、utils、common、helpers 說不出來，最後什麼都往裡面丟。</li>
+      <li><strong>名稱短、小寫、一個字</strong>，不要底線或大小寫混合。名稱會出現在每一個呼叫的地方，所以 package 裡的名稱不要重複它：<code>bento.Menu</code> 而不是 <code>bento.BentoMenu</code>。</li>
+      <li><strong>匯出的越少越好</strong>。每一個大寫的名稱都是承諾，改了就會弄壞別人。先不匯出，真的有人需要再開放。</li>
+      <li><strong>每個 package 有一段 package 說明</strong>，寫在 <code>// Package bento …</code> 開頭的註解裡。go doc 和 pkg.go.dev 都從原始碼的註解產生文件：</li>
+    </ul>
+    <pre class="shell"><code>cd chapters/29-packages-modules
+go doc ./bento
+go doc ./bento Menu.Price</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out"><code>package bento // import "github.com/xinqilin/GO-Playground/chapters/29-packages-modules/bento"
+
+Package bento 管理便當店的菜單。
+
+對這一章的 main 來說，它是「別人寫的 package」：main 只能用這裡大寫開頭的名稱。
+
+var ErrBadPrice = errors.New("價格要大於 0")
+type Menu struct{ ... }
+    func New() *Menu
+
+package bento // import "github.com/xinqilin/GO-Playground/chapters/29-packages-modules/bento"
+
+func (m *Menu) Price(dish string) (price int, ok bool)
+    Price 回傳 dish 的價格；菜單上沒有時 ok 是 false。</code></pre>
+    <p>兩個 package 不能互相 import。訂單要通知廚房、廚房做好又要更新訂單，寫成兩個 package 互相呼叫，就會編譯失敗：</p>
+    <pre class="shell"><code>cd chapters/29-packages-modules/testdata/cycle
+go build ./...</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out err"><code>package example.com/cycle/kitchen
+	imports example.com/cycle/order from kitchen.go
+	imports example.com/cycle/kitchen from order.go: import cycle not allowed</code></pre>
+    <ul class="notes">
+      <li>常見的解法：讓其中一邊定義一個小 interface，另一邊實作它（<a href="10-interfaces.html#design">10 章</a>）；或把兩邊都需要的型別移到第三個 package；或兩個合成一個。循環常常表示切錯了：兩個 package 其實是同一件事。</li>
+      <li>這幾個示範用的 module 都放在 testdata 底下：go 指令的 <code>./...</code> 會略過名叫 testdata 的目錄，它們不會影響 repo 本身的建置。module_test.go 會實際執行上面的指令，確認輸出沒有變。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="gomod">
+    <h2 id="gomod">4. go.mod 與 go.sum</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 214" role="img" aria-label="go.mod 寫著 module 路徑、需要的 Go 版本、以及 require 的每一個 module 和版本。go.sum 記錄每一個下載的 module 內容的雜湊值。go 指令下載時先從 module proxy 拿到檔案，再和 go.sum 比對；go.sum 還沒有記錄時，向 checksum database 查詢，確認全世界拿到的都是同一份">
+        <title>go.mod 說要什麼，go.sum 確認拿到的是對的</title>
+        <rect class="acc" x="16" y="16" width="200" height="86" rx="8"/>
+        <text class="sm mono" x="30" y="40">go.mod</text>
+        <text class="sm" x="30" y="64">module 路徑、Go 版本</text>
+        <text class="sm" x="30" y="88">require：要哪一版</text>
+        <rect class="soft" x="264" y="16" width="200" height="86" rx="8"/>
+        <text class="sm mono" x="278" y="40">go.sum</text>
+        <text class="sm" x="278" y="64">每個版本內容的雜湊</text>
+        <text class="sm" x="278" y="88">對不上就拒絕建置</text>
+        <rect class="soft" x="16" y="136" width="200" height="40" rx="8"/>
+        <text class="sm" x="116" y="161" text-anchor="middle">proxy.golang.org</text>
+        <rect class="soft" x="264" y="136" width="200" height="40" rx="8"/>
+        <text class="sm" x="364" y="161" text-anchor="middle">sum.golang.org</text>
+        <text class="sm" x="116" y="200" text-anchor="middle">下載 module</text>
+        <text class="sm" x="364" y="200" text-anchor="middle">確認大家拿到同一份</text>
+        <path class="wire" d="M116 102 V136"/>
+        <path class="wire" d="M364 102 V136"/>
+      </svg>
+      <figcaption>兩個檔案都要 commit。go.mod 讓別人建置出同一組版本，go.sum 確保同一個版本的內容不會被偷偷換掉。</figcaption>
+    </figure>
+    <p>這個 repo 只用標準庫，go.mod 只有兩行：</p>
+    <pre class="code" data-src="go.mod"><code>module github.com/xinqilin/GO-Playground
+
+go 1.27</code></pre>
+    <p><a href="28-database.html">28 章</a>用了 SQLite driver，它的 go.mod 就多了 require：</p>
+    <pre class="code" data-src="chapters/28-database/go.mod"><code>module github.com/xinqilin/GO-Playground/chapters/28-database
+
+go 1.27
+
+require modernc.org/sqlite v1.62.0
+
+require (
+	github.com/dustin/go-humanize v1.1.0 // indirect
+	github.com/google/uuid v1.6.0 // indirect
+	github.com/mattn/go-isatty v0.0.24 // indirect
+	github.com/ncruces/go-strftime v1.1.0 // indirect
+	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
+	golang.org/x/sys v0.49.0 // indirect
+	modernc.org/libc v1.80.1 // indirect
+	modernc.org/mathutil v1.7.1 // indirect
+	modernc.org/memory v1.12.1 // indirect
+)</code></pre>
+    <ul class="notes">
+      <li><strong>module</strong>：module 路徑，也是 import 路徑的開頭。要發佈的話，它就是程式碼的位置（例如 GitHub 上的 repo）。</li>
+      <li><strong>go</strong>：至少需要的 Go 版本，也決定語言的行為（<a href="00-hello.html#anatomy">00 章</a>）。</li>
+      <li><strong>require</strong>：直接用到的 module，以及建置需要的間接 module（標著 <code>// indirect</code>）。第一個區塊是程式碼直接 import 的 modernc.org/sqlite，第二個區塊是它需要的。</li>
+      <li>其他指令：<code>replace</code>（換成別的版本或本機的目錄，第 6 節）、<code>exclude</code>（排除某個版本）、<code>retract</code>（作者宣告自己某一版不要用，第 7 節）、<code>tool</code>（Go 1.24 起，記錄專案用到的命令列工具，<a href="32-toolchain.html">工具鏈</a>那一章）。</li>
+    </ul>
+    <p>go.sum 每個版本有兩行，一行是整個 module 內容的雜湊，一行只有它的 go.mod：</p>
+    <pre class="out"><code>modernc.org/sqlite v1.62.0 h1:gMaCjSM1qpl+iOjiWhR1LYP3zqrYDI+5GYLGt6veP2g=
+modernc.org/sqlite v1.62.0/go.mod h1:Jzjh1mt4s0HuQ0KvtB1LIuHiGRmU2D5pgj8dUhW7/SE=</code></pre>
+    <p>想知道某個 module 為什麼會在清單裡，用 <code>go mod why -m</code>，它印出從你的 module 到它的一條 import 路線：</p>
+    <pre class="shell"><code>cd chapters/28-database
+go mod why -m github.com/google/uuid</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out"><code># github.com/google/uuid
+github.com/xinqilin/GO-Playground/chapters/28-database
+modernc.org/sqlite
+modernc.org/libc
+github.com/google/uuid</code></pre>
+    <p>平常會用到的指令：</p>
+    <pre class="shell"><code>go get modernc.org/sqlite@latest   <span class="c"># 加入或升級一個相依，更新 go.mod 和 go.sum</span>
+go get modernc.org/sqlite@v1.61.0  <span class="c"># 指定版本（也可以降版）</span>
+go get -u ./...                    <span class="c"># 把所有相依升到同一個主版本裡的最新版</span>
+go mod tidy                        <span class="c"># 依照程式碼實際的 import，補上缺的、移除沒用到的</span>
+go list -m -u all                  <span class="c"># 列出所有 module，以及有沒有新版</span>
+go mod graph                       <span class="c"># 誰 require 誰，一行一筆</span></code></pre>
+    <ul class="notes">
+      <li>改了 import 之後跑 <code>go mod tidy</code>，再一起 commit go.mod 和 go.sum。CI 可以檢查 tidy 之後有沒有差異，抓出忘了更新的情況。</li>
+      <li>go.mod 可以手動改，但改完要 tidy；require 的版本和 go.sum 對不上時，go 指令會拒絕建置，並提示要跑哪個指令。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="version">
+    <h2 id="version">5. 版本與最小版本選擇</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 226" role="img" aria-label="主 module 需要 rice v1.2 和 sauce v1.2。rice v1.2 需要 pork v1.3，sauce v1.2 需要 pork v1.4。最小版本選擇在所有被要求的版本裡挑最大的，所以 pork 用 v1.4：是某個人明確要求過的版本，不是網路上最新的 v1.9">
+        <title>最小版本選擇</title>
+        <rect class="acc" x="190" y="12" width="100" height="34" rx="8"/>
+        <text class="sm mono" x="240" y="34" text-anchor="middle">main</text>
+        <path class="wire" d="M220 46 V60 H110 V72"/>
+        <path class="wire" d="M260 46 V60 H370 V72"/>
+        <rect class="soft" x="40" y="72" width="140" height="34" rx="8"/>
+        <text class="sm mono" x="110" y="94" text-anchor="middle">rice v1.2</text>
+        <rect class="soft" x="300" y="72" width="140" height="34" rx="8"/>
+        <text class="sm mono" x="370" y="94" text-anchor="middle">sauce v1.2</text>
+        <path class="wire" d="M110 106 V130"/>
+        <path class="wire" d="M370 106 V130"/>
+        <rect class="soft" x="40" y="130" width="140" height="34" rx="8"/>
+        <text class="sm mono" x="110" y="152" text-anchor="middle">pork v1.3</text>
+        <rect class="acc" x="300" y="130" width="140" height="34" rx="8"/>
+        <text class="sm mono" x="370" y="152" text-anchor="middle">pork v1.4</text>
+        <text class="sm t-acc" x="370" y="186" text-anchor="middle">選這個：被要求過的最大版本</text>
+        <text class="sm" x="240" y="214" text-anchor="middle">網路上就算有 pork v1.9，也不會自動被用上</text>
+      </svg>
+      <figcaption>結果只由 go.mod 裡的內容決定：今天建置和明年建置，選出來的版本一樣，不需要另外的 lock 檔。</figcaption>
+    </figure>
+    <p>module 的版本是<strong>語意化版本</strong>：<code>v主版本.次版本.修訂</code>。修 bug 加修訂號，加功能但不弄壞舊程式加次版本號，會弄壞舊程式（改名、刪除、改變行為）才加主版本號。v0 表示還在開發，任何一版都可能不相容。</p>
+    <p>好幾個 module 需要同一個 module 的不同版本時，Go 用<strong>最小版本選擇</strong>（Minimal Version Selection，MVS）：把所有 go.mod 裡要求過的版本都找出來，每個 module 選其中最大的。不是「網路上最新的」，是「有人明確要求過的最小那個能滿足所有人的版本」。練習 5 會自己實作它。</p>
+    <p>go.mod 的 go 那一行也是一種版本，標準庫的 go/version 用來比較這種寫法：</p>
+    <pre class="code" data-src="chapters/29-packages-modules/versions.go#goVersionDemo"><code>func goVersionDemo() {
+	pairs := [][2]string{
+		{"go1.21.0", "go1.22rc1"},
+		{"go1.22rc1", "go1.22.0"},
+		{"go1.9", "go1.10"},
+	}
+	for _, p := range pairs {
+		fmt.Printf("%s 比 %s：%d\n", p[0], p[1], version.Compare(p[0], p[1]))
+	}
+	fmt.Println(version.Lang("go1.27.4"), version.IsValid("1.27"), version.IsValid("go1.27"))
+}</code></pre>
+    <pre class="out" data-example="chapters/29-packages-modules#Example_goVersionDemo"><code>go1.21.0 比 go1.22rc1：-1
+go1.22rc1 比 go1.22.0：-1
+go1.9 比 go1.10：-1
+go1.27 false true</code></pre>
+    <ul class="notes">
+      <li>版本號要比數字，不是比字串：go1.9 比 go1.10 舊，v1.9.0 比 v1.10.0 舊（練習 2）。rc 這種預發行版比正式版舊。</li>
+      <li><strong>v2 以後要改 module 路徑</strong>：不相容的新版，module 路徑要加上 <code>/v2</code>，例如 <code>example.com/bento/v2</code>。對 Go 來說它是另一個 module，同一個程式可以同時用 v1 和 v2，舊的使用者不會因為 go get -u 突然被升到不相容的版本。標準庫的 math/rand/v2、encoding/json/v2 也是同樣的做法。</li>
+      <li><strong>pseudo-version</strong>：相依的 module 沒有打版本標籤時，go 指令用 commit 的時間和雜湊組出一個版本，例如 28 章 go.mod 裡的 <code>v0.0.0-20230129092748-24d4a6f8daec</code>。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="workspace">
+    <h2 id="workspace">6. 本機開發：replace 與 go.work</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 196" role="img" aria-label="shop 和 price 是兩個 module，各有自己的 go.mod。上層目錄的 go.work 用 use 列出兩個目錄，go 指令把它們當成同一次建置：shop import example.com/price 時，直接用本機目錄裡的程式碼，不需要發佈，也不用改 shop 的 go.mod">
+        <title>go.work 把幾個 module 放在一起</title>
+        <rect class="soft" x="16" y="16" width="448" height="140" rx="10"/>
+        <text class="sm mono" x="30" y="38">workspace/go.work</text>
+        <text class="sm mono" x="250" y="38">use ./price ./shop</text>
+        <rect class="acc" x="40" y="56" width="180" height="84" rx="8"/>
+        <text class="sm mono" x="130" y="80" text-anchor="middle">shop/</text>
+        <text class="sm" x="130" y="104" text-anchor="middle">go.mod、main.go</text>
+        <text class="sm mono" x="130" y="126" text-anchor="middle">import "example.com/price"</text>
+        <path class="wire" d="M220 98 H244"/>
+        <path class="tip" d="M256 98 L244 92 L244 104 Z"/>
+        <rect class="soft" x="256" y="56" width="180" height="84" rx="8"/>
+        <text class="sm mono" x="346" y="80" text-anchor="middle">price/</text>
+        <text class="sm" x="346" y="104" text-anchor="middle">go.mod、price.go</text>
+        <text class="sm" x="346" y="126" text-anchor="middle">本機的程式碼</text>
+        <text class="sm" x="240" y="184" text-anchor="middle">改了 price，shop 馬上看到，不用發佈新版</text>
+      </svg>
+      <figcaption>go.work 是給自己開發用的設定，通常不 commit。每個 module 的 go.mod 保持乾淨，發佈出去的還是一般的版本依賴。</figcaption>
+    </figure>
+    <p>同時修改兩個 module 時（例如函式庫和使用它的服務），每改一次就要發佈新版，太慢了。<code>go.work</code> 讓 go 指令把幾個本機的 module 當成一起建置。testdata/workspace 有兩個 module：</p>
+    <pre class="code" data-src="chapters/29-packages-modules/testdata/workspace/go.work"><code>go 1.27
+
+use (
+	./price
+	./shop
+)</code></pre>
+    <pre class="code" data-src="chapters/29-packages-modules/testdata/workspace/price/price.go"><code>// Package price 是另一個 module：放在同一個 workspace 裡，改了馬上就能在 shop 看到效果。
+package price
+
+// Of 回傳一道菜的價格，不認得的菜回傳 0。
+func Of(dish string) int {
+	switch dish {
+	case "排骨飯":
+		return 90
+	case "滷肉飯":
+		return 50
+	}
+	return 0
+}</code></pre>
+    <pre class="code" data-src="chapters/29-packages-modules/testdata/workspace/shop/main.go"><code>// shop 用到 example.com/price。這個 module 沒有發佈到任何地方，是 go.work 讓 go 找得到它。
+package main
+
+import (
+	"fmt"
+
+	"example.com/price"
+)
+
+func main() {
+	for _, dish := range []string{"排骨飯", "滷肉飯"} {
+		fmt.Printf("%s %d 元\n", dish, price.Of(dish))
+	}
+}</code></pre>
+    <pre class="shell"><code>cd chapters/29-packages-modules/testdata/workspace
+go run ./shop</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out"><code>排骨飯 90 元
+滷肉飯 50 元</code></pre>
+    <ul class="notes">
+      <li>建立 workspace：<code>go work init ./price ./shop</code>，之後用 <code>go work use ./其他目錄</code> 加入。</li>
+      <li>shop 的 go.mod 完全沒有提到 price：example.com/price 根本不存在於網路上，是 go.work 讓 go 指令找得到它。</li>
+      <li>暫時不想用 workspace：<code>GOWORK=off go build ./...</code>，確認只靠 go.mod 也建置得過，這是發佈之前該做的檢查。</li>
+    </ul>
+    <p>另一個做法是在 go.mod 寫 <code>replace</code>，把某個 module 換成本機的目錄或另一個 fork。testdata/replace 沒有 go.work，同一個 price 改由 replace 找到：</p>
+    <pre class="code" data-src="chapters/29-packages-modules/testdata/replace/go.mod"><code>module example.com/shop
+
+go 1.27
+
+require example.com/price v0.0.0
+
+// example.com/price 沒有發佈過；replace 把它換成本機的目錄。
+replace example.com/price =&gt; ../workspace/price</code></pre>
+    <pre class="shell"><code>cd chapters/29-packages-modules/testdata/replace
+go run .</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out"><code>排骨飯 90 元</code></pre>
+    <ul class="notes">
+      <li>replace 寫在 go.mod 裡，會跟著 commit。它只對主 module 有效：別人 require 你的 module 時，你的 replace 會被忽略。</li>
+      <li>適合「在上游修好之前，暫時用自己 fork 的版本」。只是本機開發的話用 go.work，不要讓 replace 留在 go.mod 裡被發佈出去。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="publish">
+    <h2 id="publish">7. 發佈、私有 module 與 vendor</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 200" role="img" aria-label="發佈一個 module：程式碼推到 repo，打上 v1.2.0 的 git 標籤。別人執行 go get 時，module proxy 從 repo 抓下那個版本並快取，checksum database 記下它的雜湊。私有的 module 設定 GOPRIVATE，go 指令就直接從 repo 抓，不經過公開的 proxy，也不查公開的 checksum database">
+        <title>版本從哪裡來</title>
+        <rect class="soft" x="16" y="16" width="130" height="56" rx="8"/>
+        <text class="sm" x="81" y="40" text-anchor="middle">你的 repo</text>
+        <text class="sm mono" x="81" y="62" text-anchor="middle">git tag v1.2.0</text>
+        <path class="wire" d="M146 44 H174"/>
+        <rect class="acc" x="174" y="16" width="140" height="56" rx="8"/>
+        <text class="sm" x="244" y="40" text-anchor="middle">module proxy</text>
+        <text class="sm" x="244" y="62" text-anchor="middle">抓下來、快取</text>
+        <path class="wire" d="M314 44 H342"/>
+        <rect class="soft" x="342" y="16" width="122" height="56" rx="8"/>
+        <text class="sm mono" x="403" y="40" text-anchor="middle">go get</text>
+        <text class="sm" x="403" y="62" text-anchor="middle">使用的人</text>
+        <rect class="hot" x="16" y="108" width="448" height="56" rx="8"/>
+        <text class="sm mono" x="30" y="130">GOPRIVATE=git.example.com/*</text>
+        <text class="sm" x="30" y="152">符合的路徑直接從 repo 抓，不經過公開的 proxy</text>
+        <text class="sm" x="240" y="190" text-anchor="middle">版本一旦發佈就不能改內容，只能發新版</text>
+      </svg>
+      <figcaption>proxy 會快取每一個版本：就算原作者刪掉 repo，已經發佈的版本還是抓得到，你的建置不會因為別人刪東西而壞掉。</figcaption>
+    </figure>
+    <p><strong>發佈</strong>不需要上傳到任何地方：module 路徑就是程式碼的位置，在 repo 打上 <code>v1.2.0</code> 這種 git 標籤就是一個版本。第一次有人 go get 時，proxy.golang.org 抓下來並快取，pkg.go.dev 也會產生文件。</p>
+    <ul class="notes">
+      <li>已經發佈的版本不能改。發現某一版有嚴重的問題，發一個新版，並在 go.mod 用 <code>retract v1.2.0</code> 宣告不要用它：go get 不會再選它，已經在用的人也會在 <code>go list -m -u</code> 看到提醒。</li>
+      <li>module 在子目錄時（例如這個 repo 的 chapters/28-database），標籤要加上目錄當前綴：<code>chapters/28-database/v1.0.0</code>。</li>
+    </ul>
+    <p><strong>私有 module</strong>（公司內部的 repo）不能經過公開的 proxy，雜湊也不該送到公開的 checksum database。設定 GOPRIVATE，符合的路徑就直接從 repo 抓：</p>
+    <pre class="shell"><code>go env -w GOPRIVATE='git.example.com/*'   <span class="c"># 寫進 go 的設定檔，之後每次都有效</span>
+go env GOPROXY GOSUMDB                    <span class="c"># 看目前的設定</span></code></pre>
+    <p class="label">輸出（預設值）</p>
+    <pre class="out"><code>https://proxy.golang.org,direct
+sum.golang.org</code></pre>
+    <ul class="notes">
+      <li>存取私有 repo 的帳號密碼由 git 處理（SSH 金鑰、credential helper），go 指令只是呼叫 git。</li>
+      <li>公司也可以架自己的 proxy，用 GOPROXY 指定，同時快取公開和私有的 module。</li>
+    </ul>
+    <p><strong>vendor</strong>：<code>go mod vendor</code> 把所有相依的原始碼複製到 vendor 目錄，go 指令看到它就改用裡面的程式碼，建置時完全不需要網路。代價是 repo 多了大量第三方程式碼，每次升級都是很大的 diff。大部分專案用 proxy 加 go.sum 就足夠了，只有完全不能連外的建置環境才需要 vendor。</p>
+  </section>
+
+  <section aria-labelledby="pitfalls">
+    <h2 id="pitfalls">常見錯誤</h2>
+    <h3 id="pit-utils">1. utils、common、models 這種 package</h3>
+    <p>名稱說不出它負責什麼，最後什麼都往裡面丟，而且每個 package 都 import 它。依照功能切，名稱就是它做的事（第 3 節）。</p>
+
+    <h3 id="pit-stutter">2. 名稱重複 package 名稱</h3>
+    <p>呼叫的地方會寫成 bento.BentoMenu。package 名稱已經是前綴了：bento.Menu（第 3 節）。</p>
+
+    <h3 id="pit-export-all">3. 什麼都匯出</h3>
+    <p>每一個大寫的名稱都可能被別人用到，以後就改不了。先不匯出，只在自己的 module 裡共用的放 internal（第 1、3 節）。</p>
+
+    <h3 id="pit-init">4. 在 init 裡做會失敗的事</h3>
+    <p>init 不能回傳錯誤，失敗只能 panic，測試也會跟著執行。讀設定、連資料庫放在 main 裡明確地呼叫（第 2 節）。</p>
+
+    <h3 id="pit-cycle">5. 兩個 package 互相 import</h3>
+    <p>編譯失敗。用 interface 反轉其中一邊的依賴，或把共用的部分移到第三個 package（第 3 節）。</p>
+
+    <h3 id="pit-gosum">6. 不 commit go.sum，或手改 go.mod 不 tidy</h3>
+    <p>別人建置時沒有雜湊可以比對，或 go.mod 和程式碼對不上。改了 import 就 go mod tidy，兩個檔案一起 commit（第 4 節）。</p>
+
+    <h3 id="pit-v2">7. 不相容的改版沒有改成 /v2</h3>
+    <p>使用者 go get -u 之後程式就壞了。主版本號從 2 開始，module 路徑要加 /v2（第 5 節）。</p>
+
+    <h3 id="pit-replace">8. 本機的 replace 留在 go.mod 裡</h3>
+    <p>別人 clone 之後沒有那個目錄，建置失敗。本機開發用 go.work，並且不要 commit 它（第 6 節）。</p>
   </section>
 
   <section aria-labelledby="java">
@@ -122,24 +592,148 @@ func main() {
       <table class="vs">
         <thead><tr><th scope="col">主題</th><th scope="col">Java</th><th scope="col">Go</th></tr></thead>
         <tbody>
-          <tr><th scope="row">專案描述</th><td class="java"><code>pom.xml</code> / <code>build.gradle</code></td><td><code>go.mod</code></td></tr>
-          <tr><th scope="row">依賴校驗</th><td class="java">固定版本號或 lock 檔</td><td><code>go.sum</code> 記錄校驗碼</td></tr>
-          <tr><th scope="row">命名空間</th><td class="java">反向網域 <code>com.example.app</code></td><td>import 路徑用 repo 網址</td></tr>
-          <tr><th scope="row">可見性</th><td class="java"><code>public</code>、<code>protected</code>、package-private、<code>private</code></td><td>只有兩種：大寫匯出、小寫不匯出</td></tr>
-          <tr><th scope="row">模組封裝</th><td class="java">JPMS <code>module-info.java</code> 的 exports</td><td><code>internal/</code> 目錄</td></tr>
-          <tr><th scope="row">套件來源</th><td class="java">Maven Central</td><td>直接從版本控制抓，預設經過 proxy.golang.org</td></tr>
+          <tr><th scope="row">可見性</th><td class="java">public、protected、private、package-private</td><td>大寫開頭匯出，其他都只在 package 內</td></tr>
+          <tr><th scope="row">package 和目錄</th><td class="java">一個 class 一個檔案，package 對應目錄</td><td>一個目錄一個 package，檔案怎麼分自己決定</td></tr>
+          <tr><th scope="row">限制誰能用</th><td class="java">JPMS 的 <code>module-info.java</code> exports</td><td>internal 目錄</td></tr>
+          <tr><th scope="row">靜態初始化</th><td class="java"><code>static { }</code>，第一次用到 class 時</td><td>init，程式啟動時一次做完</td></tr>
+          <tr><th scope="row">相依管理</th><td class="java">Maven pom.xml、Gradle</td><td>go.mod，go 指令內建</td></tr>
+          <tr><th scope="row">版本衝突</th><td class="java">Maven 選依賴樹上最近的</td><td>MVS：被要求過的最大版本</td></tr>
+          <tr><th scope="row">鎖定版本</th><td class="java">Gradle lock 檔</td><td>不需要，go.mod 就決定了；go.sum 驗證內容</td></tr>
+          <tr><th scope="row">套件倉庫</th><td class="java">Maven Central，要上傳</td><td>repo 本身加 git 標籤，proxy 自動快取</td></tr>
+          <tr><th scope="row">多模組開發</th><td class="java">Maven 多模組專案</td><td>go.work</td></tr>
+          <tr><th scope="row">未發佈的版本</th><td class="java">SNAPSHOT</td><td>pseudo-version</td></tr>
         </tbody>
       </table>
     </div>
+    <p>Java 的可見性有四種，Go 只有兩種；Go 用「一個目錄一個 package」加上 internal 來達到差不多的效果。另一個大差別是版本衝突：Maven 的結果取決於依賴樹的形狀，Go 的 MVS 只看版本號，而且永遠不會選到沒有人要求過的版本。</p>
+  </section>
+
+  <section aria-labelledby="exercises">
+    <h2 id="exercises">練習</h2>
+    <p>題目在 <code>exercises/29-packages-modules/exercises.go</code>：自己算一次 go 指令替你做的版本決定。</p>
+    <pre class="shell"><code>go test ./exercises/29-packages-modules/                  <span class="c"># 跑全部練習</span>
+go test ./exercises/29-packages-modules/ -run TestSelect  <span class="c"># 只跑一題</span>
+go test -tags solution ./exercises/29-packages-modules/   <span class="c"># 跑參考解答</span></code></pre>
+    <p>共用的型別在 doc.go：</p>
+    <pre class="code" data-src="exercises/29-packages-modules/doc.go#Version,Version.String,Require"><code>type Version struct {
+	Major, Minor, Patch int
+	Pre                 string
+}
+
+func (v Version) String() string {
+	s := fmt.Sprintf("v%d.%d.%d", v.Major, v.Minor, v.Patch)
+	if v.Pre != "" {
+		s += "-" + v.Pre
+	}
+	return s
+}
+
+type Require struct {
+	Path     string
+	Version  string
+	Indirect bool // 行尾有 // indirect
+}</code></pre>
+    <ol class="exercises">
+      <li>
+        <h3><span class="level l1">入門</span>練習 1：解析版本</h3>
+        <p>把 go.mod 裡的版本字串變成可以比較的數字。</p>
+        <pre class="code" data-src="exercises/29-packages-modules/exercises.go#Parse"><code>func Parse(s string) (Version, error) {
+	// TODO: 實作
+	return Version{}, nil
+}</code></pre>
+        <p>測試：<code>TestParse</code>，包含 28 章 go.mod 裡的 pseudo-version。</p>
+        <details><summary>提示</summary><p><code>strings.CutPrefix</code> 去掉 v，<code>strings.Cut(rest, "-")</code> 分出預發行標記，再 Split 成三段。strconv.Atoi 接受 +1，要自己擋掉。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l2">進階</span>練習 2：比較版本</h3>
+        <p>v1.10.0 比 v1.9.0 新，用字串比較會得到相反的答案。</p>
+        <pre class="code" data-src="exercises/29-packages-modules/exercises.go#Compare"><code>func Compare(a, b Version) int {
+	// TODO: 實作
+	return 0
+}</code></pre>
+        <p>測試：<code>TestCompare</code>。</p>
+        <details><summary>提示</summary><p><code>cmp.Or(cmp.Compare(a.Major, b.Major), …)</code> 會回傳第一個不是 0 的結果。預發行標記的每一段，先用 strconv.Atoi 判斷是不是數字。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l2">進階</span>練習 3：go get -u 會升到哪一版</h3>
+        <p>不會跨主版本，也不會選預發行版。</p>
+        <pre class="code" data-src="exercises/29-packages-modules/exercises.go#Latest"><code>func Latest(current Version, available []Version) (Version, bool) {
+	// TODO: 實作
+	return Version{}, false
+}</code></pre>
+        <p>測試：<code>TestLatest</code>。</p>
+        <details><summary>提示</summary><p>從 current 開始，逐一看 available，符合條件又比目前最好的新就換掉。用練習 2 的 Compare。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l2">進階</span>練習 4：讀 go.mod 的 require</h3>
+        <p>一行的寫法和區塊的寫法都要支援，replace 區塊不能被當成 require。</p>
+        <pre class="code" data-src="exercises/29-packages-modules/exercises.go#ParseRequires"><code>func ParseRequires(gomod string) ([]Require, error) {
+	// TODO: 實作
+	return nil, nil
+}</code></pre>
+        <p>測試：<code>TestParseRequires</code>，輸入改寫自 28 章的 go.mod。</p>
+        <details><summary>提示</summary><p>一行一行讀，用 <code>strings.Cut(line, "//")</code> 分出註解，<code>strings.Fields</code> 切欄位。用一個 bool 記住「現在在 require 區塊裡」，遇到 <code>)</code> 就離開。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l3">挑戰</span>練習 5：最小版本選擇</h3>
+        <p>第 5 節那張圖，自己算一次。</p>
+        <pre class="code" data-src="exercises/29-packages-modules/exercises.go#Select"><code>func Select(reqs map[string][]string) (map[string]string, error) {
+	// TODO: 實作
+	return nil, nil
+}</code></pre>
+        <p>測試：<code>TestSelect</code>。</p>
+        <details><summary>提示</summary><p>從 "main" 開始做廣度優先搜尋（一個 queue 加上記錄走過哪些 path@version 的 map），每走到一個 path@version，就和那個 path 目前最大的版本比較。注意最後沒被選上的版本，它的 require 一樣要走。</p></details>
+      </li>
+      <li>
+        <h3><span class="level fix">找錯</span>練習 6：internal 的規則</h3>
+        <p>example.com/shopping 不在 example.com/shop 底下，卻被允許了。</p>
+        <pre class="code" data-src="exercises/29-packages-modules/exercises.go#InternalAllowed"><code>func InternalAllowed(importer, imported string) bool {
+	before, _, ok := strings.Cut(imported, "/internal")
+	if !ok {
+		return true
+	}
+	return strings.HasPrefix(importer, before)
+}</code></pre>
+        <p>測試：<code>TestInternalAllowed</code>。</p>
+        <details><summary>提示</summary><p>有三個問題：字串的開頭相同不等於在那個目錄底下（要比到 / 為止）；/internals 不是 internal；有好幾段 internal 時要看最後一段。用 strings.Split 切成路徑段來比，三個問題一次解決。</p></details>
+      </li>
+    </ol>
+    <p><a href="https://github.com/xinqilin/GO-Playground/blob/main/exercises/29-packages-modules/solution.go">參考解答</a>：先自己寫完再看。測試通過的寫法都是對的。</p>
+  </section>
+
+  <section aria-labelledby="recap">
+    <h2 id="recap">重點回顧</h2>
+    <ul class="recap">
+      <li>一個目錄一個 package；import 路徑是 module 路徑加目錄；程式裡用 package 名稱。</li>
+      <li>大寫開頭才匯出。匯出的越少，以後越好改。</li>
+      <li>被 import 的 package 先初始化；變數依相依關係初始化，然後 init，最後 main。</li>
+      <li>init 只做註冊、固定的表格；會失敗的事放在 main。</li>
+      <li>internal 只給上一層目錄底下的程式碼用；package 依照功能切，名稱短而且不重複。</li>
+      <li>import 循環是編譯錯誤，用 interface 或第三個 package 解開。</li>
+      <li>go.mod 決定版本，go.sum 驗證內容，兩個都要 commit；改了 import 就 go mod tidy。</li>
+      <li>MVS 選被要求過的最大版本；不相容的新版要改成 /v2 路徑。</li>
+      <li>本機同時改好幾個 module 用 go.work；私有 module 設 GOPRIVATE。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="further">
+    <h2 id="further">延伸閱讀</h2>
+    <ul class="notes">
+      <li>語言規格：<a href="https://go.dev/ref/spec#Exported_identifiers">Exported identifiers</a>、<a href="https://go.dev/ref/spec#Import_declarations">Import declarations</a>、<a href="https://go.dev/ref/spec#Package_initialization">Package initialization</a>。</li>
+      <li>Go Modules Reference：<a href="https://go.dev/ref/mod#go-mod-file">go.mod</a>、<a href="https://go.dev/ref/mod#go-sum-files">go.sum</a>、<a href="https://go.dev/ref/mod#minimal-version-selection">Minimal version selection</a>、<a href="https://go.dev/ref/mod#major-version-suffixes">Major version suffixes</a>、<a href="https://go.dev/ref/mod#workspaces">Workspaces</a>、<a href="https://go.dev/ref/mod#private-modules">Private modules</a>、<a href="https://go.dev/ref/mod#vendoring">Vendoring</a>。</li>
+      <li>官方文件：<a href="https://go.dev/doc/modules/layout">Organizing a Go module</a>、<a href="https://go.dev/doc/modules/managing-dependencies">Managing dependencies</a>、<a href="https://go.dev/doc/modules/version-numbers">Module version numbering</a>、<a href="https://go.dev/doc/tutorial/workspaces">Getting started with multi-module workspaces</a>。</li>
+      <li>Go 官方部落格：<a href="https://go.dev/blog/package-names">Package names</a>。</li>
+    </ul>
   </section>
 
   <section aria-labelledby="run">
     <h2 id="run">動手跑</h2>
     <p class="label">在 repo 根目錄</p>
-    <pre class="shell"><code>go run ./chapters/29-packages-modules
-go test ./chapters/29-packages-modules/...
-go doc ./chapters/29-packages-modules/greet   <span class="c"># 看 greet 的文件</span></code></pre>
-    <p><a href="https://github.com/xinqilin/GO-Playground/tree/main/chapters/29-packages-modules">在 GitHub 看完整程式碼</a></p>
+    <pre class="shell"><code>go run ./chapters/29-packages-modules              <span class="c"># 跑一遍所有示範</span>
+go test ./chapters/29-packages-modules/...         <span class="c"># 驗證輸出，並實際執行 testdata 裡的 go 指令</span>
+go -C chapters/29-packages-modules/testdata/workspace run ./shop
+go test ./exercises/29-packages-modules/           <span class="c"># 做練習</span></code></pre>
+    <p><a href="https://github.com/xinqilin/GO-Playground/tree/main/chapters/29-packages-modules">在 GitHub 看本章完整程式碼</a>，或看<a href="https://github.com/xinqilin/GO-Playground/tree/main/exercises/29-packages-modules">練習題</a>。</p>
   </section>
 </main>
 

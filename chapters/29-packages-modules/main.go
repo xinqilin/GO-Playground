@@ -1,29 +1,26 @@
 // 第 29 章：package 與 module。
 //
-// module 是一整個專案（一個 go.mod），package 是裡面的一個資料夾。
-// import 路徑 = module 路徑 + 資料夾路徑。
+// 每個示範都是一個函式，main 依照頁面上的順序呼叫它們；
+// main_test.go 用 Example 鎖住每個示範的輸出，頁面上的輸出就是從那裡同步過去的。
+// module_test.go 對 testdata 底下的幾個小 module 執行 go 指令，確認頁面上的指令輸出是真的。
+//
 // 執行：go run ./chapters/29-packages-modules
 package main
 
-import (
-	"fmt"
-
-	"github.com/xinqilin/GO-Playground/chapters/29-packages-modules/greet"
-	"github.com/xinqilin/GO-Playground/chapters/29-packages-modules/internal/counter"
-)
-
-// init 在 main 之前自動執行，每個檔案可以有多個。適合做簡單的初始化，不要放太多邏輯。
-func init() {
-	fmt.Println("init：在 main 之前執行")
-}
+import "fmt"
 
 func main() {
-	fmt.Println(greet.Hello("Gopher"))
-	fmt.Println(greet.Hello("  "))
-	// greet.normalize("x") 會編譯錯誤：normalize 沒有匯出。
+	section("1. package 與 import")
+	exportDemo()
+	aliasDemo()
 
-	greet.Prefix = "嗨" // 匯出的變數，其他套件也改得到
-	fmt.Println(greet.Hello("Go"))
+	section("2. 初始化的順序")
+	initOrderDemo()
 
-	fmt.Println(counter.Next(), counter.Next())
+	section("5. 版本")
+	goVersionDemo()
+}
+
+func section(title string) {
+	fmt.Println("==", title, "==")
 }
