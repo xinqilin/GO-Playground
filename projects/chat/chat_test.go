@@ -225,6 +225,24 @@ func TestCheckNick(t *testing.T) {
 	}
 }
 
+// TestRenameSame：改成自己現在的暱稱什麼都不做，不能回「有人用了」，也不用通知大家。
+func TestRenameSame(t *testing.T) {
+	r := NewRoom()
+	m, err := r.Join("小明")
+	if err != nil {
+		t.Fatal(err)
+	}
+	<-m.out // 歡迎訊息
+	if err := r.Rename(m, "小明"); err != nil {
+		t.Errorf("Rename 成自己的暱稱 = %v，想要 nil", err)
+	}
+	select {
+	case line := <-m.out:
+		t.Errorf("不應該廣播，卻收到 %q", line)
+	default:
+	}
+}
+
 func Example_clean() {
 	for _, s := range []string{
 		"\x1b[2J\x1b[31m大家好\x1b[0m", // 清掉畫面、改成紅字

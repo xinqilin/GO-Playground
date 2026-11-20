@@ -100,7 +100,11 @@ func (r *Room) Rename(m *member, nick string) error {
 	if !r.hasLocked(m) {
 		return nil
 	}
-	if r.members[nick] != nil {
+	switch r.members[nick] {
+	case nil:
+	case m: // 改成自己現在的名字
+		return nil
+	default:
 		return errNickTaken
 	}
 	old := m.nick
