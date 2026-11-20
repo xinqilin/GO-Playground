@@ -1,0 +1,944 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>HTTP 用戶端｜Go 圖解手冊</title>
+<meta name="description" content="用 net/http 呼叫別人的 API：http.Client 的逾時與 context、狀態碼不是 error、用 net/url 組網址、送出與解析 JSON、關掉 body 讓連線重用、重試與退避、自己寫 RoundTripper，以及不經過網路的測試方式，附可執行的練習題。">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<header class="site">
+  <a href="index.html">Go 圖解手冊</a>
+  <span class="count">27 / 33</span>
+</header>
+
+<main class="page long">
+  <header class="hero">
+    <div class="num" aria-hidden="true">27</div>
+    <p class="eyebrow">Part 4 · 標準庫實戰 · 第 27 章</p>
+    <h1>HTTP 用戶端</h1>
+    <p class="analogy">打電話訂便當：先想好最多等幾聲就掛掉；電話接通不代表訂到了，要聽清楚對方說「好」還是「賣完了」；講完要把電話掛好，下一通才打得進來；對方說「現在太忙」就隔一下再打，而且每次隔久一點。</p>
+  </header>
+
+  <nav class="toc-inline" aria-labelledby="toc-title">
+    <p class="label" id="toc-title">本章內容</p>
+    <ol>
+      <li><a href="#goals">本章你會學到</a></li>
+      <li><a href="#request">發出請求、讀回應</a></li>
+      <li><a href="#timeout">逾時與取消</a></li>
+      <li><a href="#json">網址與 JSON</a></li>
+      <li><a href="#reuse">關掉 body 與連線池</a></li>
+      <li><a href="#retry">重試與退避</a></li>
+      <li><a href="#roundtripper">RoundTripper</a></li>
+      <li><a href="#testing">測試</a></li>
+      <li><a href="#pitfalls">常見錯誤</a></li>
+      <li><a href="#java">從 Java 來的你</a></li>
+      <li><a href="#exercises">練習</a></li>
+      <li><a href="#recap">重點回顧</a></li>
+      <li><a href="#further">延伸閱讀</a></li>
+    </ol>
+  </nav>
+
+  <section aria-labelledby="goals">
+    <h2 id="goals">本章你會學到</h2>
+    <ul class="notes">
+      <li>http.Client 送出請求，分清楚「送不出去」（error）和「對方說不行」（狀態碼）。</li>
+      <li>Client.Timeout 和 context 的期限，以及為什麼不能直接用 http.Get 上線。</li>
+      <li>用 net/url 組網址；把「送 JSON、檢查狀態碼、解 JSON、關 body」包成一個函式。</li>
+      <li>body 讀完並關掉，連線才會回到連線池；整個程式共用一個 Client。</li>
+      <li>只重試暫時性的失敗，等待時間指數成長並加上抖動，ctx 決定最多等多久。</li>
+      <li>RoundTripper：在 Client 和網路之間加上記錄、驗證，或換成測試用的假對方。</li>
+      <li>用假的 RoundTripper 和 Go 1.27 的 NewTestServer 測試，不需要網路，也不用真的等逾時。</li>
+    </ul>
+    <p>先備：<a href="26-http.html">26 章的 HTTP 服務</a>（這一章是另一頭）、<a href="18-context.html">18 章的 context</a>、<a href="23-json.html">23 章的 JSON</a>、<a href="22-time.html#testing">22 章的 synctest</a>。示範的 client 都不經過網路，而是把請求交給一個假的便當店，輸出才會每次一樣。</p>
+  </section>
+
+  <section aria-labelledby="request">
+    <h2 id="request">1. 發出請求、讀回應</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 214" role="img" aria-label="client.Do 回傳回應和錯誤。err 不是 nil 表示沒有拿到任何回應，例如找不到主機、連不上、逾時。err 是 nil 表示拿到了回應，狀態碼可能是 200，也可能是 404 或 500，要自己檢查">
+        <title>error 和狀態碼是兩回事</title>
+        <rect class="acc" x="110" y="12" width="260" height="38" rx="8"/>
+        <text class="sm mono" x="240" y="36" text-anchor="middle">resp, err := client.Do(req)</text>
+        <path class="wire" d="M200 50 V66 H110 V80"/>
+        <path class="wire" d="M280 50 V66 H370 V80"/>
+        <path class="tip" d="M110 92 L104 80 L116 80 Z"/>
+        <path class="tip" d="M370 92 L364 80 L376 80 Z"/>
+        <rect class="hot" x="16" y="92" width="188" height="96" rx="8"/>
+        <text class="sm mono" x="110" y="116" text-anchor="middle">err != nil</text>
+        <text class="sm" x="110" y="140" text-anchor="middle">沒有拿到回應</text>
+        <text class="sm" x="110" y="164" text-anchor="middle">找不到主機、連不上、逾時</text>
+        <rect class="soft" x="276" y="92" width="188" height="96" rx="8"/>
+        <text class="sm mono" x="370" y="116" text-anchor="middle">err == nil</text>
+        <text class="sm" x="370" y="140" text-anchor="middle">拿到回應了</text>
+        <text class="sm mono" x="370" y="164" text-anchor="middle">200、404、500 都有可能</text>
+        <text class="sm t-hot" x="370" y="208" text-anchor="middle">自己檢查 StatusCode</text>
+      </svg>
+      <figcaption>404、500 也是一個完整的 HTTP 回應，所以 err 是 nil。只看 err 的程式，會把「找不到這筆訂單」當成成功。</figcaption>
+    </figure>
+    <p>送出請求的是 <code>*http.Client</code>。它的 Get、Post 是方便的寫法，完整的寫法是先建立 <code>*http.Request</code>，再交給 <code>client.Do</code>。拿到的 <code>*http.Response</code> 有狀態碼、標頭，以及一個 io.Reader 形式的 Body：</p>
+    <pre class="code" data-src="chapters/27-http-client/basics.go#getDemo"><code>func getDemo() {
+	client := newDemoClient()
+
+	resp, err := client.Get("http://shop.test/menu")
+	if err != nil {
+		fmt.Println("送不出去：", err)
+		return
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		fmt.Println("讀內容失敗：", err)
+		return
+	}
+	fmt.Println(resp.StatusCode, resp.Header.Get("Content-Type"))
+	fmt.Println(string(body))
+
+	resp2, err := client.Get("http://shop.test/orders/99")
+	if err != nil {
+		fmt.Println("送不出去：", err)
+		return
+	}
+	defer resp2.Body.Close()
+	fmt.Printf("err 是 %v，狀態是 %s\n", err, resp2.Status)
+}</code></pre>
+    <pre class="out" data-example="chapters/27-http-client#Example_getDemo"><code>200 application/json
+[{"dish":"滷肉飯","price":50},{"dish":"排骨飯","price":90}]
+err 是 &lt;nil&gt;，狀態是 404 Not Found</code></pre>
+    <ul class="notes">
+      <li>先檢查 err，再 <code>defer resp.Body.Close()</code>。err 不是 nil 的時候 resp 是 nil，順序反過來就是 nil 指標的 panic。</li>
+      <li><code>resp.StatusCode</code> 是數字，<code>resp.Status</code> 是「404 Not Found」這種給人看的文字。判斷用前者，比較時用 <code>http.StatusNotFound</code> 這類常數。</li>
+      <li>Body 是一邊從網路讀一邊交給你的串流，不是已經在記憶體裡的字串。io.ReadAll 會讀到結束為止，所以要先確定對方不會送來無限多的資料（第 3 節）。</li>
+      <li><code>http.Get(url)</code> 用的是 <code>http.DefaultClient</code>，它沒有逾時。只適合寫小工具，正式的程式要自己建立 Client（下一節）。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="timeout">
+    <h2 id="timeout">2. 逾時與取消</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 200" role="img" aria-label="一個請求的時間軸：建立連線、送出請求、等對方回標頭、讀 body。Client.Timeout 從開始管到 body 讀完，套用在這個 Client 送出的每個請求。請求的 context 期限只管這一個請求。兩個都設的時候，先到期的那個生效">
+        <title>兩種期限</title>
+        <path class="wire" d="M16 40 H464"/>
+        <text class="sm" x="60" y="28" text-anchor="middle">連線</text>
+        <text class="sm" x="160" y="28" text-anchor="middle">送出請求</text>
+        <text class="sm" x="270" y="28" text-anchor="middle">等回應標頭</text>
+        <text class="sm" x="390" y="28" text-anchor="middle">讀 body</text>
+        <path class="wire" d="M110 34 V46"/>
+        <path class="wire" d="M210 34 V46"/>
+        <path class="wire" d="M330 34 V46"/>
+        <rect class="acc" x="16" y="62" width="448" height="30" rx="4"/>
+        <text class="sm mono" x="240" y="82" text-anchor="middle">Client.Timeout：這個 Client 的每個請求</text>
+        <rect class="soft" x="16" y="104" width="300" height="30" rx="4"/>
+        <text class="sm mono" x="166" y="124" text-anchor="middle">ctx 的期限：只管這一個請求</text>
+        <text class="sm t-hot" x="240" y="164" text-anchor="middle">先到期的那個生效，err 是 context.DeadlineExceeded</text>
+        <text class="sm" x="240" y="188" text-anchor="middle">對方的 r.Context() 同時被取消，知道客人走了</text>
+      </svg>
+      <figcaption>Client.Timeout 的零值是「永遠等下去」。對方卡住不回應時，沒有逾時的請求會讓呼叫它的 goroutine 一起卡住。</figcaption>
+    </figure>
+    <p>每個 Client 都要設 <code>Timeout</code>：從開始連線，到 body 讀完的總時間。個別請求需要更短的期限，或要跟著上層一起取消時，用 <a href="18-context.html#deadline">18 章</a>的 context 建立請求：<code>http.NewRequestWithContext(ctx, …)</code>。</p>
+    <p>逾時要怎麼測？店家真的等 5 秒，測試就要跑 5 秒。下面的測試用 <a href="26-http.html#testing">26 章</a>介紹的 <code>httptest.NewTestServer</code>（記憶體裡的網路）搭配 synctest（假的時間），測試一瞬間就跑完，而且時間可以檢查到剛好 2 秒：</p>
+    <pre class="code" data-src="chapters/27-http-client/main_test.go#TestClientTimeout"><code>func TestClientTimeout(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		start := time.Now()
+		gaveUp := make(chan time.Duration, 2)
+		srv := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			select {
+			case &lt;-time.After(5 * time.Second):
+				io.WriteString(w, "便當好了")
+			case &lt;-r.Context().Done(): // 客人走了，店家這邊也收到通知
+				gaveUp &lt;- time.Since(start)
+			}
+		}))
+		client := srv.Client()
+		client.Timeout = 2 * time.Second
+
+		_, err := client.Get("http://shop.test/slow")
+		if !errors.Is(err, context.DeadlineExceeded) || time.Since(start) != 2*time.Second {
+			t.Fatalf("Client.Timeout：%v 之後拿到 %v，want 2s 之後 DeadlineExceeded", time.Since(start), err)
+		}
+		if got := &lt;-gaveUp; got != 2*time.Second {
+			t.Errorf("店家在 %v 才知道客人走了，want 2s", got)
+		}
+
+		// 單一請求的期限用 context：1 秒，比 Client.Timeout 短，先到的那個生效。
+		ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+		defer cancel()
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://shop.test/slow", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		before := time.Now()
+		if _, err := client.Do(req); !errors.Is(err, context.DeadlineExceeded) || time.Since(before) != time.Second {
+			t.Errorf("context：%v 之後拿到 %v，want 1s 之後 DeadlineExceeded", time.Since(before), err)
+		}
+		&lt;-gaveUp
+	})
+}</code></pre>
+    <ul class="notes">
+      <li>逾時的錯誤包了好幾層（*url.Error 裡面是 context.DeadlineExceeded），用 <code>errors.Is</code> 判斷，不要比對錯誤訊息的文字。</li>
+      <li>客人放棄時，店家那邊 <code>r.Context()</code> 也被取消。<a href="26-http.html#request">26 章</a>說要把它傳給資料庫查詢，就是為了這種時候能停下來。</li>
+      <li>DefaultTransport 另外有連線階段的逾時（建立 TCP 連線 30 秒、TLS 握手 10 秒），但沒有限制等回應的時間，所以 Client.Timeout 還是必要的。</li>
+      <li>逾時要多長，看對方平常多快、你的呼叫者能等多久。不知道的話先量測，不要隨便抄一個數字。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="json">
+    <h2 id="json">3. 網址與 JSON</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 186" role="img" aria-label="一個網址的各部分：scheme 和主機，然後是路徑，每一段用 url.PathEscape 跳脫，段裡的斜線會變成 %2F；問號後面是查詢字串，用 url.Values 的 Encode 產生，空白變成加號，and 符號變成 %26">
+        <title>網址的組成</title>
+        <rect class="soft" x="16" y="20" width="130" height="34" rx="6"/>
+        <text class="sm mono" x="81" y="42" text-anchor="middle">http://shop.test</text>
+        <rect class="acc" x="152" y="20" width="160" height="34" rx="6"/>
+        <text class="sm mono" x="232" y="42" text-anchor="middle">/orders/A%2F7</text>
+        <rect class="soft" x="318" y="20" width="146" height="34" rx="6"/>
+        <text class="sm mono" x="391" y="42" text-anchor="middle">?dish=...&amp;tag=...</text>
+        <text class="sm" x="81" y="80" text-anchor="middle">scheme、主機</text>
+        <text class="sm" x="232" y="80" text-anchor="middle">路徑</text>
+        <text class="sm" x="391" y="80" text-anchor="middle">查詢字串</text>
+        <text class="sm mono" x="232" y="106" text-anchor="middle">url.PathEscape</text>
+        <text class="sm mono" x="391" y="106" text-anchor="middle">url.Values.Encode</text>
+        <text class="sm" x="232" y="132" text-anchor="middle">/ 變成 %2F</text>
+        <text class="sm" x="391" y="132" text-anchor="middle">空白變 +、&amp; 變 %26</text>
+        <text class="sm t-hot" x="240" y="170" text-anchor="middle">自己拼字串：使用者輸入的 &amp; 會變成另一個參數</text>
+      </svg>
+      <figcaption>路徑和查詢字串的跳脫規則不一樣：空白在路徑裡是 %20，在查詢字串裡是 +。交給 net/url，不要自己處理。</figcaption>
+    </figure>
+    <p>網址裡有使用者輸入的部分（站名、菜名、備註）時，用 net/url 組，不要用字串相加：</p>
+    <pre class="code" data-src="chapters/27-http-client/jsonapi.go#urlDemo"><code>func urlDemo() {
+	q := url.Values{}
+	q.Set("dish", "排骨飯 大")
+	q.Set("note", "不要辣&amp;多飯")
+	q.Add("tag", "便當")
+	q.Add("tag", "外帶")
+	fmt.Println("http://shop.test/search?" + q.Encode())
+
+	u, err := url.JoinPath("http://shop.test/api/", "orders", "A/7")
+	fmt.Println(u, err)
+	fmt.Println("http://shop.test/orders/" + url.PathEscape("A/7"))
+
+	parsed, err := url.Parse("http://shop.test/search?dish=%E6%8E%92%E9%AA%A8%E9%A3%AF&amp;page=2")
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	fmt.Println(parsed.Host, parsed.Path, parsed.Query().Get("dish"), parsed.Query().Get("page"))
+}</code></pre>
+    <pre class="out" data-example="chapters/27-http-client#Example_urlDemo"><code>http://shop.test/search?dish=%E6%8E%92%E9%AA%A8%E9%A3%AF+%E5%A4%A7&amp;note=%E4%B8%8D%E8%A6%81%E8%BE%A3%26%E5%A4%9A%E9%A3%AF&amp;tag=%E4%BE%BF%E7%95%B6&amp;tag=%E5%A4%96%E5%B8%B6
+http://shop.test/api/orders/A/7 &lt;nil&gt;
+http://shop.test/orders/A%2F7
+shop.test /search 排骨飯 2</code></pre>
+    <ul class="notes">
+      <li>備註「不要辣&amp;多飯」如果直接接在網址後面，對方會讀到 note=不要辣，以及一個叫「多飯」的參數。</li>
+      <li><code>url.JoinPath</code> 會處理多餘的斜線，但不會跳脫段裡的 /：編號 A/7 被當成兩段路徑。路徑的一段可能含有 / 時，用 <code>url.PathEscape</code>。</li>
+      <li><code>url.Values</code> 是 <code>map[string][]string</code>，同一個名稱可以有多個值（Add）。Encode 會依名稱排序，所以輸出是固定的。</li>
+    </ul>
+
+    <figure class="fig">
+      <svg viewBox="0 0 480 236" role="img" aria-label="do 函式的流程：client.Do 出錯就直接回傳錯誤；拿到回應之後先安排讀完並關掉 body。狀態碼不是 2xx 時，試著從內容讀出 error 訊息，回傳 APIError；是 2xx 時，把內容解成 JSON 放進 out。讀內容時最多讀 1 MB">
+        <title>呼叫 JSON API 的固定步驟</title>
+        <rect class="acc" x="160" y="10" width="160" height="34" rx="8"/>
+        <text class="sm mono" x="240" y="32" text-anchor="middle">client.Do(req)</text>
+        <path class="wire" d="M320 27 H350"/>
+        <text class="sm t-hot" x="356" y="32">err：直接回傳</text>
+        <path class="wire" d="M240 44 V58"/>
+        <rect class="soft" x="100" y="58" width="280" height="34" rx="8"/>
+        <text class="sm" x="240" y="80" text-anchor="middle">defer：讀完（最多 1 MB）並關掉 body</text>
+        <path class="wire" d="M240 92 V108 H120 V122"/>
+        <path class="wire" d="M240 108 H360 V122"/>
+        <path class="tip" d="M120 134 L114 122 L126 122 Z"/>
+        <path class="tip" d="M360 134 L354 122 L366 122 Z"/>
+        <rect class="soft" x="16" y="134" width="208" height="62" rx="8"/>
+        <text class="sm mono" x="120" y="158" text-anchor="middle">2xx</text>
+        <text class="sm" x="120" y="182" text-anchor="middle">內容解成 JSON 放進 out</text>
+        <rect class="hot" x="256" y="134" width="208" height="62" rx="8"/>
+        <text class="sm mono" x="360" y="158" text-anchor="middle">其他狀態碼</text>
+        <text class="sm" x="360" y="182" text-anchor="middle">回傳 *APIError</text>
+        <text class="sm" x="240" y="226" text-anchor="middle">每個呼叫的地方只剩「送什麼、要什麼型別」</text>
+      </svg>
+      <figcaption>呼叫 API 的每個地方都要做同樣的四件事，漏一件就是 bug。寫成一個函式，呼叫的地方就不會漏。</figcaption>
+    </figure>
+    <p>呼叫 JSON API 的步驟每次都一樣：編碼、設標頭、送出、檢查狀態碼、解碼、關 body。把它們集中在 do，再用泛型包成 getJSON 和 postJSON（<a href="12-generics.html">12 章</a>）：</p>
+    <pre class="code" data-src="chapters/27-http-client/jsonapi.go#APIError,APIError.Error,maxResponse,do,getJSON,postJSON"><code>type APIError struct {
+	Status  int
+	Message string
+}
+
+func (e *APIError) Error() string {
+	return fmt.Sprintf("HTTP %d：%s", e.Status, e.Message)
+}
+
+const maxResponse = 1 &lt;&lt; 20
+
+func do(client *http.Client, req *http.Request, out any) error {
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		io.Copy(io.Discard, io.LimitReader(resp.Body, maxResponse))
+		resp.Body.Close()
+	}()
+	body := io.LimitReader(resp.Body, maxResponse)
+
+	if resp.StatusCode &lt; 200 || resp.StatusCode &gt; 299 {
+		apiErr := &amp;APIError{Status: resp.StatusCode, Message: http.StatusText(resp.StatusCode)}
+		var e struct {
+			Error string `json:"error"`
+		}
+		if json.UnmarshalRead(body, &amp;e) == nil &amp;&amp; e.Error != "" {
+			apiErr.Message = e.Error
+		}
+		return apiErr
+	}
+	if out == nil {
+		return nil
+	}
+	return json.UnmarshalRead(body, out)
+}
+
+func getJSON[T any](ctx context.Context, client *http.Client, u string) (T, error) {
+	var out T
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	if err != nil {
+		return out, err
+	}
+	req.Header.Set("Accept", "application/json")
+	err = do(client, req, &amp;out)
+	return out, err
+}
+
+func postJSON[T any](ctx context.Context, client *http.Client, u string, in any) (T, error) {
+	var out T
+	b, err := json.Marshal(in)
+	if err != nil {
+		return out, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u, bytes.NewReader(b))
+	if err != nil {
+		return out, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+	err = do(client, req, &amp;out)
+	return out, err
+}</code></pre>
+    <pre class="code" data-src="chapters/27-http-client/jsonapi.go#jsonDemo"><code>func jsonDemo() {
+	ctx := context.Background()
+	client := newDemoClient()
+
+	menu, err := getJSON[[]MenuItem](ctx, client, "http://shop.test/menu")
+	fmt.Println(menu, err)
+
+	type orderIn struct {
+		Dish string `json:"dish"`
+		Qty  int    `json:"qty"`
+	}
+	o, err := postJSON[Order](ctx, client, "http://shop.test/orders", orderIn{"排骨飯", 2})
+	fmt.Printf("%+v %v\n", o, err)
+
+	_, err = postJSON[Order](ctx, client, "http://shop.test/orders", orderIn{"排骨飯", 2})
+	fmt.Println(err)
+	if apiErr, ok := errors.AsType[*APIError](err); ok &amp;&amp; apiErr.Status == http.StatusConflict {
+		fmt.Println("賣完了，換一道菜")
+	}
+
+	_, err = getJSON[Order](ctx, client, "http://shop.test/orders/99")
+	fmt.Println(err)
+}</code></pre>
+    <pre class="out" data-example="chapters/27-http-client#Example_jsonDemo"><code>[{滷肉飯 50} {排骨飯 90}] &lt;nil&gt;
+{ID:1 Dish:排骨飯 Qty:2 Total:180} &lt;nil&gt;
+HTTP 409：排骨飯 賣完了
+賣完了，換一道菜
+HTTP 404：找不到這筆訂單</code></pre>
+    <ul class="notes">
+      <li>APIError 帶著狀態碼，呼叫的一方用 <code>errors.AsType</code> 取出來決定怎麼處理（<a href="11-errors.html#types">11 章</a>）：409 換一道菜，404 告訴使用者沒有這筆訂單。</li>
+      <li>錯誤的內容不一定是 JSON：前面的閘道器、負載平衡器可能回一頁 HTML。解不開時用 <code>http.StatusText</code> 當訊息，不要把整頁 HTML 放進錯誤裡。</li>
+      <li><code>io.LimitReader</code> 限制最多讀多少。對方出錯送來 1 GB 的內容時，解析會在 1 MB 處失敗，而不是把記憶體吃光。</li>
+      <li>json/v2 解析失敗時，out 可能已經被填了一部分。err 不是 nil 時，不要使用回傳的值。</li>
+      <li>POST 的內容先 Marshal 成 []byte 再用 bytes.NewReader 送出：編碼失敗時請求還沒送出，而且 Client 知道內容的長度。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="reuse">
+    <h2 id="reuse">4. 關掉 body 與連線池</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 214" role="img" aria-label="Client 的 Transport 管著一個連線池。回應的 body 讀完並關掉之後，連線回到池子裡，下一個請求直接使用，不用重新連線。body 沒有關掉，那條連線就一直被佔著，下一個請求只好建立新的連線；請求一多，連線和檔案描述符就用光了">
+        <title>連線池</title>
+        <rect class="soft" x="16" y="16" width="120" height="40" rx="8"/>
+        <text class="sm mono" x="76" y="41" text-anchor="middle">http.Client</text>
+        <path class="wire" d="M136 36 H160"/>
+        <rect class="acc" x="160" y="16" width="170" height="40" rx="8"/>
+        <text class="sm" x="245" y="41" text-anchor="middle">Transport 的連線池</text>
+        <path class="wire" d="M330 36 H354"/>
+        <rect class="soft" x="354" y="16" width="110" height="40" rx="8"/>
+        <text class="sm" x="409" y="41" text-anchor="middle">對方</text>
+        <rect class="soft" x="16" y="80" width="214" height="96" rx="8"/>
+        <text class="sm bold" x="123" y="104" text-anchor="middle">讀完並關掉</text>
+        <text class="sm" x="123" y="128" text-anchor="middle">連線回到池子</text>
+        <text class="sm" x="123" y="152" text-anchor="middle">5 個請求用 1 條連線</text>
+        <rect class="hot" x="250" y="80" width="214" height="96" rx="8"/>
+        <text class="sm bold" x="357" y="104" text-anchor="middle">沒有關掉</text>
+        <text class="sm" x="357" y="128" text-anchor="middle">連線一直被佔著</text>
+        <text class="sm" x="357" y="152" text-anchor="middle">5 個請求用 5 條連線</text>
+        <text class="sm" x="240" y="204" text-anchor="middle">建立連線很貴：TCP 握手、TLS 握手，跨國時一次就是幾百毫秒</text>
+      </svg>
+      <figcaption>連線用完不還，池子就沒有東西可以重用。這種洩漏平常看不出來，流量一大就變成「too many open files」。</figcaption>
+    </figure>
+    <p>Client 不是每次都重新連線。它的 Transport 把用完的連線留在池子裡，下一個送到同一個主機的請求直接拿來用。但只有在 body <strong>讀到結束並關掉</strong>之後，連線才會還回去。下面的測試數 server 接受了幾條連線：</p>
+    <pre class="code" data-src="chapters/27-http-client/main_test.go#countConns,TestConnReuse"><code>func countConns(t *testing.T) (*httptest.Server, *atomic.Int64) {
+	var conns atomic.Int64
+	srv := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		io.WriteString(w, "排骨飯 90")
+	}))
+	srv.Config.ConnState = func(_ net.Conn, s http.ConnState) {
+		if s == http.StateNew {
+			conns.Add(1)
+		}
+	}
+	return srv, &amp;conns
+}
+
+func TestConnReuse(t *testing.T) {
+	t.Run("讀完並關掉", func(t *testing.T) {
+		srv, conns := countConns(t)
+		for range 5 {
+			resp, err := srv.Client().Get("http://shop.test/menu")
+			if err != nil {
+				t.Fatal(err)
+			}
+			io.Copy(io.Discard, resp.Body)
+			resp.Body.Close()
+		}
+		if n := conns.Load(); n != 1 {
+			t.Errorf("5 個請求用了 %d 條連線，want 1", n)
+		}
+	})
+	t.Run("沒有關掉", func(t *testing.T) {
+		srv, conns := countConns(t)
+		var open []io.Closer
+		for range 5 {
+			resp, err := srv.Client().Get("http://shop.test/menu")
+			if err != nil {
+				t.Fatal(err)
+			}
+			open = append(open, resp.Body) // 沒讀也沒關：這條連線一直被佔著
+		}
+		if n := conns.Load(); n != 5 {
+			t.Errorf("5 個請求用了 %d 條連線，want 5（每次都要開新的）", n)
+		}
+		for _, b := range open {
+			b.Close()
+		}
+	})
+}</code></pre>
+    <ul class="notes">
+      <li>只關不讀時，net/http 不一定能重用那條連線（剩下的內容還在路上）。不需要內容時，先 <code>io.Copy(io.Discard, resp.Body)</code> 再關，第 3 節的 do 就是這樣寫的。</li>
+      <li>在迴圈裡 <code>defer resp.Body.Close()</code>，要等整個函式結束才會關，迴圈跑多少圈就佔著多少條連線（<a href="04-functions.html#pit-defer-loop">04 章</a>，練習 6）。</li>
+      <li><code>srv.Config.ConnState</code> 是 http.Server 的欄位，連線狀態改變時呼叫。測試用它就能看到「連線有沒有被重用」這種平常看不到的行為。</li>
+    </ul>
+    <p>連線池在 Transport 裡，所以 <strong>整個程式共用一個 Client</strong>（它可以被很多 goroutine 同時使用）。每個請求都建一個新的 Transport，池子就沒有意義，舊的連線也不會被關掉。正式用的 Client 從 DefaultTransport 複製一份再調整：</p>
+    <pre class="code" data-src="chapters/27-http-client/basics.go#newClient"><code>func newClient() *http.Client {
+	t := http.DefaultTransport.(*http.Transport).Clone()
+	t.MaxIdleConnsPerHost = 10 // 預設是 2：同一個主機最多留 2 條閒置的連線
+	return &amp;http.Client{
+		Timeout:   10 * time.Second, // 從送出到讀完 body 的總時間
+		Transport: t,
+	}
+}</code></pre>
+    <ul class="notes">
+      <li><code>Clone</code> 保留 DefaultTransport 的 Proxy、連線逾時、HTTP/2 這些設定，只改你要改的。自己用 <code>&amp;http.Transport{}</code> 從零開始，這些都會變成零值。</li>
+      <li>MaxIdleConnsPerHost 預設是 2：同一個主機最多留 2 條閒置的連線。對同一個 API 的並發請求很多時，多出來的連線用完就被關掉，下次又要重新建立。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="retry">
+    <h2 id="retry">5. 重試與退避</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 196" role="img" aria-label="重試的時間軸：第 1 次 503，等 1 秒加上抖動；第 2 次 503，等 2 秒加上抖動；第 3 次 200 成功。等待時間每次加倍，抖動讓很多 client 不會在同一個時間點一起重試。ctx 到期時不管在哪一步都停下來">
+        <title>指數退避加抖動</title>
+        <path class="wire" d="M16 70 H464"/>
+        <rect class="hot" x="16" y="52" width="56" height="36" rx="6"/>
+        <text class="sm mono" x="44" y="75" text-anchor="middle">503</text>
+        <rect class="soft" x="72" y="58" width="80" height="24" rx="4"/>
+        <text class="sm" x="112" y="75" text-anchor="middle">等 1s+</text>
+        <rect class="hot" x="152" y="52" width="56" height="36" rx="6"/>
+        <text class="sm mono" x="180" y="75" text-anchor="middle">503</text>
+        <rect class="soft" x="208" y="58" width="160" height="24" rx="4"/>
+        <text class="sm" x="288" y="75" text-anchor="middle">等 2s+</text>
+        <rect class="acc" x="368" y="52" width="56" height="36" rx="6"/>
+        <text class="sm mono" x="396" y="75" text-anchor="middle">200</text>
+        <text class="sm" x="44" y="34" text-anchor="middle">第 1 次</text>
+        <text class="sm" x="180" y="34" text-anchor="middle">第 2 次</text>
+        <text class="sm" x="396" y="34" text-anchor="middle">第 3 次</text>
+        <text class="sm" x="240" y="124" text-anchor="middle">「+」是抖動：每次多等一個隨機的時間</text>
+        <text class="sm" x="240" y="148" text-anchor="middle">一千個 client 同時失敗，也不會同時重試</text>
+        <text class="sm t-hot" x="240" y="180" text-anchor="middle">ctx 到期：不管在送還是在等，立刻停下</text>
+      </svg>
+      <figcaption>對方太忙時，立刻重試只會讓它更忙。每次多等一倍，給對方時間恢復。</figcaption>
+    </figure>
+    <p>網路和對方都可能暫時出問題：連線被切斷、對方正在重新部署回 503、被限流回 429。這種失敗等一下再試通常就好了。但不是每種失敗都值得重試：</p>
+    <pre class="code" data-src="chapters/27-http-client/retry.go#retryable,getWithRetry"><code>func retryable(resp *http.Response, err error) bool {
+	if err != nil {
+		// ctx 被取消或到期，是呼叫的一方不要了，再試也沒有用；其他的網路錯誤可能是暫時的。
+		return !errors.Is(err, context.Canceled) &amp;&amp; !errors.Is(err, context.DeadlineExceeded)
+	}
+	switch resp.StatusCode {
+	case http.StatusTooManyRequests, http.StatusBadGateway,
+		http.StatusServiceUnavailable, http.StatusGatewayTimeout:
+		return true
+	}
+	return false // 2xx 成功了；其他 4xx 是請求本身的問題，再送一次結果也一樣
+}
+
+func getWithRetry(ctx context.Context, client *http.Client, u string, attempts int, base time.Duration) (*http.Response, error) {
+	var resp *http.Response
+	var err error
+	for i := range attempts {
+		if i &gt; 0 {
+			wait := base &lt;&lt; (i - 1)
+			wait += rand.N(wait/2 + 1)
+			select {
+			case &lt;-time.After(wait):
+			case &lt;-ctx.Done():
+				return nil, ctx.Err()
+			}
+		}
+		req, reqErr := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+		if reqErr != nil {
+			return nil, reqErr
+		}
+		resp, err = client.Do(req)
+		if !retryable(resp, err) || i == attempts-1 {
+			break
+		}
+		if resp != nil {
+			// 要再試一次，這個回應用不到了：讀完並關掉，連線才能重用。
+			io.Copy(io.Discard, resp.Body)
+			resp.Body.Close()
+		}
+	}
+	return resp, err
+}</code></pre>
+    <pre class="code" data-src="chapters/27-http-client/retry.go#flaky,retryDemo"><code>func flaky() http.Handler {
+	calls := 0
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		fmt.Printf("店家收到第 %d 次請求\n", calls)
+		if calls &lt;= 2 {
+			http.Error(w, "太忙了", http.StatusServiceUnavailable)
+			return
+		}
+		fmt.Fprint(w, "今天的便當：排骨飯")
+	})
+}
+
+func retryDemo() {
+	client := &amp;http.Client{Timeout: 5 * time.Second, Transport: handlerTransport{flaky()}}
+	resp, err := getWithRetry(context.Background(), client, "http://shop.test/today", 4, 10*time.Millisecond)
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	fmt.Println(resp.StatusCode, string(body))
+}</code></pre>
+    <pre class="out" data-example="chapters/27-http-client#Example_retryDemo"><code>店家收到第 1 次請求
+店家收到第 2 次請求
+店家收到第 3 次請求
+200 今天的便當：排骨飯</code></pre>
+    <ul class="notes">
+      <li><strong>重試哪些</strong>：網路錯誤，以及 429、502、503、504。其他 4xx 是請求本身有問題（格式錯、沒權限、找不到），再送一次結果也一樣。</li>
+      <li><strong>不重試 ctx 的錯誤</strong>：Canceled 或 DeadlineExceeded 表示呼叫的一方已經不要了。</li>
+      <li><strong>只重試冪等的請求</strong>：GET 送幾次都一樣。POST 下單時，可能是店家已經收到、只是回應在路上掉了，重送就變成兩張訂單。真的要重試 POST，要和對方約定一個 idempotency key，讓對方認出重複的請求。</li>
+      <li><strong>對方說了要等多久</strong>：429 和 503 的回應可能帶著 <code>Retry-After</code> 標頭，有的話照它的時間等（練習 4）。</li>
+      <li>等待用 select 同時看 <code>time.After</code> 和 <code>ctx.Done()</code>（<a href="16-select.html">16 章</a>），ctx 到期時不用把剩下的時間等完。</li>
+    </ul>
+    <p>等待的時間有隨機的抖動，用真的時間測試會又慢又不穩定。synctest 讓測試檢查「總共等了 7 到 10.5 秒」，實際上一瞬間就跑完：</p>
+    <pre class="code" data-src="chapters/27-http-client/main_test.go#TestGetWithRetry"><code>func TestGetWithRetry(t *testing.T) {
+	tests := []struct {
+		name             string
+		status           int
+		deadline         time.Duration // 0 表示 ctx 沒有期限
+		wantCalls        int64
+		wantErr          error
+		minWait, maxWait time.Duration
+	}{
+		// 等 1 + 2 + 4 = 7 秒，每次再加上最多一半的抖動，最多 10.5 秒
+		{"一直 503：試 4 次", 503, 0, 4, nil, 7 * time.Second, 10500 * time.Millisecond},
+		{"404 不重試", 404, 0, 1, nil, 0, 0},
+		{"等待時 ctx 到期", 503, 2 * time.Second, 2, context.DeadlineExceeded, 2 * time.Second, 2 * time.Second},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				var calls atomic.Int64
+				srv := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					calls.Add(1)
+					http.Error(w, http.StatusText(tt.status), tt.status)
+				}))
+				ctx := t.Context()
+				if tt.deadline &gt; 0 {
+					var cancel context.CancelFunc
+					ctx, cancel = context.WithTimeout(ctx, tt.deadline)
+					defer cancel()
+				}
+
+				start := time.Now()
+				resp, err := getWithRetry(ctx, srv.Client(), "http://shop.test/today", 4, time.Second)
+				waited := time.Since(start)
+				if resp != nil {
+					resp.Body.Close()
+				}
+
+				if !errors.Is(err, tt.wantErr) || (tt.wantErr == nil &amp;&amp; resp.StatusCode != tt.status) {
+					t.Errorf("err = %v，want %v", err, tt.wantErr)
+				}
+				if calls.Load() != tt.wantCalls {
+					t.Errorf("店家收到 %d 次請求，want %d", calls.Load(), tt.wantCalls)
+				}
+				if waited &lt; tt.minWait || waited &gt; tt.maxWait {
+					t.Errorf("總共等了 %v，want %v 到 %v", waited, tt.minWait, tt.maxWait)
+				}
+			})
+		})
+	}
+}</code></pre>
+  </section>
+
+  <section aria-labelledby="roundtripper">
+    <h2 id="roundtripper">6. RoundTripper</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 204" role="img" aria-label="client.Do 把請求交給 Client 的 Transport，它是一個 RoundTripper。RoundTripper 可以一層包一層：logTransport 記錄之後交給下一層，最裡面是真的 http.Transport，透過網路送出；測試時最裡面換成 handlerTransport，直接把請求交給一個 handler">
+        <title>RoundTripper 一層包一層</title>
+        <rect class="soft" x="16" y="16" width="120" height="40" rx="8"/>
+        <text class="sm mono" x="76" y="41" text-anchor="middle">client.Do</text>
+        <path class="wire" d="M136 36 H150"/>
+        <path class="tip" d="M162 36 L150 30 L150 42 Z"/>
+        <rect class="acc" x="162" y="16" width="140" height="40" rx="8"/>
+        <text class="sm mono" x="232" y="41" text-anchor="middle">logTransport</text>
+        <path class="wire" d="M302 36 H320 V80 H232 V94"/>
+        <path class="wire" d="M320 80 H400 V94"/>
+        <path class="tip" d="M232 106 L226 94 L238 94 Z"/>
+        <path class="tip" d="M400 106 L394 94 L406 94 Z"/>
+        <rect class="soft" x="152" y="106" width="160" height="56" rx="8"/>
+        <text class="sm mono" x="232" y="128" text-anchor="middle">http.Transport</text>
+        <text class="sm" x="232" y="150" text-anchor="middle">正式：送上網路</text>
+        <rect class="soft" x="328" y="106" width="136" height="56" rx="8"/>
+        <text class="sm mono" x="396" y="128" text-anchor="middle">handlerTransport</text>
+        <text class="sm" x="396" y="150" text-anchor="middle">測試：交給 handler</text>
+        <text class="sm" x="240" y="192" text-anchor="middle">呼叫 client.Do 的程式碼完全不用改</text>
+      </svg>
+      <figcaption>RoundTripper 之於 client，就像 middleware 之於 server：在請求送出和回應回來的路上加一層。</figcaption>
+    </figure>
+    <p>Client 負責逾時、轉址、cookie；真正把請求送出去、拿回回應的是它的 <code>Transport</code> 欄位，型別是 <code>http.RoundTripper</code>，一個只有 <code>RoundTrip(*Request) (*Response, error)</code> 方法的 interface。換掉它，就能在不改呼叫端的情況下，加上記錄、驗證、指標，或者完全不經過網路。本章的示範都靠這一個：</p>
+    <pre class="code" data-src="chapters/27-http-client/transport.go#handlerTransport,handlerTransport.RoundTrip"><code>type handlerTransport struct {
+	h http.Handler
+}
+
+func (t handlerTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	if req.Body != nil {
+		defer req.Body.Close() // RoundTripper 一定要關掉請求的 body，不管成功或失敗
+	}
+	rec := httptest.NewRecorder()
+	t.h.ServeHTTP(rec, req)
+	return rec.Result(), nil
+}</code></pre>
+    <p>包住另一個 RoundTripper，就能在前後加上自己的處理，和 <a href="26-http.html#middleware">26 章的 middleware</a> 是同一個想法：</p>
+    <pre class="code" data-src="chapters/27-http-client/transport.go#logTransport,logTransport.RoundTrip,transportDemo"><code>type logTransport struct {
+	next   http.RoundTripper
+	logger *slog.Logger
+}
+
+func (t logTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	start := time.Now()
+	resp, err := t.next.RoundTrip(req)
+	if err != nil {
+		t.logger.WarnContext(req.Context(), "request failed", "method", req.Method, "url", req.URL.Redacted(), "err", err)
+		return nil, err
+	}
+	t.logger.InfoContext(req.Context(), "request", "method", req.Method, "url", req.URL.Redacted(),
+		"status", resp.StatusCode, "took", time.Since(start))
+	return resp, nil
+}
+
+func transportDemo() {
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &amp;slog.HandlerOptions{ReplaceAttr: dropVolatile}))
+	client := &amp;http.Client{
+		Timeout:   5 * time.Second,
+		Transport: logTransport{next: handlerTransport{fakeShop()}, logger: logger},
+	}
+	for _, u := range []string{"http://shop.test/menu", "http://amei:s3cret@shop.test/orders/7"} {
+		resp, err := client.Get(u)
+		if err != nil {
+			continue
+		}
+		io.Copy(io.Discard, resp.Body)
+		resp.Body.Close()
+	}
+}</code></pre>
+    <pre class="out" data-example="chapters/27-http-client#Example_transportDemo"><code>level=INFO msg=request method=GET url=http://shop.test/menu status=200
+level=INFO msg=request method=GET url=http://amei:xxxxx@shop.test/orders/7 status=404</code></pre>
+    <p>RoundTripper 有幾條規則，寫錯了不會編譯失敗，只會在奇怪的時候出問題：</p>
+    <ul class="notes">
+      <li><strong>不要修改傳進來的請求</strong>。要加標頭，先用 <code>req.Clone(req.Context())</code> 複製一份，改複本（練習 3）。呼叫的一方可能會重用原本的請求，例如重試。</li>
+      <li><strong>一定要關掉請求的 body</strong>，成功或失敗都要。交給下一層 RoundTripper 時，由下一層負責。</li>
+      <li><strong>只有拿不到回應才回傳 error</strong>。404、500 照樣回傳 Response，判斷狀態碼是呼叫端的事。</li>
+      <li>記錄網址用 <code>req.URL.Redacted()</code>，網址裡的密碼會變成 xxxxx。Authorization 這類標頭更不能記錄。</li>
+      <li>逾時、轉址、cookie 是 Client 處理的，不要在 RoundTripper 裡重做一次。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="testing">
+    <h2 id="testing">7. 測試</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 196" role="img" aria-label="兩種假的對方。假的 RoundTripper：把請求直接交給 handler，沒有連線，最快，適合測試解析、狀態碼、錯誤處理。NewTestServer：真的 http.Server，透過記憶體裡的網路連線，適合測試逾時、連線重用、取消；兩者都不需要真的網路，也不用開 port">
+        <title>兩種假的對方</title>
+        <rect class="soft" x="16" y="16" width="214" height="150" rx="8"/>
+        <text class="sm bold" x="123" y="42" text-anchor="middle">假的 RoundTripper</text>
+        <text class="sm" x="123" y="70" text-anchor="middle">直接呼叫 handler</text>
+        <text class="sm" x="123" y="94" text-anchor="middle">沒有連線，最快</text>
+        <text class="sm t-acc" x="123" y="126" text-anchor="middle">解析、狀態碼、錯誤</text>
+        <text class="sm t-acc" x="123" y="150" text-anchor="middle">body 有沒有關</text>
+        <rect class="soft" x="250" y="16" width="214" height="150" rx="8"/>
+        <text class="sm bold" x="357" y="42" text-anchor="middle">NewTestServer</text>
+        <text class="sm" x="357" y="70" text-anchor="middle">真的 http.Server</text>
+        <text class="sm" x="357" y="94" text-anchor="middle">記憶體裡的網路</text>
+        <text class="sm t-acc" x="357" y="126" text-anchor="middle">逾時、取消、重試</text>
+        <text class="sm t-acc" x="357" y="150" text-anchor="middle">連線有沒有重用</text>
+        <text class="sm" x="240" y="188" text-anchor="middle">兩種都不需要網路，也不用開 port</text>
+      </svg>
+      <figcaption>呼叫外部 API 的程式，測試不能真的打過去：對方可能很慢、會收費、會限流，測試的結果也會跟著對方的狀態變。</figcaption>
+    </figure>
+    <p>要測的是「我的 client 程式碼對各種回應的反應」，所以假的對方要能隨意回出 200、404、502、壞掉的 JSON、超大的內容。handlerTransport 讓這些都只是一個 handler：</p>
+    <pre class="code" data-src="chapters/27-http-client/main_test.go#TestDo"><code>func TestDo(t *testing.T) {
+	h := http.NewServeMux()
+	h.HandleFunc("GET /gateway", func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "&lt;html&gt;upstream down&lt;/html&gt;", http.StatusBadGateway)
+	})
+	h.HandleFunc("GET /huge", func(w http.ResponseWriter, r *http.Request) {
+		io.WriteString(w, `["`+strings.Repeat("滷", maxResponse)+`"]`)
+	})
+	client := &amp;http.Client{Transport: handlerTransport{h}}
+	ctx := t.Context()
+
+	_, err := getJSON[[]string](ctx, client, "http://shop.test/gateway")
+	if apiErr, ok := errors.AsType[*APIError](err); !ok || apiErr.Status != 502 || apiErr.Message != "Bad Gateway" {
+		t.Errorf("不是 JSON 的錯誤內容：err = %v，want HTTP 502：Bad Gateway", err)
+	}
+
+	// 只讀前 1 MB，JSON 在中間被截斷，所以解析失敗，而不是把整個回應讀進記憶體。
+	if _, err := getJSON[[]string](ctx, client, "http://shop.test/huge"); err == nil {
+		t.Errorf("超過 %d bytes 的回應應該解析失敗", maxResponse)
+	}
+}</code></pre>
+    <ul class="notes">
+      <li>假的 RoundTripper 不經過連線，所以測不到逾時和連線重用；那些行為用第 2、4、5 節的 NewTestServer 測。</li>
+      <li>測試用 NewTestServer 時一定要用 <code>srv.Client()</code>。用 http.Get 或自己的 Client，請求會真的送上網路（<a href="26-http.html#pit-test-client">26 章</a>）。</li>
+      <li>假的 RoundTripper 也能檢查呼叫端有沒有做對：把回應的 body 包一層，記錄有沒有被關掉。練習的測試就是這樣檢查練習 2、5、6 的。</li>
+      <li>讓函式接受 <code>*http.Client</code> 參數（或放在 struct 欄位），不要在函式裡用 http.DefaultClient，測試才換得掉。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="pitfalls">
+    <h2 id="pitfalls">常見錯誤</h2>
+    <h3 id="pit-default-client">1. 用 http.Get 或 http.DefaultClient 上線</h3>
+    <p>DefaultClient 沒有逾時，對方卡住時你的 goroutine 也跟著卡住。自己建立 Client，設 Timeout（第 2 節）。</p>
+
+    <h3 id="pit-status">2. 以為 404、500 會是 error</h3>
+    <p>只要拿到回應，err 就是 nil。一定要檢查 StatusCode（第 1 節）。</p>
+
+    <h3 id="pit-close">3. 沒有讀完、關掉 body</h3>
+    <p>連線還不回池子，請求一多就用光連線和檔案描述符。先檢查 err，再 defer 讀完並關掉（第 4 節）。</p>
+
+    <h3 id="pit-defer-loop">4. 在迴圈裡 defer resp.Body.Close()</h3>
+    <p>defer 要等整個函式結束才執行，迴圈跑幾圈就佔著幾條連線。把一圈的工作抽成一個函式，defer 寫在裡面（練習 6）。</p>
+
+    <h3 id="pit-client-per-request">5. 每個請求建一個新的 Client 或 Transport</h3>
+    <p>連線池在 Transport 裡，每次新建就沒有重用，舊的閒置連線也不會被關。整個程式共用一個 Client（第 4 節）。</p>
+
+    <h3 id="pit-concat-url">6. 用字串相加組網址</h3>
+    <p>使用者輸入的 &amp;、#、/、空白會改變網址的意思。用 url.Values 和 url.PathEscape（第 3 節）。</p>
+
+    <h3 id="pit-retry-post">7. 什麼都重試</h3>
+    <p>重試 400 只是浪費；重試 POST 可能下兩次單；不等待就重試會把對方壓垮。只重試暫時性的失敗和冪等的請求，並且退避（第 5 節）。</p>
+
+    <h3 id="pit-modify-req">8. 在 RoundTripper 裡修改傳進來的請求</h3>
+    <p>呼叫的一方可能還在用那個請求。先 Clone 再改（第 6 節）。</p>
+  </section>
+
+  <section aria-labelledby="java">
+    <h2 id="java">從 Java 來的你</h2>
+    <div class="table-wrap">
+      <table class="vs">
+        <thead><tr><th scope="col">主題</th><th scope="col">Java</th><th scope="col">Go</th></tr></thead>
+        <tbody>
+          <tr><th scope="row">用戶端</th><td class="java"><code>java.net.http.HttpClient</code>、Spring <code>RestClient</code></td><td><code>*http.Client</code>，整個程式共用一個</td></tr>
+          <tr><th scope="row">逾時</th><td class="java"><code>connectTimeout</code>、<code>HttpRequest.timeout</code></td><td><code>Client.Timeout</code>、請求的 ctx</td></tr>
+          <tr><th scope="row">4xx、5xx</th><td class="java">RestClient 預設丟出例外</td><td>不是 error，自己檢查 StatusCode</td></tr>
+          <tr><th scope="row">JSON</th><td class="java">Jackson 自動轉換</td><td><code>json.Marshal</code>、<code>json.UnmarshalRead</code></td></tr>
+          <tr><th scope="row">關閉回應</th><td class="java">try-with-resources，或由框架處理</td><td><code>defer resp.Body.Close()</code>，自己負責</td></tr>
+          <tr><th scope="row">攔截器</th><td class="java"><code>ClientHttpRequestInterceptor</code></td><td>包住下一層的 RoundTripper</td></tr>
+          <tr><th scope="row">連線池</th><td class="java">Apache HttpClient 的連線管理器</td><td><code>http.Transport</code> 內建</td></tr>
+          <tr><th scope="row">重試</th><td class="java">Spring Retry、Resilience4j</td><td>自己寫迴圈（標準庫沒有）</td></tr>
+          <tr><th scope="row">測試</th><td class="java">MockRestServiceServer、WireMock</td><td>假的 RoundTripper、NewTestServer</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>最大的差別在錯誤：Spring 的 RestClient 把 4xx、5xx 變成例外，Go 把它們當成正常的回應。好處是每個呼叫的地方都看得到「狀態碼不對時怎麼辦」，代價是要記得寫。第 3 節的 do 把這件事集中在一個地方。</p>
+  </section>
+
+  <section aria-labelledby="exercises">
+    <h2 id="exercises">練習</h2>
+    <p>題目在 <code>exercises/27-http-client/exercises.go</code>，是一個查詢公車到站時間的 client。測試都不經過網路。</p>
+    <pre class="shell"><code>go test ./exercises/27-http-client/                         <span class="c"># 跑全部練習</span>
+go test ./exercises/27-http-client/ -run TestGetArrivals    <span class="c"># 只跑一題</span>
+go test -tags solution ./exercises/27-http-client/          <span class="c"># 跑參考解答</span></code></pre>
+    <p>共用的型別在 doc.go：</p>
+    <pre class="code" data-src="exercises/27-http-client/doc.go#Arrival,StatusError,maxBody"><code>type Arrival struct {
+	Route   string `json:"route"`
+	Minutes int    `json:"minutes"`
+}
+
+type StatusError struct {
+	Code    int
+	Message string // 對方 JSON 內容裡的 message；沒有的話是空字串
+}
+
+const maxBody = 1 &lt;&lt; 20</code></pre>
+    <ol class="exercises">
+      <li>
+        <h3><span class="level l1">入門</span>練習 1：組網址</h3>
+        <p>站名、路線都是使用者輸入的，有中文、空白，甚至斜線。</p>
+        <pre class="code" data-src="exercises/27-http-client/exercises.go#BuildURL"><code>func BuildURL(base, stop string, routes []string) (string, error) {
+	// TODO: 實作
+	return "", nil
+}</code></pre>
+        <p>測試：<code>TestBuildURL</code>。</p>
+        <details><summary>提示</summary><p>先 <code>url.Parse(base)</code>，檢查 Scheme 和 Host 都不是空的。站名用 <code>url.PathEscape</code>，路線用 <code>url.Values{"route": routes}.Encode()</code>。base 結尾的 / 用 strings.TrimSuffix 去掉。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l2">進階</span>練習 2：查到站時間</h3>
+        <p>把第 3 節 do 的步驟自己寫一次。</p>
+        <pre class="code" data-src="exercises/27-http-client/exercises.go#GetArrivals"><code>func GetArrivals(ctx context.Context, client *http.Client, u string) ([]Arrival, error) {
+	// TODO: 實作
+	return nil, nil
+}</code></pre>
+        <p>測試：<code>TestGetArrivals</code>，它會檢查每個回應的 body 都關掉了。</p>
+        <details><summary>提示</summary><p>順序是：NewRequestWithContext、設 Accept、client.Do、檢查 err、defer 讀完並關掉、用 <code>io.LimitReader</code> 包住 body、看狀態碼。錯誤內容解不開時不算錯，Message 留空就好。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l2">進階</span>練習 3：自動帶上金鑰</h3>
+        <p>每個請求都要帶 API 金鑰，但不想在每個呼叫的地方設標頭。</p>
+        <pre class="code" data-src="exercises/27-http-client/doc.go#AuthTransport"><code>type AuthTransport struct {
+	Token string
+	Next  http.RoundTripper // 不能是 nil
+}</code></pre>
+        <pre class="code" data-src="exercises/27-http-client/exercises.go#AuthTransport.RoundTrip"><code>func (t *AuthTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	// TODO: 實作
+	return nil, nil
+}</code></pre>
+        <p>測試：<code>TestAuthTransport</code>，同一個請求送兩次，並檢查原本的請求沒有被改。</p>
+        <details><summary>提示</summary><p><code>req.Clone(req.Context())</code> 會複製標頭，改複本的標頭不會影響原本的請求。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l2">進階</span>練習 4：Retry-After</h3>
+        <p>對方說了要等多久，就照它說的等。</p>
+        <pre class="code" data-src="exercises/27-http-client/exercises.go#RetryAfter"><code>func RetryAfter(h http.Header, now time.Time) (wait time.Duration, ok bool) {
+	// TODO: 實作
+	return 0, false
+}</code></pre>
+        <p>測試：<code>TestRetryAfter</code>。</p>
+        <details><summary>提示</summary><p>先試 <code>strconv.Atoi</code>；失敗再試 <code>http.ParseTime</code>，它認得 HTTP 會用到的三種日期格式。日期減掉 now 是負的時候用 0（內建的 max 函式）。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l3">挑戰</span>練習 5：用 ETag 省流量</h3>
+        <p>時刻表很少變，每次都下載整份很浪費。對方給的 ETag 是內容的版本，下次帶著它問「變了沒」，沒變就只回 304。</p>
+        <pre class="code" data-src="exercises/27-http-client/doc.go#Cache,entry"><code>type Cache struct {
+	mu      sync.Mutex
+	entries map[string]entry
+}
+
+type entry struct {
+	etag string
+	body []byte
+}</code></pre>
+        <pre class="code" data-src="exercises/27-http-client/exercises.go#Cache.Get"><code>func (c *Cache) Get(ctx context.Context, client *http.Client, u string) ([]byte, error) {
+	// TODO: 實作
+	return nil, nil
+}</code></pre>
+        <p>測試：<code>TestCache</code>，包含 20 個 goroutine 同時取，請用 -race 跑。</p>
+        <details><summary>提示</summary><p>用 Mutex 保護 entries，但送請求的時候不要拿著鎖。entries 是 nil 時要先 make。回傳記下的內容時用 <code>bytes.Clone</code> 複製一份：呼叫的一方改了拿到的 []byte，不能影響快取。</p></details>
+      </li>
+      <li>
+        <h3><span class="level fix">找錯</span>練習 6：健康檢查</h3>
+        <p>檢查的網址一多，連線數就一直往上長。</p>
+        <pre class="code" data-src="exercises/27-http-client/exercises.go#Healthy"><code>func Healthy(ctx context.Context, client *http.Client, urls []string) int {
+	n := 0
+	for _, u := range urls {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+		if err != nil {
+			continue
+		}
+		resp, err := client.Do(req)
+		if err != nil {
+			continue
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode == http.StatusOK {
+			n++
+		}
+	}
+	return n
+}</code></pre>
+        <p>測試：<code>TestHealthy</code>，它記錄同時有幾個 body 沒關。</p>
+        <details><summary>提示</summary><p>常見錯誤 4。</p></details>
+      </li>
+    </ol>
+    <p><a href="https://github.com/xinqilin/GO-Playground/blob/main/exercises/27-http-client/solution.go">參考解答</a>：先自己寫完再看。測試通過的寫法都是對的。</p>
+  </section>
+
+  <section aria-labelledby="recap">
+    <h2 id="recap">重點回顧</h2>
+    <ul class="recap">
+      <li>err 不是 nil 表示沒拿到回應；拿到回應時一定要檢查 StatusCode。</li>
+      <li>自己建立 Client 並設 Timeout；單一請求的期限和取消用 NewRequestWithContext。</li>
+      <li>網址用 url.Values 和 url.PathEscape 組，不要用字串相加。</li>
+      <li>呼叫 JSON API 的步驟集中在一個函式：送出、檢查狀態碼、限制大小、解碼、讀完並關掉 body。</li>
+      <li>body 讀完並關掉，連線才能重用；不要在迴圈裡 defer。</li>
+      <li>整個程式共用一個 Client；調整 Transport 時從 DefaultTransport 複製。</li>
+      <li>只重試暫時性的失敗和冪等的請求，指數退避加抖動，ctx 決定最多等多久。</li>
+      <li>RoundTripper 是 client 這一側的 middleware：不改原本的請求，只有拿不到回應才回傳 error。</li>
+      <li>測試用假的 RoundTripper 或 NewTestServer，加上 synctest 就不用真的等。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="further">
+    <h2 id="further">延伸閱讀</h2>
+    <ul class="notes">
+      <li>套件文件：<a href="https://pkg.go.dev/net/http#Client">http.Client</a>、<a href="https://pkg.go.dev/net/http#Response">http.Response</a>（Body 的關閉規則）、<a href="https://pkg.go.dev/net/http#Transport">http.Transport</a>、<a href="https://pkg.go.dev/net/http#RoundTripper">http.RoundTripper</a>（實作的規則）。</li>
+      <li><a href="https://pkg.go.dev/net/url#PathEscape">net/url</a>：PathEscape、QueryEscape、Values 的差別。</li>
+      <li><a href="https://pkg.go.dev/net/http/httptest#NewTestServer">httptest.NewTestServer</a>，以及 <a href="https://go.dev/doc/go1.27#nethttphttptestpkgnethttphttptest">Go 1.27 的版本說明</a>。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="run">
+    <h2 id="run">動手跑</h2>
+    <p class="label">在 repo 根目錄</p>
+    <pre class="shell"><code>go run ./chapters/27-http-client         <span class="c"># 對假的便當店跑一遍所有示範</span>
+go test ./chapters/27-http-client        <span class="c"># 驗證頁面上的輸出，以及逾時、連線重用、重試的測試</span>
+go test ./exercises/27-http-client/      <span class="c"># 做練習</span></code></pre>
+    <p>想打真的 server：一個終端機跑 <code>go run ./chapters/26-http</code>，再把本章的 newDemoClient 換成 newClient、網址換成 <code>http://localhost:8080</code>。</p>
+    <p><a href="https://github.com/xinqilin/GO-Playground/tree/main/chapters/27-http-client">在 GitHub 看本章完整程式碼</a>，或看<a href="https://github.com/xinqilin/GO-Playground/tree/main/exercises/27-http-client">練習題</a>。專題<a href="project-urlchecker.html">並行網址檢查器</a>把這一章和並行放在一起用。</p>
+  </section>
+</main>
+
+<nav class="pager" aria-label="章節導覽">
+  <a class="prev" href="26-http.html">← 26 HTTP 服務</a>
+  <a class="home" href="index.html">目錄</a>
+  <a class="next" href="29-packages-modules.html">29 package 與 module →</a>
+</nav>
+</body>
+</html>
