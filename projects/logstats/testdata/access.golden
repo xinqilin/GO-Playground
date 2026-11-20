@@ -1,0 +1,12 @@
+期間：2026-11-21 09:30:01 +08:00 到 2026-11-21 09:34:30 +08:00
+請求：19 筆，另有 3 行無法解析
+狀態：2xx 14、3xx 1、4xx 2、5xx 2（10.5%）
+最忙的一分鐘：09:31，9 筆
+
+  count  5xx   p50     p95     max  route
+      6    0  11ms    14ms    14ms  GET /menu
+      6    2  52ms  1.204s  1.204s  POST /orders
+      3    0   8ms     9ms     9ms  GET /orders/{id}
+      2    0   1ms     1ms     1ms  GET /healthz
+      1    0   1ms     1ms     1ms  GET /nosuch
+      1    0   1ms     1ms     1ms  GET /orders/abc
