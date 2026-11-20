@@ -882,7 +882,7 @@ ok  	github.com/xinqilin/GO-Playground/chapters/30-testing/parking	2.468s</code>
     <ul class="notes">
       <li>-run='^$' 讓一般的測試都不跑，只跑 benchmark。-10 是 GOMAXPROCS。每一行依序是：跑了幾次、每次多久、每次配置幾個 byte、每次配置幾次。</li>
       <li>NormalizePlate 每次配置一次 8 個 byte：最後把 []byte 轉成 string 的那一次。</li>
-      <li>單次的數字意義不大，要和改之前比。怎麼比得可靠、怎麼找出慢在哪裡，是效能那一章的主題。</li>
+      <li>單次的數字意義不大，要和改之前比。怎麼比得可靠、怎麼找出慢在哪裡，是<a href="31-performance.html">效能與 profiling</a>那一章的主題。</li>
     </ul>
   </section>
 
@@ -1070,7 +1070,7 @@ go test ./exercises/30-testing/                           <span class="c"># 做�
 <nav class="pager" aria-label="章節導覽">
   <a class="prev" href="29-packages-modules.html">← 29 package 與 module</a>
   <a class="home" href="index.html">目錄</a>
-  <a class="next" href="32-toolchain.html">32 工具鏈 →</a>
+  <a class="next" href="31-performance.html">31 效能與 profiling →</a>
 </nav>
 </body>
 </html>

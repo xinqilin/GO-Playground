@@ -459,7 +459,7 @@ chapters/05-pointers/escape/main.go:23:17: inlining call to newCounter
 chapters/05-pointers/escape/main.go:24:18: inlining call to localOnly
 chapters/05-pointers/escape/main.go:11:2: moved to heap: c</code></pre>
       <p><code>-gcflags=-m</code> 讓編譯器說出它做的最佳化決定。<code>moved to heap: c</code> 指的是 newCounter 裡的 c（第 11 行），因為它的位址被回傳了。localOnly 裡的 c 也被取了位址，但位址沒有離開函式，所以留在 stack 上，沒有出現在報告裡。<code>can inline</code> 和 <code>inlining call</code> 是另一種最佳化：編譯器把小函式的內容直接嵌進呼叫的地方，省掉呼叫的成本。</p>
-      <p>heap 配置比 stack 貴，因為要由 GC 追蹤和回收。但不要因此刻意避免指標：先寫出清楚的程式，等效能量測（之後的「效能與 profiling」那一章）顯示配置是瓶頸，再用 <code>-gcflags=-m</code> 找原因。</p>
+      <p>heap 配置比 stack 貴，因為要由 GC 追蹤和回收。但不要因此刻意避免指標：先寫出清楚的程式，等效能量測（<a href="31-performance.html#escape">效能與 profiling</a>那一章）顯示配置是瓶頸，再用 <code>-gcflags=-m</code> 找原因。</p>
     </section>
   </section>
 

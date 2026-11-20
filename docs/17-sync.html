@@ -600,7 +600,7 @@ func poolDemo() {
       <li>還回去之前要 Reset，下一個借的人才不會看到上一張收據。</li>
       <li>還回去之後就不能再用它。這裡回傳 <code>b.String()</code> 是安全的，因為它會複製一份；回傳 <code>b.Bytes()</code> 的話，拿到的 slice 和 Buffer 共用底層陣列，下一個借走的人會改掉它。</li>
       <li>Pool 裡的東西隨時可能被清掉，所以不能拿來當連線池或快取，只能放「沒有也沒關係、重做一個就好」的東西。</li>
-      <li>它是效能最佳化，不是預設寫法。先用 benchmark 和 profiling 證明配置記憶體真的是瓶頸（「效能與 profiling」那一章），再加上它。</li>
+      <li>它是效能最佳化，不是預設寫法。先用 benchmark 和 profiling 證明配置記憶體真的是瓶頸（<a href="31-performance.html#pool">效能與 profiling</a>那一章），再加上它。</li>
     </ul>
   </section>
 
