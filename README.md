@@ -2,7 +2,7 @@
 
 [![ci](https://github.com/xinqilin/GO-Playground/actions/workflows/ci.yml/badge.svg)](https://github.com/xinqilin/GO-Playground/actions/workflows/ci.yml)
 
-給工程師的 Go 入門手冊（繁體中文）。每一章先用大圖把觀念講懂，再附上可以執行、有測試的程式碼，並對照 Java 的寫法。
+繁體中文的 Go 手冊：先修 4 章給從來沒寫過程式的人，正文 34 章從基礎、型別、並行、標準庫一路到工程實務，最後是 7 個專題。每一章先用圖把觀念講懂，再一步一步看可以執行、有測試的程式碼，附上常見錯誤、Java 對照，以及有自動測試的練習（全書 243 題）。
 
 **線上閱讀：<https://bill-lin.dev/GO-Playground/>**
 
@@ -19,13 +19,29 @@ go test ./exercises/03-control-flow/        # 做某一章的練習（寫完之�
 go test -race -tags solution ./...          # 全部測試，練習題改用參考解答
 ```
 
-每一章都是獨立的程式：`chapters/NN-主題/` 放程式碼和測試，`docs/NN-主題.html` 是對應的圖解頁。測試會比對每一章印出來的內容，所以頁面上的輸出和程式碼不會脫節。
+第 28 章（資料庫）是獨立的 module，根目錄的 `./...` 不會包含它，要到它的目錄裡跑：
 
-`exercises/NN-主題/` 是練習題：`exercises.go` 是題目，`solution.go` 是參考解答（加上 `-tags solution` 才會編譯）。題目還沒寫完時測試本來就會失敗，所以直接在根目錄跑 `go test ./...` 會看到練習題的紅燈。
+```sh
+go -C chapters/28-database test .                      # 範例程式的測試（./... 會連練習一起跑）
+go -C chapters/28-database test ./exercises/           # 這一章的練習
+```
+
+每一章都是獨立的程式：`chapters/NN-主題/`（先修是 `chapters/pre-N-主題/`）放程式碼和測試，`docs/` 裡同名的 `.html` 是對應的圖解頁。每一段示範都有一個 `Example` 測試比對它印出來的內容。
+
+`exercises/NN-主題/` 是練習題：`exercises.go` 是題目，`solution.go` 是參考解答（加上 `-tags solution` 才會編譯），`exercises_test.go` 是測試。每一題的測試一開始都會失敗，寫對一題就通過一題；「找錯」題的題目檔裡是有 bug 的程式，要找出來修好。因為練習還沒寫完，直接在根目錄跑 `go test ./...` 會看到練習題的紅燈，這是預期的。
 
 頁面上的程式碼和輸出由 `go run ./tools/docsync` 從 repo 裡的程式同步過去，CI 會用 `-check` 確認兩邊一致。
 
 ## 目錄
+
+### 先修：從來沒寫過程式的人從這裡開始
+
+| 章 | 主題 | 圖解 | 程式碼 |
+|---|---|---|---|
+| 先1 | 程式怎麼跑起來 | [看圖](https://bill-lin.dev/GO-Playground/pre-1-running.html) | [chapters/pre-1-running](chapters/pre-1-running) |
+| 先2 | 值、變數與運算 | [看圖](https://bill-lin.dev/GO-Playground/pre-2-values.html) | [chapters/pre-2-values](chapters/pre-2-values) |
+| 先3 | 判斷與重複 | [看圖](https://bill-lin.dev/GO-Playground/pre-3-decisions.html) | [chapters/pre-3-decisions](chapters/pre-3-decisions) |
+| 先4 | 拆解問題：函式與清單 | [看圖](https://bill-lin.dev/GO-Playground/pre-4-problems.html) | [chapters/pre-4-problems](chapters/pre-4-problems) |
 
 ### Part 0 開始
 
@@ -103,13 +119,21 @@ go test -race -tags solution ./...          # 全部測試，練習題改用參�
 | P6 | TCP 聊天室：每連線兩個 goroutine、鎖與待送區、deadline、優雅關機、net.Pipe + synctest | [看圖](https://bill-lin.dev/GO-Playground/project-chat.html) | [projects/chat](projects/chat) |
 | P7 | TTL＋LRU 快取：泛型、map 加雙向串列、Mutex 與 RLock 的陷阱、只載入一次、synctest、benchmark | [看圖](https://bill-lin.dev/GO-Playground/project-cache.html) | [projects/cache](projects/cache) |
 
+### 附錄
+
+- [術語表](https://bill-lin.dev/GO-Playground/glossary.html)：98 個術語，各用一兩句話說明，再連回詳細介紹它的那一節。
+
 ## 每一章的結構
 
-- **看圖**：大圖少字，先把觀念看懂。
-- **最小範例**：可以直接執行的短程式，輸出是實際跑出來的結果。
-- **工程師筆記**：實務上會踩的坑和慣例。
-- **從 Java 來的你**：同一件事在 Java 和 Go 的寫法對照。
+- **本章內容、本章你會學到**：這一章要解決什麼問題，需要先讀哪幾章。
+- **編號的小節**：一節一個主題，先看圖，再看說明、程式碼和實際的輸出。標著「深入」的段落講原理和少見的情況，第一次讀可以先跳過。
+- **常見錯誤**：錯誤和正確的寫法並排；編譯不過的例子附上真的編譯錯誤訊息。
+- **從 Java 來的你**：同一件事在 Java 和 Go 的寫法對照（先修沒有這一段）。
+- **練習**：5 到 7 題，分成入門、進階、挑戰和找錯，每一題都有測試和提示。
+- **重點回顧、延伸閱讀**：一份檢查清單，以及官方文件的連結。
 - **動手跑**：在 repo 裡執行的指令。
+
+專題頁則是走讀一個完整的程式：從需求、設計到測試，最後是讓你自己動手改的延伸挑戰。
 
 ## 參考資料
 
