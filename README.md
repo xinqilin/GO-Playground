@@ -76,7 +76,7 @@ go test -race -tags solution ./...          # 全部測試，練習題改用參�
 | 22 | 時間 | [看圖](https://bill-lin.dev/GO-Playground/22-time.html) | [chapters/22-time](chapters/22-time) |
 | 23 | JSON 與資料編碼 | [看圖](https://bill-lin.dev/GO-Playground/23-json.html) | [chapters/23-json](chapters/23-json) |
 | 24 | 文字處理 | [看圖](https://bill-lin.dev/GO-Playground/24-text.html) | [chapters/24-text](chapters/24-text) |
-| 22 | 標準庫精選 | [看圖](https://bill-lin.dev/GO-Playground/22-stdlib.html) | [chapters/22-stdlib](chapters/22-stdlib) |
+| 25 | 日誌 | [看圖](https://bill-lin.dev/GO-Playground/25-logging.html) | [chapters/25-logging](chapters/25-logging) |
 | 26 | HTTP 服務 | [看圖](https://bill-lin.dev/GO-Playground/26-http.html) | [chapters/26-http](chapters/26-http) |
 
 ### Part 5 工程實務

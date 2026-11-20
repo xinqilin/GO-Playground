@@ -1,0 +1,813 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>日誌｜Go 圖解手冊</title>
+<meta name="description" content="Go 的日誌：log 套件、log/slog 的結構化紀錄、TextHandler 與 JSONHandler、屬性與 With、層級與 LevelVar、用 LogValuer 遮蔽個資、MultiHandler、從 context 帶 request id 的自訂 Handler，以及怎麼測試日誌，附可執行的練習題。">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<header class="site">
+  <a href="index.html">Go 圖解手冊</a>
+  <span class="count">25 / 33</span>
+</header>
+
+<main class="page long">
+  <header class="hero">
+    <div class="num" aria-hidden="true">25</div>
+    <p class="eyebrow">Part 4 · 標準庫實戰 · 第 25 章</p>
+    <h1>日誌</h1>
+    <p class="analogy">便當店的交班本：誰、幾點、哪一桌、發生什麼事，每一筆都照同樣的欄位寫，下一班的人才查得到「昨天七號桌為什麼等了二十分鐘」。客人的電話只抄末幾碼，不重要的小事忙的時候就不寫。</p>
+  </header>
+
+  <nav class="toc-inline" aria-labelledby="toc-title">
+    <p class="label" id="toc-title">本章內容</p>
+    <ol>
+      <li><a href="#goals">本章你會學到</a></li>
+      <li><a href="#log">log 套件</a></li>
+      <li><a href="#slog">slog：結構化的紀錄</a></li>
+      <li><a href="#attrs">屬性與 With</a></li>
+      <li><a href="#levels">層級</a></li>
+      <li><a href="#valuer">LogValuer</a></li>
+      <li><a href="#handler">Handler</a></li>
+      <li><a href="#testing">測試日誌</a></li>
+      <li><a href="#pitfalls">常見錯誤</a></li>
+      <li><a href="#java">從 Java 來的你</a></li>
+      <li><a href="#exercises">練習</a></li>
+      <li><a href="#recap">重點回顧</a></li>
+      <li><a href="#further">延伸閱讀</a></li>
+    </ol>
+  </nav>
+
+  <section aria-labelledby="goals">
+    <h2 id="goals">本章你會學到</h2>
+    <ul class="notes">
+      <li>log 套件能做什麼、不能做什麼，以及 log.Fatal 的代價。</li>
+      <li>用 log/slog 記結構化的紀錄：訊息固定，資料放在屬性裡；TextHandler 給人看，JSONHandler 給機器查。</li>
+      <li>Attr、Group、With、WithGroup，以及鍵值對寫錯時會發生什麼。</li>
+      <li>層級的數值、HandlerOptions.Level、執行中調整層級的 LevelVar。</li>
+      <li>用 LogValuer 遮蔽個資，以及只在真的要記時才計算。</li>
+      <li>MultiHandler、自己包一層 Handler 從 context 帶 request id，以及包裝時最常漏掉的兩個方法。</li>
+      <li>把 Logger 當參數傳進去，在測試裡檢查記了什麼。</li>
+    </ul>
+    <p>先備：<a href="09-structs-methods.html#embed">09 章的嵌入</a>、<a href="10-interfaces.html">10 章的 interface</a>、<a href="18-context.html#value">18 章的 context.WithValue</a>、<a href="23-json.html#stream">23 章的 jsontext.Decoder</a>。</p>
+  </section>
+
+  <section aria-labelledby="log">
+    <h2 id="log">1. log 套件</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 176" role="img" aria-label="log.New 有三個參數：寫到哪裡的 io.Writer、每一行開頭的前綴、決定要不要加日期時間和檔名的旗標。三者組成一行輸出：前綴、日期時間、訊息">
+        <title>log.New 的三個參數</title>
+        <rect class="soft" x="16" y="16" width="140" height="48" rx="8"/>
+        <text class="sm mono" x="86" y="36" text-anchor="middle">io.Writer</text>
+        <text class="sm" x="86" y="55" text-anchor="middle">寫到哪裡</text>
+        <rect class="soft" x="170" y="16" width="140" height="48" rx="8"/>
+        <text class="sm mono" x="240" y="36" text-anchor="middle">prefix</text>
+        <text class="sm" x="240" y="55" text-anchor="middle">每行的開頭</text>
+        <rect class="soft" x="324" y="16" width="140" height="48" rx="8"/>
+        <text class="sm mono" x="394" y="36" text-anchor="middle">flags</text>
+        <text class="sm" x="394" y="55" text-anchor="middle">日期、時間、檔名</text>
+        <path class="wire" d="M86 64 V84 H240"/>
+        <path class="wire" d="M394 64 V84 H240"/>
+        <path class="wire" d="M240 64 V96"/>
+        <path class="tip" d="M240 108 L234 96 L246 96 Z"/>
+        <rect class="acc" x="16" y="108" width="448" height="34" rx="8"/>
+        <text class="sm mono" x="240" y="130" text-anchor="middle">[廚房] 2026/11/20 10:30:00 第 7 桌 排骨飯 出餐</text>
+        <text class="sm t-hot" x="240" y="166" text-anchor="middle">一整行文字：要查「第 7 桌」只能搜字串</text>
+      </svg>
+      <figcaption>log 套件寫出的是一行文字。給人在終端機上看很夠用，但沒有欄位，程式很難從中取出「哪一桌」「等了多久」。</figcaption>
+    </figure>
+    <p><code>log</code> 是 Go 最早的日誌套件。套件層級的 <code>log.Println</code>、<code>log.Printf</code> 寫到 stderr，每一行前面加上日期和時間；要自己決定寫到哪裡、前面加什麼，用 <code>log.New</code> 建立自己的 <code>*log.Logger</code>：</p>
+    <pre class="code" data-src="chapters/25-logging/log.go#logDemo"><code>func logDemo() {
+	kitchen := log.New(os.Stdout, "[廚房] ", 0)
+	kitchen.Println("開火")
+	kitchen.Printf("第 %d 桌 %s 出餐", 7, "排骨飯") // 結尾沒有換行，log 會自動補上
+
+	counter := log.New(kitchen.Writer(), "[外場] ", kitchen.Flags())
+	counter.Println("叫號", 42)
+}</code></pre>
+    <pre class="out" data-example="chapters/25-logging#Example_logDemo"><code>[廚房] 開火
+[廚房] 第 7 桌 排骨飯 出餐
+[外場] 叫號 42</code></pre>
+    <ul class="notes">
+      <li>log 會自動補上結尾的換行，Printf 不用寫 <code>\n</code>。</li>
+      <li>旗標用 <code>|</code> 組合：<code>log.LstdFlags</code>（日期加時間，預設值）、<code>log.Lmicroseconds</code>、<code>log.LUTC</code>、<code>log.Lshortfile</code>（印出 <code>log.go:12:</code> 這樣的檔名和行號）、<code>log.Lmsgprefix</code>（前綴改放在訊息前面，而不是一行的最前面）。本章的範例用 0，輸出才會每次一樣。</li>
+      <li>*log.Logger 可以被很多 goroutine 同時使用，每一行都會完整地寫出去，不會和別人的交錯。</li>
+    </ul>
+    <p><code>log.Fatal</code> 等於印出訊息再 <code>os.Exit(1)</code>，<code>log.Panic</code> 等於印出訊息再 panic。Fatal 不會執行 defer，檔案沒有 Close、緩衝區沒有 Flush 就結束了；它和 os.Exit 一樣只該出現在 main 裡（<a href="21-cli.html#pit-exit-deep">21 章</a>）。</p>
+    <p>log 的限制在於它只有一行文字。正式環境的 log 通常送到集中的平台，有人要問「今天 ERROR 有幾筆」「七號桌的所有紀錄」「等超過 60 秒的單」，這些問題需要欄位，不是字串。這就是 slog 要解決的事。</p>
+  </section>
+
+  <section aria-labelledby="slog">
+    <h2 id="slog">2. slog：結構化的紀錄</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 214" role="img" aria-label="Logger 是呼叫的那一端，Info、With 這些方法產生一筆 Record，裡面有時間、層級、訊息和屬性。Record 交給 Handler，Handler 決定要不要記、寫成什麼格式：TextHandler 寫成 key=value，JSONHandler 寫成 JSON，或自訂的 Handler。最後寫到 io.Writer">
+        <title>Logger、Record、Handler</title>
+        <rect class="acc" x="16" y="16" width="130" height="66" rx="8"/>
+        <text class="sm mono bold" x="81" y="40" text-anchor="middle">*slog.Logger</text>
+        <text class="sm mono" x="81" y="62" text-anchor="middle">Info、With</text>
+        <path class="wire" d="M146 49 H162"/>
+        <path class="tip" d="M174 49 L162 43 L162 55 Z"/>
+        <rect class="soft" x="174" y="16" width="130" height="66" rx="8"/>
+        <text class="sm mono bold" x="239" y="38" text-anchor="middle">Record</text>
+        <text class="sm" x="239" y="56" text-anchor="middle">時間、層級</text>
+        <text class="sm" x="239" y="74" text-anchor="middle">訊息、屬性</text>
+        <path class="wire" d="M304 49 H320"/>
+        <path class="tip" d="M332 49 L320 43 L320 55 Z"/>
+        <rect class="acc" x="332" y="16" width="132" height="66" rx="8"/>
+        <text class="sm mono bold" x="398" y="40" text-anchor="middle">slog.Handler</text>
+        <text class="sm" x="398" y="62" text-anchor="middle">要不要記、格式</text>
+        <path class="wire" d="M398 82 V100 H96 V114"/>
+        <path class="wire" d="M244 100 V114"/>
+        <path class="wire" d="M398 100 V114"/>
+        <rect class="soft" x="26" y="114" width="140" height="40" rx="8"/>
+        <text class="sm mono" x="96" y="139" text-anchor="middle">TextHandler</text>
+        <rect class="soft" x="174" y="114" width="140" height="40" rx="8"/>
+        <text class="sm mono" x="244" y="139" text-anchor="middle">JSONHandler</text>
+        <rect class="soft dash" x="322" y="114" width="140" height="40" rx="8"/>
+        <text class="sm" x="392" y="139" text-anchor="middle">自訂的 Handler</text>
+        <path class="wire" d="M244 154 V168"/>
+        <path class="tip" d="M244 180 L238 168 L250 168 Z"/>
+        <text class="sm mono" x="244" y="202" text-anchor="middle">io.Writer：stderr、檔案、網路</text>
+      </svg>
+      <figcaption>Logger 是你呼叫的那一端，Handler 是真正寫出去的那一端。換格式、換目的地都只換 Handler，呼叫 Logger 的程式碼不用動。</figcaption>
+    </figure>
+    <p><code>log/slog</code>（Go 1.21 起）的每一筆紀錄由一個<strong>固定的訊息</strong>加上一組<strong>屬性</strong>組成。訊息說發生什麼事，屬性是這次的資料，寫成交錯的鍵值對：</p>
+    <pre class="code" data-src="chapters/25-logging/slog.go#dropTime,demoOptions,textJSONDemo"><code>func dropTime(groups []string, a slog.Attr) slog.Attr {
+	if a.Key == slog.TimeKey &amp;&amp; len(groups) == 0 {
+		return slog.Attr{} // 回傳空的 Attr 就是不輸出這個欄位
+	}
+	return a
+}
+
+var demoOptions = &amp;slog.HandlerOptions{ReplaceAttr: dropTime}
+
+func textJSONDemo() {
+	text := slog.New(slog.NewTextHandler(os.Stdout, demoOptions))
+	text.Info("出餐", "table", 7, "dish", "排骨飯", "note", "少飯 不要辣", "wait", 95*time.Second)
+
+	jsonLog := slog.New(slog.NewJSONHandler(os.Stdout, demoOptions))
+	jsonLog.Info("出餐", "table", 7, "dish", "排骨飯", "note", "少飯 不要辣", "wait", 95*time.Second)
+}</code></pre>
+    <pre class="out" data-example="chapters/25-logging#Example_textJSONDemo"><code>level=INFO msg=出餐 table=7 dish=排骨飯 note="少飯 不要辣" wait=1m35s
+{"level":"INFO","msg":"出餐","table":7,"dish":"排骨飯","note":"少飯 不要辣","wait":95000000000}</code></pre>
+    <ul class="notes">
+      <li>TextHandler 寫成 <code>key=value</code>，值裡有空白或特殊字元時才加引號，適合開發時在終端機看；JSONHandler 每一筆一行 JSON，適合送到 log 平台查詢。</li>
+      <li>兩個 Handler 都可以傳 <code>*slog.HandlerOptions</code>，nil 就是預設值。<code>ReplaceAttr</code> 會對每個屬性呼叫一次，可以改名、改值，回傳空的 Attr 就是不輸出。本章的範例用它拿掉時間；正式的程式要保留時間，<code>AddSource: true</code> 還會加上原始碼的檔名和行號。</li>
+      <li>time.Duration 在 TextHandler 是 <code>1m35s</code>，在 JSONHandler 是奈秒數 <code>95000000000</code>。查 JSON 的人不一定知道單位，常見的做法是在 key 寫上單位（<code>wait_ms</code>）並傳整數。</li>
+    </ul>
+    <p>還沒設定之前，套件層級的 <code>slog.Info</code> 經過 log 套件寫到 stderr。<code>slog.SetDefault</code> 換掉預設的 Logger 之後，連舊的 <code>log.Println</code> 也會改走新的 Handler。所以一個專案可以先換掉 main 裡的設定，舊的程式碼慢慢改：</p>
+    <pre class="code" data-src="chapters/25-logging/defaults/main.go#main"><code>func main() {
+	log.Println("開火")
+	slog.Info("出餐", "table", 7)
+
+	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stderr, nil)))
+	log.Println("舊的程式碼呼叫 log")
+	slog.Info("出餐", "table", 8)
+}</code></pre>
+    <p class="label">實際執行的輸出（stderr，時間每次不同）</p>
+    <pre class="out"><code>2026/11/20 20:53:36 開火
+2026/11/20 20:53:36 INFO 出餐 table=7
+{"time":"2026-11-20T20:53:36.201907+08:00","level":"INFO","msg":"舊的程式碼呼叫 log"}
+{"time":"2026-11-20T20:53:36.201927+08:00","level":"INFO","msg":"出餐","table":8}</code></pre>
+  </section>
+
+  <section aria-labelledby="attrs">
+    <h2 id="attrs">3. 屬性與 With</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 200" role="img" aria-label="base 這個 Logger 沒有屬性。base.With 加上 order_id 和 table 得到 order；order.WithGroup pay 得到 pay。用 pay 記一筆付款，輸出依序有 order_id、table，以及放在 pay 群組裡的 method 和 amount。base 本身沒有被改變">
+        <title>With 一層一層疊上去</title>
+        <rect class="soft" x="16" y="16" width="120" height="40" rx="8"/>
+        <text class="sm mono" x="76" y="41" text-anchor="middle">base</text>
+        <path class="wire" d="M136 36 H162"/>
+        <path class="tip" d="M174 36 L162 30 L162 42 Z"/>
+        <text class="sm mono" x="155" y="24" text-anchor="middle">With</text>
+        <rect class="acc" x="174" y="16" width="130" height="40" rx="8"/>
+        <text class="sm mono" x="239" y="41" text-anchor="middle">order</text>
+        <path class="wire" d="M304 36 H330"/>
+        <path class="tip" d="M342 36 L330 30 L330 42 Z"/>
+        <text class="sm mono" x="323" y="24" text-anchor="middle">WithGroup</text>
+        <rect class="acc" x="342" y="16" width="122" height="40" rx="8"/>
+        <text class="sm mono" x="403" y="41" text-anchor="middle">pay</text>
+        <text class="sm" x="239" y="76" text-anchor="middle">+ order_id、table</text>
+        <text class="sm" x="403" y="76" text-anchor="middle">+ 群組 pay</text>
+        <path class="wire" d="M403 84 V100"/>
+        <path class="tip" d="M403 112 L397 100 L409 100 Z"/>
+        <rect class="soft" x="16" y="112" width="448" height="36" rx="8"/>
+        <text class="sm mono" x="240" y="135" text-anchor="middle">order_id=A042 table=7 pay.method=悠遊卡 pay.amount=225</text>
+        <text class="sm" x="240" y="180" text-anchor="middle">每次 With 都回傳新的 Logger，base 和 order 都不會被改變</text>
+      </svg>
+      <figcaption>With 適合放「這一整段工作都相同」的屬性，例如訂單編號、使用者、元件名稱；只屬於某一筆的資料，直接寫在那一次呼叫裡。</figcaption>
+    </figure>
+    <p>鍵值對很方便，但 key 和 value 的位置全靠你自己對齊。<code>slog.Int</code>、<code>slog.String</code>、<code>slog.Any</code> 這些函式直接建立一個 <code>slog.Attr</code>，型別寫在名稱上，不會錯位；<code>slog.Group</code> 把幾個屬性收成一組。兩種寫法可以混用：</p>
+    <pre class="code" data-src="chapters/25-logging/attrs.go#attrsDemo"><code>func attrsDemo() {
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, demoOptions))
+	logger.Warn("出餐延遲",
+		slog.Int("table", 7),
+		slog.Group("order", slog.String("dish", "排骨飯"), slog.Int("qty", 2)),
+		slog.Any("err", errors.New("排骨還在炸")),
+	)
+
+	// LogAttrs 只收 Attr，不收鍵值對；在很常執行的路徑上，它的配置比較少。
+	logger.LogAttrs(context.Background(), slog.LevelInfo, "出餐",
+		slog.Int("table", 8), slog.String("dish", "雞腿飯"))
+}</code></pre>
+    <pre class="out" data-example="chapters/25-logging#Example_attrsDemo"><code>{"level":"WARN","msg":"出餐延遲","table":7,"order":{"dish":"排骨飯","qty":2},"err":"排骨還在炸"}
+{"level":"INFO","msg":"出餐","table":8,"dish":"雞腿飯"}</code></pre>
+    <ul class="notes">
+      <li>error 的值會用 Error() 的結果。慣例是 key 寫 <code>err</code>，一筆紀錄只放一個錯誤。</li>
+      <li>群組在 JSON 裡是巢狀的物件，在 TextHandler 裡是 <code>order.dish=排骨飯</code>。手上已經是 []slog.Attr 的話，用 <code>slog.GroupAttrs</code>（Go 1.25 起）。</li>
+      <li>slog.Int 這類函式把值存在 slog.Value 裡，整數、字串、時間這些常見的型別不會被轉成 any，少一次記憶體配置。</li>
+    </ul>
+    <p>鍵值對少了一個時，slog 不會報錯，而是把落單的值記成 <code>!BADKEY</code>。go vet 會檢查 slog 的參數，這種錯誤在 commit 之前就能抓到：</p>
+    <pre class="code bad" data-vet-error><code>package main
+
+import "log/slog"
+
+func main() {
+	table, dish := 7, "排骨飯"
+	slog.Info("出餐", "table", table, dish)
+	slog.Info("出餐", table, "dish", dish)
+}</code></pre>
+    <pre class="shell"><code>go vet .</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out err"><code>main.go:7:2: call to slog.Info missing a final value
+main.go:8:22: slog.Info arg "table" should be a string or a slog.Attr (possible missing key or value)</code></pre>
+    <p>這支程式照樣能執行，兩行分別記成 <code>table=7 !BADKEY=排骨飯</code> 和 <code>!BADKEY=7 dish=排骨飯</code>。沒有跑 vet 的話，要等到有人查 log 才會發現。</p>
+    <p><code>logger.With(...)</code> 回傳一個新的 Logger，之後每一筆都自動帶著這些屬性；<code>WithGroup</code> 讓之後加上的屬性都放進一個群組：</p>
+    <pre class="code" data-src="chapters/25-logging/attrs.go#withDemo"><code>func withDemo() {
+	base := slog.New(slog.NewTextHandler(os.Stdout, demoOptions))
+	order := base.With("order_id", "A042", "table", 7)
+	order.Info("接單")
+	order.Info("出餐", "dish", "排骨飯")
+
+	pay := order.WithGroup("pay")
+	pay.Info("付款", "method", "悠遊卡", "amount", 225)
+
+	base.Info("打烊")
+}</code></pre>
+    <pre class="out" data-example="chapters/25-logging#Example_withDemo"><code>level=INFO msg=接單 order_id=A042 table=7
+level=INFO msg=出餐 order_id=A042 table=7 dish=排骨飯
+level=INFO msg=付款 order_id=A042 table=7 pay.method=悠遊卡 pay.amount=225
+level=INFO msg=打烊</code></pre>
+    <ul class="notes">
+      <li>With 的屬性只格式化一次（在 Handler 的 WithAttrs 裡），之後每一筆直接用，不會每次重新處理。</li>
+      <li>With 不會改變原本的 Logger。在迴圈裡寫 <code>logger = logger.With(...)</code> 會讓屬性一圈一圈累積下去（練習 6）。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="levels">
+    <h2 id="levels">4. 層級</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 172" role="img" aria-label="層級是一條數線：DEBUG 是 -4，INFO 是 0，WARN 是 4，ERROR 是 8。門檻設在 INFO 時，INFO 以上的紀錄會記，DEBUG 會被丟掉；門檻可以在執行中移動">
+        <title>層級是整數</title>
+        <path class="wire" d="M24 70 H456"/>
+        <path class="tip" d="M468 70 L456 64 L456 76 Z"/>
+        <circle class="soft" cx="80" cy="70" r="7"/>
+        <circle class="acc" cx="190" cy="70" r="7"/>
+        <circle class="acc" cx="300" cy="70" r="7"/>
+        <circle class="hot" cx="410" cy="70" r="7"/>
+        <text class="sm mono" x="80" y="50" text-anchor="middle">DEBUG</text>
+        <text class="sm mono" x="190" y="50" text-anchor="middle">INFO</text>
+        <text class="sm mono" x="300" y="50" text-anchor="middle">WARN</text>
+        <text class="sm mono" x="410" y="50" text-anchor="middle">ERROR</text>
+        <text class="sm mono" x="80" y="96" text-anchor="middle">-4</text>
+        <text class="sm mono" x="190" y="96" text-anchor="middle">0</text>
+        <text class="sm mono" x="300" y="96" text-anchor="middle">4</text>
+        <text class="sm mono" x="410" y="96" text-anchor="middle">8</text>
+        <path class="wire hot-ln" d="M168 112 V136"/>
+        <text class="sm t-hot" x="168" y="156" text-anchor="middle">門檻（LevelVar 可以移動）</text>
+        <text class="sm" x="80" y="128" text-anchor="middle">丟掉</text>
+        <text class="sm" x="330" y="128" text-anchor="middle">記下來</text>
+      </svg>
+      <figcaption>四個層級之間留了空位，需要的話可以定義自己的層級，例如 -8 當成 TRACE。</figcaption>
+    </figure>
+    <p>層級的型別是 <code>slog.Level</code>，其實就是 int，數字越大越嚴重：</p>
+    <pre class="code" data-src="chapters/25-logging/levels.go#levelsDemo"><code>func levelsDemo() {
+	fmt.Println(slog.LevelDebug, slog.LevelInfo, slog.LevelWarn, slog.LevelError)
+	fmt.Println(int(slog.LevelDebug), int(slog.LevelInfo), int(slog.LevelWarn), int(slog.LevelError))
+	fmt.Println(slog.LevelInfo+2, slog.Level(-8))
+
+	for _, s := range []string{"warn", "INFO+2", "verbose"} {
+		var lv slog.Level
+		if err := lv.UnmarshalText([]byte(s)); err != nil {
+			fmt.Println(s, "→", err)
+			continue
+		}
+		fmt.Println(s, "→", lv)
+	}
+}</code></pre>
+    <pre class="out" data-example="chapters/25-logging#Example_levelsDemo"><code>DEBUG INFO WARN ERROR
+-4 0 4 8
+INFO+2 DEBUG-4
+warn → WARN
+INFO+2 → INFO+2
+verbose → slog: level string "verbose": unknown name</code></pre>
+    <ul class="notes">
+      <li>不在四個名稱上的值，印成「名稱加減差距」：2 在 INFO 和 WARN 之間，是 <code>INFO+2</code>；-8 比 DEBUG 還小 4，是 <code>DEBUG-4</code>。</li>
+      <li><code>Level.UnmarshalText</code> 讀的就是這種文字，而且不分大小寫。從旗標或環境變數讀層級時直接用它（練習 1）。</li>
+    </ul>
+    <p>每個層級什麼時候用，常見的分法是：<strong>Debug</strong> 只在找問題時打開；<strong>Info</strong> 是正常的重要事件（接單、結帳完成）；<strong>Warn</strong> 是不正常但程式自己處理掉了（重試成功、庫存快沒了）；<strong>Error</strong> 是需要人處理的失敗。</p>
+    <p>Handler 只記門檻以上的紀錄，門檻由 <code>HandlerOptions.Level</code> 決定，預設是 Info。傳一個 <code>*slog.LevelVar</code> 進去，就能在程式執行中調整門檻：</p>
+    <pre class="code" data-src="chapters/25-logging/levels.go#levelVarDemo"><code>func levelVarDemo() {
+	var level slog.LevelVar // 零值是 Info
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &amp;slog.HandlerOptions{Level: &amp;level, ReplaceAttr: dropTime}))
+
+	logger.Debug("看不到", "step", 1)
+	logger.Info("接單", "table", 7)
+
+	level.Set(slog.LevelDebug) // 例如收到管理指令，暫時打開 debug
+	logger.Debug("看得到了", "step", 2)
+
+	level.Set(slog.LevelWarn)
+	logger.Info("看不到", "table", 8)
+	logger.Warn("排骨快賣完了", "left", 3)
+	fmt.Println("Info 要不要記：", logger.Enabled(context.Background(), slog.LevelInfo))
+}</code></pre>
+    <pre class="out" data-example="chapters/25-logging#Example_levelVarDemo"><code>level=INFO msg=接單 table=7
+level=DEBUG msg=看得到了 step=2
+level=WARN msg=排骨快賣完了 left=3
+Info 要不要記： false</code></pre>
+    <ul class="notes">
+      <li>LevelVar 可以被很多 goroutine 同時讀寫。常見的用法是收到 signal（<a href="21-cli.html#signal">21 章</a>）或管理用的 HTTP 請求時，暫時把門檻調到 Debug。</li>
+      <li><code>logger.Enabled(ctx, level)</code> 回答「這個層級現在會不會被記」。要記的資料計算起來很貴時，先問一下再算；下一節的 LogValuer 是另一種做法。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="valuer">
+    <h2 id="valuer">5. LogValuer</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 180" role="img" aria-label="Customer 有 ID、Name、Phone、Address 四個欄位。LogValue 只挑出 id 和遮起來的 phone，名字和地址不會出現在 log 裡">
+        <title>LogValue 決定記什麼</title>
+        <rect class="soft" x="16" y="16" width="170" height="148" rx="8"/>
+        <text class="sm mono bold" x="101" y="38" text-anchor="middle">Customer</text>
+        <text class="sm mono" x="32" y="66">ID 1024</text>
+        <text class="sm mono" x="32" y="92">Name 王小明</text>
+        <text class="sm mono" x="32" y="118">Phone 0912345678</text>
+        <text class="sm mono" x="32" y="144">Address 台北市…</text>
+        <path class="wire" d="M186 90 H222"/>
+        <path class="tip" d="M234 90 L222 84 L222 96 Z"/>
+        <text class="sm mono" x="210" y="78" text-anchor="middle">LogValue</text>
+        <rect class="acc" x="234" y="54" width="230" height="72" rx="8"/>
+        <text class="sm mono" x="250" y="82">id: 1024</text>
+        <text class="sm mono" x="250" y="108">phone: 0912***678</text>
+        <text class="sm t-hot" x="349" y="150" text-anchor="middle">名字、地址不記</text>
+      </svg>
+      <figcaption>型別自己決定它在 log 裡長什麼樣子。不管誰、在哪裡記它，都不會不小心把個資寫出去。</figcaption>
+    </figure>
+    <p>型別實作 <code>slog.LogValuer</code>（只有一個方法 <code>LogValue() slog.Value</code>），slog 記錄它的時候就用 LogValue 回傳的值，而不是型別本身。最重要的用途是<strong>遮蔽個資和秘密</strong>：</p>
+    <pre class="code" data-src="chapters/25-logging/valuer.go#Phone,Phone.LogValue,Customer,Customer.LogValue,valuerDemo"><code>type Phone string
+
+func (p Phone) LogValue() slog.Value {
+	s := string(p)
+	if len(s) &lt; 7 {
+		return slog.StringValue("***")
+	}
+	return slog.StringValue(s[:4] + "***" + s[len(s)-3:])
+}
+
+type Customer struct {
+	ID      int
+	Name    string
+	Phone   Phone
+	Address string
+}
+
+func (c Customer) LogValue() slog.Value {
+	return slog.GroupValue(slog.Int("id", c.ID), slog.Any("phone", c.Phone))
+}
+
+func valuerDemo() {
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, demoOptions))
+	c := Customer{ID: 1024, Name: "王小明", Phone: "0912345678", Address: "台北市信義路五段 7 號"}
+	logger.Info("外送訂單", "customer", c)
+	logger.Info("回撥", "phone", c.Phone)
+}</code></pre>
+    <pre class="out" data-example="chapters/25-logging#Example_valuerDemo"><code>{"level":"INFO","msg":"外送訂單","customer":{"id":1024,"phone":"0912***678"}}
+{"level":"INFO","msg":"回撥","phone":"0912***678"}</code></pre>
+    <ul class="notes">
+      <li>LogValue 回傳 <code>slog.GroupValue(...)</code> 就變成一個群組。群組裡的 Phone 又是 LogValuer，slog 會繼續展開。</li>
+      <li>密碼、token、完整的卡號和身分證字號不該出現在 log 裡。log 會被很多人看、保存很久、複製到很多地方，比資料庫難保護得多。</li>
+      <li>不是自己的型別、或想用 key 統一過濾（例如所有叫 password 的屬性），用 HandlerOptions 的 ReplaceAttr（練習 2）。</li>
+    </ul>
+    <p>LogValue 只在這筆紀錄真的要寫出去時才被呼叫。被層級擋掉的紀錄，LogValue 一次都不會執行，所以很花時間才算得出來的資料也可以放心放進去：</p>
+    <pre class="code" data-src="chapters/25-logging/valuer.go#report,report.LogValue,lazyDemo"><code>type report struct{ calls *int }
+
+func (r report) LogValue() slog.Value {
+	*r.calls++
+	return slog.StringValue("今日營收 12,345 元")
+}
+
+func lazyDemo() {
+	logger := slog.New(slog.NewTextHandler(os.Stdout, demoOptions)) // 沒有設定 Level，最低是 Info
+	calls := 0
+	logger.Debug("報表", "report", report{&amp;calls})
+	fmt.Println("計算了", calls, "次")
+	logger.Info("報表", "report", report{&amp;calls})
+	fmt.Println("計算了", calls, "次")
+}</code></pre>
+    <pre class="out" data-example="chapters/25-logging#Example_lazyDemo"><code>計算了 0 次
+level=INFO msg=報表 report="今日營收 12,345 元"
+計算了 1 次</code></pre>
+  </section>
+
+  <section aria-labelledby="handler">
+    <h2 id="handler">6. Handler</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 214" role="img" aria-label="ctxHandler 包住 TextHandler。logger.With 會呼叫 Handler 的 WithAttrs。ctxHandler 自己實作 WithAttrs，回傳包好的新 ctxHandler，request id 還在；只覆寫 Handle 的 handleOnly，WithAttrs 是嵌入的 TextHandler 提供的，回傳的是裸的 TextHandler，request id 就不見了">
+        <title>包裝的 Handler 要包到底</title>
+        <rect class="acc" x="16" y="16" width="210" height="58" rx="8"/>
+        <text class="sm mono bold" x="121" y="38" text-anchor="middle">ctxHandler</text>
+        <rect class="soft" x="40" y="44" width="162" height="24" rx="4"/>
+        <text class="sm mono" x="121" y="61" text-anchor="middle">TextHandler</text>
+        <rect class="hot" x="254" y="16" width="210" height="58" rx="8"/>
+        <text class="sm mono bold" x="359" y="38" text-anchor="middle">handleOnly</text>
+        <rect class="soft" x="278" y="44" width="162" height="24" rx="4"/>
+        <text class="sm mono" x="359" y="61" text-anchor="middle">TextHandler</text>
+        <path class="wire" d="M121 74 V100"/>
+        <path class="tip" d="M121 112 L115 100 L127 100 Z"/>
+        <path class="wire hot-ln" d="M359 74 V100"/>
+        <path class="tip hot-tip" d="M359 112 L353 100 L365 100 Z"/>
+        <text class="sm mono" x="240" y="96" text-anchor="middle">With</text>
+        <rect class="acc" x="16" y="112" width="210" height="58" rx="8"/>
+        <text class="sm mono bold" x="121" y="134" text-anchor="middle">ctxHandler</text>
+        <rect class="soft" x="40" y="140" width="162" height="24" rx="4"/>
+        <text class="sm mono" x="121" y="157" text-anchor="middle">TextHandler+屬性</text>
+        <rect class="soft" x="278" y="126" width="162" height="30" rx="6"/>
+        <text class="sm mono" x="359" y="146" text-anchor="middle">TextHandler+屬性</text>
+        <text class="sm" x="121" y="198" text-anchor="middle">還會加 request id</text>
+        <text class="sm t-hot" x="359" y="198" text-anchor="middle">外面那層不見了</text>
+      </svg>
+      <figcaption>嵌入讓 handleOnly「自動」有了 WithAttrs，但那是裡面那個 Handler 的方法，回傳的也只有裡面那個。</figcaption>
+    </figure>
+    <p><code>slog.Handler</code> 是一個有四個方法的 interface：<code>Enabled</code>（這個層級要不要記）、<code>Handle</code>（記一筆）、<code>WithAttrs</code> 和 <code>WithGroup</code>（logger.With、WithGroup 時呼叫，回傳一個新的 Handler）。最常見的需求不是從頭寫一個，而是組合或包裝現有的。</p>
+    <p>要同時寫到兩個地方，用 <code>slog.NewMultiHandler</code>（Go 1.26 起）。每個 Handler 有自己的格式和門檻，例如全部寫到 stdout，Warn 以上另外寫一份 JSON 給告警系統：</p>
+    <pre class="code" data-src="chapters/25-logging/handler.go#multiDemo"><code>func multiDemo() {
+	var alerts strings.Builder // 實際的程式裡可能是檔案，或送到告警系統的 Writer
+	logger := slog.New(slog.NewMultiHandler(
+		slog.NewTextHandler(os.Stdout, demoOptions),
+		slog.NewJSONHandler(&amp;alerts, &amp;slog.HandlerOptions{Level: slog.LevelWarn, ReplaceAttr: dropTime}),
+	))
+	logger.Info("接單", "table", 7)
+	logger.Warn("排骨快賣完了", "left", 3)
+	logger.Error("收銀機斷線", "err", errors.New("connection refused"))
+	fmt.Print("告警：\n", alerts.String())
+}</code></pre>
+    <pre class="out" data-example="chapters/25-logging#Example_multiDemo"><code>level=INFO msg=接單 table=7
+level=WARN msg=排骨快賣完了 left=3
+level=ERROR msg=收銀機斷線 err="connection refused"
+告警：
+{"level":"WARN","msg":"排骨快賣完了","left":3}
+{"level":"ERROR","msg":"收銀機斷線","err":"connection refused"}</code></pre>
+    <p>另一個常見的需求是 request id：一個請求經過很多函式，每一筆 log 都應該帶著同一個 id，才查得出「這個請求發生了什麼事」。id 放在 context 裡（<a href="18-context.html#value">18 章</a>），但內建的 Handler 不會去看 context 的值，所以自己包一層：</p>
+    <pre class="code" data-src="chapters/25-logging/handler.go#requestIDKey,withRequestID,ctxHandler,ctxHandler.Handle,ctxHandler.WithAttrs,ctxHandler.WithGroup"><code>type requestIDKey struct{}
+
+func withRequestID(ctx context.Context, id string) context.Context {
+	return context.WithValue(ctx, requestIDKey{}, id)
+}
+
+type ctxHandler struct {
+	slog.Handler
+}
+
+func (h ctxHandler) Handle(ctx context.Context, r slog.Record) error {
+	if id, ok := ctx.Value(requestIDKey{}).(string); ok {
+		r.AddAttrs(slog.String("request_id", id))
+	}
+	return h.Handler.Handle(ctx, r)
+}
+
+func (h ctxHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
+	return ctxHandler{h.Handler.WithAttrs(attrs)}
+}
+
+func (h ctxHandler) WithGroup(name string) slog.Handler {
+	return ctxHandler{h.Handler.WithGroup(name)}
+}</code></pre>
+    <p>嵌入 slog.Handler 之後，只要覆寫需要的方法，其他的方法自動用裡面那個的（<a href="09-structs-methods.html#embed">09 章</a>）。陷阱就在這裡：WithAttrs、WithGroup 也會「自動」用裡面那個的，而它們回傳的是裡面那個 Handler，外面那一層就不見了。把只覆寫 Handle 的版本放在一起比較：</p>
+    <pre class="code" data-src="chapters/25-logging/handler.go#handleOnly,handleOnly.Handle,contextDemo"><code>type handleOnly struct {
+	slog.Handler
+}
+
+func (h handleOnly) Handle(ctx context.Context, r slog.Record) error {
+	return ctxHandler{h.Handler}.Handle(ctx, r)
+}
+
+func contextDemo() {
+	ctx := withRequestID(context.Background(), "r-7f3a")
+	inner := slog.NewTextHandler(os.Stdout, demoOptions)
+	for _, h := range []slog.Handler{ctxHandler{inner}, handleOnly{inner}} {
+		fmt.Printf("%T：\n", h)
+		logger := slog.New(h)
+		logger.InfoContext(ctx, "接單", "table", 7)
+		logger.With("table", 7).InfoContext(ctx, "出餐")
+	}
+}</code></pre>
+    <pre class="out" data-example="chapters/25-logging#Example_contextDemo"><code>main.ctxHandler：
+level=INFO msg=接單 table=7 request_id=r-7f3a
+level=INFO msg=出餐 table=7 request_id=r-7f3a
+main.handleOnly：
+level=INFO msg=接單 table=7 request_id=r-7f3a
+level=INFO msg=出餐 table=7</code></pre>
+    <ul class="notes">
+      <li>沒有 With 的時候兩者完全一樣，所以這個 bug 很容易通過簡單的測試，上線後才發現一部分的 log 沒有 request id。</li>
+      <li>要用 ...Context 版本的方法（InfoContext、ErrorContext），ctx 才會傳到 Handle。</li>
+      <li>request id 是在 Handle 裡加的，所以會放在當時開著的群組裡面；需要永遠在最外層時，Handler 要自己記住群組，處理起來比較複雜。</li>
+      <li>自訂的 Handler 可以用標準庫的 <code>testing/slogtest</code> 檢查有沒有遵守 Handler 的規則，例如空的 Attr 要略過、群組要正確地巢狀（本章的 main_test.go 有用到）。它檢查的是輸出的內容，抓不到上面這種「外面那一層不見了」的 bug，這要自己寫測試。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="testing">
+    <h2 id="testing">7. 測試日誌</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 182" role="img" aria-label="正式的程式把寫到 stderr 的 JSON Logger 傳給 checkout；測試把寫到 bytes.Buffer 的 Logger 傳給同一個 checkout，再把 buffer 裡每一行解成 map，檢查 level、msg 和屬性">
+        <title>Logger 從外面傳進來</title>
+        <rect class="soft" x="16" y="16" width="160" height="40" rx="8"/>
+        <text class="sm" x="96" y="41" text-anchor="middle">main：寫到 stderr</text>
+        <rect class="soft" x="16" y="96" width="160" height="40" rx="8"/>
+        <text class="sm" x="96" y="121" text-anchor="middle">測試：寫到 buffer</text>
+        <path class="wire" d="M176 36 H200 V66 H214"/>
+        <path class="wire" d="M176 116 H200 V86 H214"/>
+        <path class="tip" d="M226 76 L214 70 L214 82 Z"/>
+        <rect class="acc" x="226" y="52" width="110" height="48" rx="8"/>
+        <text class="sm mono" x="281" y="81" text-anchor="middle">checkout</text>
+        <path class="wire" d="M281 100 V120 H352"/>
+        <path class="tip" d="M364 120 L352 114 L352 126 Z"/>
+        <rect class="soft" x="364" y="96" width="100" height="48" rx="8"/>
+        <text class="sm" x="414" y="116" text-anchor="middle">一行一行</text>
+        <text class="sm" x="414" y="135" text-anchor="middle">解成 map</text>
+        <text class="sm" x="240" y="170" text-anchor="middle">檢查 level、msg、order_id、err</text>
+      </svg>
+      <figcaption>函式不自己去拿全域的 Logger，而是由呼叫的一方傳進來。正式環境和測試只差在傳進去的是哪一個。</figcaption>
+    </figure>
+    <p>log 也是程式的輸出。付款失敗時有沒有記一筆 ERROR、有沒有帶著訂單編號，這些都值得測試，尤其是要靠 log 觸發告警的時候。前提是函式用的 Logger 是傳進來的：</p>
+    <pre class="code" data-src="chapters/25-logging/checkout.go#Order,checkout,checkoutDemo"><code>type Order struct {
+	ID    string
+	Items int
+	Total int
+}
+
+func checkout(ctx context.Context, logger *slog.Logger, o Order, pay func(amount int) error) error {
+	logger = logger.With("order_id", o.ID)
+	logger.DebugContext(ctx, "開始結帳", "items", o.Items)
+	if err := pay(o.Total); err != nil {
+		logger.ErrorContext(ctx, "付款失敗", "total", o.Total, "err", err)
+		return fmt.Errorf("訂單 %s：%w", o.ID, err)
+	}
+	logger.InfoContext(ctx, "結帳完成", "total", o.Total)
+	return nil
+}
+
+func checkoutDemo() {
+	logger := slog.New(slog.NewTextHandler(os.Stdout, demoOptions))
+	err := checkout(context.Background(), logger, Order{ID: "A042", Items: 3, Total: 225}, func(int) error {
+		return errors.New("餘額不足")
+	})
+	fmt.Println(err)
+}</code></pre>
+    <pre class="out" data-example="chapters/25-logging#Example_checkoutDemo"><code>level=ERROR msg=付款失敗 order_id=A042 total=225 err=餘額不足
+訂單 A042：餘額不足</code></pre>
+    <p>測試裡給它一個寫到 bytes.Buffer 的 JSONHandler，再用 <a href="23-json.html#stream">23 章</a>的 jsontext.Decoder 一筆一筆解開，檢查欄位，而不是比對整個字串。這樣以後多加一個屬性，測試也不會壞：</p>
+    <pre class="code" data-src="chapters/25-logging/main_test.go#logLines,TestCheckoutLogs"><code>func logLines(t *testing.T, r io.Reader) []map[string]any {
+	t.Helper()
+	var lines []map[string]any
+	dec := jsontext.NewDecoder(r)
+	for {
+		var m map[string]any
+		err := json.UnmarshalDecode(dec, &amp;m)
+		if errors.Is(err, io.EOF) {
+			return lines
+		}
+		if err != nil {
+			t.Fatalf("log 不是合法的 JSON：%v", err)
+		}
+		lines = append(lines, m)
+	}
+}
+
+func TestCheckoutLogs(t *testing.T) {
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&amp;buf, &amp;slog.HandlerOptions{Level: slog.LevelDebug}))
+	order := Order{ID: "A042", Items: 3, Total: 225}
+
+	err := checkout(t.Context(), logger, order, func(int) error { return errors.New("餘額不足") })
+	if err == nil {
+		t.Fatal("付款失敗時 checkout 應該回傳錯誤")
+	}
+	lines := logLines(t, &amp;buf)
+	if len(lines) != 2 {
+		t.Fatalf("記了 %d 筆，want 2：%v", len(lines), lines)
+	}
+	want := map[string]any{"level": "ERROR", "msg": "付款失敗", "order_id": "A042", "total": 225.0, "err": "餘額不足"}
+	for key, w := range want {
+		if got := lines[1][key]; got != w {
+			t.Errorf("%s = %v，want %v", key, got, w)
+		}
+	}
+}</code></pre>
+    <ul class="notes">
+      <li>層級設成 Debug，Debug 的紀錄才會出現在 buffer 裡，測試才看得到全部。</li>
+      <li>JSON 的數字解到 any 是 float64，所以比對的是 <code>225.0</code>（<a href="23-json.html#decode">23 章</a>）。</li>
+      <li>不在乎 log 的測試，傳 <code>slog.New(slog.DiscardHandler)</code>（Go 1.24 起），什麼都不寫。</li>
+      <li>想在測試失敗時看到 log，用 <code>t.Output()</code>（Go 1.25 起）當 Writer：<code>slog.New(slog.NewTextHandler(t.Output(), nil))</code>。log 會和 t.Log 一樣跟著那個測試印出來，用 -v 或失敗時才看得到。</li>
+    </ul>
+    <p>整個專案的 Logger 通常在 main 建立一次，傳給需要的元件（存在 struct 的欄位裡），或用 With 加上元件名稱後再傳下去。只有 main 和很小的程式才直接用套件層級的 slog.Info。</p>
+  </section>
+
+  <section aria-labelledby="pitfalls">
+    <h2 id="pitfalls">常見錯誤</h2>
+    <h3 id="pit-sprintf">1. 把資料拼進訊息裡</h3>
+    <p><code>slog.Info(fmt.Sprintf("第 %d 桌出餐", 7))</code> 每一筆的訊息都不一樣，查不了「所有出餐」，也取不出桌號。訊息寫固定的文字，資料放在屬性裡（第 2 節）。</p>
+
+    <h3 id="pit-badkey">2. 鍵值對少一個</h3>
+    <p>落單的值被記成 !BADKEY，後面的 key 和 value 全部錯位。跑 go vet；容易寫錯的地方改用 slog.Int、slog.String（第 3 節）。</p>
+
+    <h3 id="pit-secret">3. 把密碼、token、個資記進 log</h3>
+    <p>log 被保存得很久、看得到的人很多。敏感的型別實作 LogValuer，或用 ReplaceAttr 依 key 遮掉（第 5 節、練習 2）。</p>
+
+    <h3 id="pit-with-loop">4. 在迴圈裡 logger = logger.With(...)</h3>
+    <p>每一圈都在上一圈的基礎上加屬性，紀錄越來越長，而且帶著錯的資料。只屬於這一筆的資料直接寫在呼叫裡（第 3 節、練習 6）。</p>
+
+    <h3 id="pit-wrapper">5. 包裝 Handler 時只覆寫 Handle</h3>
+    <p>WithAttrs、WithGroup 會回傳裡面那個 Handler，logger.With 之後外面那一層就消失了。四個方法都要處理，回傳時再包一次（第 6 節）。</p>
+
+    <h3 id="pit-global">6. 在函式裡直接用全域的 Logger</h3>
+    <p>測試換不掉，也無法讓不同的元件有不同的設定。Logger 從參數或 struct 欄位傳進來（第 7 節）。</p>
+
+    <h3 id="pit-fatal">7. 在 main 以外呼叫 log.Fatal</h3>
+    <p>它直接結束程式，defer 不會執行，呼叫的一方也沒有機會處理。回傳錯誤，讓 main 決定（第 1 節）。</p>
+
+    <h3 id="pit-duration">8. 在 JSON 裡記 time.Duration，卻沒說單位</h3>
+    <p>JSONHandler 把它寫成奈秒的整數，查的人很容易看錯三個零。key 寫上單位並傳整數，或傳 Duration 的 String()（第 2 節）。</p>
+  </section>
+
+  <section aria-labelledby="java">
+    <h2 id="java">從 Java 來的你</h2>
+    <div class="table-wrap">
+      <table class="vs">
+        <thead><tr><th scope="col">主題</th><th scope="col">Java（SLF4J＋Logback）</th><th scope="col">Go</th></tr></thead>
+        <tbody>
+          <tr><th scope="row">函式庫</th><td class="java">第三方的 SLF4J、Logback、Log4j 2</td><td>標準庫的 <code>log/slog</code></td></tr>
+          <tr><th scope="row">記一筆</th><td class="java"><code>log.info("出餐 table={}", 7)</code></td><td><code>slog.Info("出餐", "table", 7)</code></td></tr>
+          <tr><th scope="row">取得 Logger</th><td class="java">每個 class 一個 <code>LoggerFactory.getLogger(X.class)</code></td><td>由外面傳進來，用 <code>With("component", …)</code> 標示</td></tr>
+          <tr><th scope="row">輸出的目的地與格式</th><td class="java">Appender、Encoder</td><td><code>slog.Handler</code></td></tr>
+          <tr><th scope="row">設定</th><td class="java"><code>logback.xml</code></td><td>程式碼裡的 <code>HandlerOptions</code></td></tr>
+          <tr><th scope="row">一整段工作的共同資料</th><td class="java">MDC（綁在 thread 上）</td><td><code>With</code>，或 context 加上自訂 Handler</td></tr>
+          <tr><th scope="row">層級</th><td class="java">TRACE、DEBUG、INFO、WARN、ERROR</td><td>Debug、Info、Warn、Error，其實是整數</td></tr>
+          <tr><th scope="row">避免多餘的計算</th><td class="java"><code>isDebugEnabled()</code>、<code>{}</code> 佔位</td><td><code>Enabled</code>、<code>LogValuer</code></td></tr>
+          <tr><th scope="row">JSON 輸出</th><td class="java">另外加 logstash-logback-encoder</td><td>內建 <code>JSONHandler</code></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>MDC 把資料綁在目前的 thread 上，Go 的 goroutine 沒有可以讓你掛資料的身分，所以這類資料改放在 context 或 With 出來的 Logger 裡，明確地傳下去。</p>
+  </section>
+
+  <section aria-labelledby="exercises">
+    <h2 id="exercises">練習</h2>
+    <p>題目在 <code>exercises/25-logging/exercises.go</code>。</p>
+    <pre class="shell"><code>go test ./exercises/25-logging/                    <span class="c"># 跑全部練習</span>
+go test ./exercises/25-logging/ -run TestRedact    <span class="c"># 只跑一題</span>
+go test -tags solution ./exercises/25-logging/     <span class="c"># 跑參考解答</span></code></pre>
+    <ol class="exercises">
+      <li>
+        <h3><span class="level l1">入門</span>練習 1：依設定建立 Logger</h3>
+        <p>格式和層級來自設定檔或旗標。</p>
+        <pre class="code" data-src="exercises/25-logging/exercises.go#NewLogger"><code>func NewLogger(w io.Writer, format, level string) (*slog.Logger, error) {
+	// TODO: 實作
+	return nil, nil
+}</code></pre>
+        <p>測試：<code>TestNewLogger</code>。</p>
+        <details><summary>提示</summary><p>層級用 <code>var lv slog.Level</code> 加上 <code>lv.UnmarshalText</code>，它已經處理了大小寫和 +1 這種寫法；零值剛好是 Info。<code>slog.Level</code> 本身就實作了 HandlerOptions.Level 要的 Leveler。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l2">進階</span>練習 2：遮掉秘密</h3>
+        <p>不管寫在哪一層，叫 password、token 的屬性都不能出現。</p>
+        <pre class="code" data-src="exercises/25-logging/exercises.go#Redact"><code>func Redact(keys ...string) func(groups []string, a slog.Attr) slog.Attr {
+	// TODO: 實作
+	return nil
+}</code></pre>
+        <p>測試：<code>TestRedact</code>。</p>
+        <details><summary>提示</summary><p>ReplaceAttr 會對每一層群組裡的每個屬性呼叫，所以只要看 a.Key，不用自己往下找。比較用 <code>strings.EqualFold</code>，找有沒有符合的 key 可以用 <code>slices.ContainsFunc</code>。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l2">進階</span>練習 3：交班統計</h3>
+        <p>讀一份 JSON 格式的 log，算每個層級幾筆，列出所有的錯誤。</p>
+        <pre class="code" data-src="exercises/25-logging/doc.go#Summary"><code>type Summary struct {
+	Counts map[string]int // 每個 level 字串（例如 "INFO"、"WARN+2"）出現幾筆
+	Errors []string       // ERROR 以上（含 ERROR+1 這類）每一筆的 msg，依照出現的順序
+}</code></pre>
+        <pre class="code" data-src="exercises/25-logging/exercises.go#Summarize"><code>func Summarize(r io.Reader) (Summary, error) {
+	// TODO: 實作
+	return Summary{}, nil
+}</code></pre>
+        <p>測試：<code>TestSummarize</code>。</p>
+        <details><summary>提示</summary><p>和 <a href="23-json.html#stream">23 章</a>讀 JSON Lines 一樣，用 jsontext.Decoder 加 UnmarshalDecode，解到只有 level 和 msg 的 struct，其他欄位會被略過。「ERROR 以上」用 Level.UnmarshalText 轉成數字再比，ERROR+2 也算。msg 要分辨「沒有這個欄位」和「空字串」時，欄位用 *string。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l2">進階</span>練習 4：計時</h3>
+        <p>寫在函式開頭的一行 defer，結束時記下花了多久。</p>
+        <pre class="code" data-src="exercises/25-logging/exercises.go#Timed"><code>func Timed(logger *slog.Logger, op string, slow time.Duration) (done func()) {
+	// TODO: 實作
+	return func() {}
+}</code></pre>
+        <p>測試：<code>TestTimed</code>，用 <a href="22-time.html">22 章</a>的 synctest 讓時間剛好是 2 秒和 3 秒。</p>
+        <details><summary>提示</summary><p>Timed 被呼叫時記下 time.Now()，回傳的 closure 用 time.Since 算經過的時間。用法是 <code>defer Timed(logger, "炸排骨", 3*time.Second)()</code>：注意最後的 ()，Timed 本身在 defer 那一行就執行了。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l3">挑戰</span>練習 5：計數的 Handler</h3>
+        <p>照常記錄，同時算每個層級記了幾筆，例如給監控系統用。</p>
+        <pre class="code" data-src="exercises/25-logging/exercises.go#CountingHandler,NewCountingHandler,CountingHandler.Enabled,CountingHandler.Handle,CountingHandler.WithAttrs,CountingHandler.WithGroup,CountingHandler.Count"><code>type CountingHandler struct {
+	// TODO: 加上需要的欄位
+}
+
+func NewCountingHandler(next slog.Handler) *CountingHandler {
+	// TODO: 實作
+	return &amp;CountingHandler{}
+}
+
+func (h *CountingHandler) Enabled(ctx context.Context, level slog.Level) bool {
+	// TODO: 實作
+	return false
+}
+
+func (h *CountingHandler) Handle(ctx context.Context, r slog.Record) error {
+	// TODO: 實作
+	return nil
+}
+
+func (h *CountingHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
+	// TODO: 實作
+	return h
+}
+
+func (h *CountingHandler) WithGroup(name string) slog.Handler {
+	// TODO: 實作
+	return h
+}
+
+func (h *CountingHandler) Count(level slog.Level) int {
+	// TODO: 實作
+	return 0
+}</code></pre>
+        <p>測試：<code>TestCountingHandler</code>，用 -race 跑。</p>
+        <details><summary>提示</summary><p>計數放在另一個 struct 裡（一個 Mutex 加一個 map），CountingHandler 存它的指標。WithAttrs、WithGroup 回傳新的 CountingHandler：next 換成 next.WithAttrs(attrs)，計數的指標照抄，這樣全部共用同一份（第 6 節）。</p></details>
+      </li>
+      <li>
+        <h3><span class="level fix">找錯</span>練習 6：越來越長的紀錄</h3>
+        <p>三個品項，第三筆紀錄卻有三個 item。</p>
+        <pre class="code" data-src="exercises/25-logging/exercises.go#LogItems"><code>func LogItems(logger *slog.Logger, items []string) {
+	for _, it := range items {
+		logger = logger.With("item", it)
+		logger.Info("出餐")
+	}
+}</code></pre>
+        <p>測試：<code>TestLogItems</code>。</p>
+        <details><summary>提示</summary><p>常見錯誤 4。</p></details>
+      </li>
+    </ol>
+    <p><a href="https://github.com/xinqilin/GO-Playground/blob/main/exercises/25-logging/solution.go">參考解答</a>：先自己寫完再看。測試通過的寫法都是對的。</p>
+  </section>
+
+  <section aria-labelledby="recap">
+    <h2 id="recap">重點回顧</h2>
+    <ul class="recap">
+      <li>log 套件寫出一行文字；需要查詢的 log 用 log/slog。</li>
+      <li>訊息寫固定的文字，資料放在屬性裡；TextHandler 給人看，JSONHandler 給機器查。</li>
+      <li>slog.Int、slog.String 不會錯位；鍵值對寫錯會變成 !BADKEY，用 go vet 抓。</li>
+      <li>With 回傳新的 Logger，適合一整段工作共同的屬性；不要在迴圈裡蓋掉原本的 Logger。</li>
+      <li>層級是整數，門檻由 HandlerOptions.Level 決定，LevelVar 可以在執行中調整。</li>
+      <li>個資和秘密用 LogValuer 或 ReplaceAttr 遮掉；LogValue 只在真的要記時才執行。</li>
+      <li>寫到多個地方用 MultiHandler；包裝 Handler 時四個方法都要處理。</li>
+      <li>request id 放在 context，用 ...Context 方法和自訂 Handler 帶進每一筆紀錄。</li>
+      <li>Logger 從外面傳進來，測試時寫到 buffer，解開 JSON 檢查欄位。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="further">
+    <h2 id="further">延伸閱讀</h2>
+    <ul class="notes">
+      <li>套件文件：<a href="https://pkg.go.dev/log/slog">log/slog</a>（開頭有 Handler 的設計說明和效能建議）、<a href="https://pkg.go.dev/log">log</a>、<a href="https://pkg.go.dev/testing/slogtest">testing/slogtest</a>。</li>
+      <li>Go 官方部落格：<a href="https://go.dev/blog/slog">Structured Logging with slog</a>。</li>
+      <li>Go 1.26 版本說明：<a href="https://go.dev/doc/go1.26#logslogpkglogslog">log/slog 的 MultiHandler</a>。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="run">
+    <h2 id="run">動手跑</h2>
+    <p class="label">在 repo 根目錄</p>
+    <pre class="shell"><code>go run ./chapters/25-logging              <span class="c"># 依序執行本章所有示範</span>
+go run ./chapters/25-logging/defaults     <span class="c"># 沒有設定時的輸出（寫到 stderr）</span>
+go test ./chapters/25-logging             <span class="c"># 驗證頁面上的每一段輸出</span>
+go test ./exercises/25-logging/           <span class="c"># 做練習</span></code></pre>
+    <p><a href="https://github.com/xinqilin/GO-Playground/tree/main/chapters/25-logging">在 GitHub 看本章完整程式碼</a>，或看<a href="https://github.com/xinqilin/GO-Playground/tree/main/exercises/25-logging">練習題</a>。</p>
+  </section>
+</main>
+
+<nav class="pager" aria-label="章節導覽">
+  <a class="prev" href="24-text.html">← 24 文字處理</a>
+  <a class="home" href="index.html">目錄</a>
+  <a class="next" href="26-http.html">26 HTTP 服務 →</a>
+</nav>
+</body>
+</html>
