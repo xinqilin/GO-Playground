@@ -4,128 +4,717 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>並行網址檢查器｜Go 圖解手冊</title>
-<meta name="description" content="同時檢查多個網址：用 semaphore 限制同時數量、每個請求各自逾時，並用 interface 讓測試不碰網路。">
+<meta name="description" content="同時檢查一批網址的命令列工具：用 interface 隔開網路、固定數量的 worker、每次請求的 context 逾時、用 Ticker 限速、指數退避重試、Ctrl-C 取消，再用 synctest 的假時鐘和 golden file 把每一個時間都測準。">
 <link rel="stylesheet" href="assets/style.css">
 </head>
 <body>
 <header class="site">
   <a href="index.html">Go 圖解手冊</a>
-  <span class="count">專題 3 / 4</span>
+  <span class="count">專題 3 / 7</span>
 </header>
 
-<main class="page">
+<main class="page long">
   <header class="hero">
     <div class="num" aria-hidden="true">P3</div>
-    <p class="eyebrow">專題 · goroutine、semaphore、context、interface</p>
+    <p class="eyebrow">專題 3 · worker pool、context、限速、重試、synctest</p>
     <h1>並行網址檢查器</h1>
-    <p class="analogy">一次派好幾個人去敲門，最慢的那一家不會拖住其他人。</p>
+    <p class="analogy">便當店的網站有菜單、訂位、外送好幾個頁面，老闆想每天早上確認它們都還活著。一個一個檢查太慢；一口氣全部送出又可能把對方的伺服器打掛。這個專題寫一個工具：同時檢查、但有上限，每個請求有時間限制，失敗了等一下再試，隨時可以按 Ctrl-C 停下來。</p>
   </header>
 
-  <section aria-labelledby="look">
-    <h2 id="look">看圖</h2>
-    <div class="figs">
-      <figure class="fig">
-        <svg viewBox="0 0 480 214" role="img" aria-label="三個網址經過最多兩張號碼牌的 semaphore 送出請求；ok.test 回 200，missing.test 回 404，slow.test 逾時；結果照輸入順序寫回">
-          <title>限制同時數量，各自逾時</title>
-          <rect class="soft" x="12" y="30" width="120" height="36" rx="6"/>
-          <rect class="soft" x="12" y="90" width="120" height="36" rx="6"/>
-          <rect class="soft" x="12" y="150" width="120" height="36" rx="6"/>
-          <text class="small mono" x="72" y="53" text-anchor="middle">ok.test</text>
-          <text class="small mono" x="72" y="113" text-anchor="middle">missing.test</text>
-          <text class="small mono" x="72" y="173" text-anchor="middle">slow.test</text>
-          <path class="wire" d="M132 48 H150 V168 H132 M132 108 H160"/>
-          <path class="tip" d="M170 108 L158 102 L158 114 Z"/>
-          <rect class="acc" x="170" y="50" width="90" height="116" rx="10"/>
-          <text class="small mono t-acc" x="215" y="72" text-anchor="middle">sem</text>
-          <rect class="hot" x="185" y="86" width="60" height="28" rx="4"/>
-          <rect class="hot" x="185" y="122" width="60" height="28" rx="4"/>
-          <text class="sm" x="215" y="190" text-anchor="middle">同時最多 2 個</text>
-          <path class="wire" d="M260 108 H280 M280 48 V168 M280 48 H290 M280 108 H290 M280 168 H290"/>
-          <path class="tip" d="M300 48 L290 42 L290 54 Z"/>
-          <path class="tip" d="M300 108 L290 102 L290 114 Z"/>
-          <path class="tip" d="M300 168 L290 162 L290 174 Z"/>
-          <rect class="acc" x="300" y="30" width="168" height="36" rx="6"/>
-          <rect class="hot" x="300" y="90" width="168" height="36" rx="6"/>
-          <rect class="hot" x="300" y="150" width="168" height="36" rx="6"/>
-          <text class="small mono" x="384" y="53" text-anchor="middle">OK 200</text>
-          <text class="small mono t-hot" x="384" y="113" text-anchor="middle">FAIL 404</text>
-          <text class="small t-hot" x="384" y="173" text-anchor="middle">FAIL 逾時</text>
-        </svg>
-        <figcaption>號碼牌限制同時的請求數，每個請求各有自己的逾時；慢的那個逾時失敗，不會拖住別人。結果照輸入的順序寫回。</figcaption>
-      </figure>
+  <nav class="toc-inline" aria-labelledby="toc-title">
+    <p class="label" id="toc-title">本專題內容</p>
+    <ol>
+      <li><a href="#goal">這個專題做什麼</a></li>
+      <li><a href="#fetcher">把網路藏在 interface 後面</a></li>
+      <li><a href="#pool">worker pool</a></li>
+      <li><a href="#timeout">每一次請求的逾時</a></li>
+      <li><a href="#rate">限速：節拍器</a></li>
+      <li><a href="#retry">退避重試</a></li>
+      <li><a href="#cancel">Ctrl-C：取消整個檢查</a></li>
+      <li><a href="#testing">假的時鐘：synctest 與 golden file</a></li>
+      <li><a href="#cli">命令列介面與 exit code</a></li>
+      <li><a href="#challenges">延伸挑戰</a></li>
+      <li><a href="#recap">重點回顧</a></li>
+      <li><a href="#further">延伸閱讀</a></li>
+    </ol>
+  </nav>
 
-      <figure class="fig">
-        <svg viewBox="0 0 480 216" role="img" aria-label="Check 只依賴 Fetcher interface；上線時接 httpFetcher 真的發請求，測試時接 fakeFetcher 回假結果">
-          <title>interface 讓測試不碰網路</title>
-          <rect class="acc" x="170" y="20" width="140" height="44" rx="8"/>
-          <text class="mono bold" x="240" y="48" text-anchor="middle">Check</text>
-          <path class="wire" d="M240 64 V78"/>
-          <path class="tip" d="M240 86 L234 75 L246 75 Z"/>
-          <rect class="wire dash" x="170" y="86" width="140" height="36" rx="8"/>
-          <text class="small mono" x="240" y="109" text-anchor="middle">Fetcher</text>
-          <path class="wire" d="M240 122 V136 H115 V150 M240 136 H365 V150"/>
-          <rect class="soft" x="40" y="150" width="150" height="36" rx="6"/>
-          <rect class="acc" x="290" y="150" width="150" height="36" rx="6"/>
-          <text class="small mono" x="115" y="173" text-anchor="middle">httpFetcher</text>
-          <text class="small mono" x="365" y="173" text-anchor="middle">fakeFetcher</text>
-          <text class="sm" x="115" y="206" text-anchor="middle">上線：真的發 HEAD 請求</text>
-          <text class="sm t-acc" x="365" y="206" text-anchor="middle">測試：照網址回假結果</text>
-        </svg>
-        <figcaption>Check 只認得 <code>Fetcher</code> 這個 interface。上線時接真的 HTTP，測試時接假的；測試不碰網路，又快又穩定。</figcaption>
-      </figure>
-    </div>
+  <section aria-labelledby="goal">
+    <h2 id="goal">這個專題做什麼</h2>
+    <p>給它一串網址（或從標準輸入每行讀一個），它同時檢查，最後依原本的順序列出結果：</p>
+    <pre class="shell"><code>urlchecker -workers 2 -timeout 500ms https://ok.test https://missing.test https://flaky.test https://slow.test ftp://files.test</code></pre>
+    <pre class="out" data-src="projects/urlchecker/testdata/report.golden"><code>OK   200  120ms  https://ok.test
+FAIL 404   80ms  https://missing.test
+OK   200  750ms  https://flaky.test（試了 3 次）
+FAIL ---   2.1s  https://slow.test（逾時，試了 3 次）
+FAIL ---     0s  ftp://files.test（只檢查 http 和 https 網址）
+共 5 個網址：2 個正常，3 個失敗，花了 2.22s</code></pre>
+    <p>這段輸出不是在真的網路上跑的：ok.test、flaky.test 這些網址由測試裡的假 Fetcher 回應，時間由 synctest 的假時鐘計算，所以每一個數字都固定，可以逐字比對（第 7 節）。從上到下：</p>
+    <ul class="notes">
+      <li><strong>ok.test</strong>：120ms 後回 200。</li>
+      <li><strong>missing.test</strong>：回 404，失敗，但不重試，因為再試幾次結果都一樣。</li>
+      <li><strong>flaky.test</strong>：前兩次回 503，等一下再試，第三次成功。</li>
+      <li><strong>slow.test</strong>：永遠不回應，每次都在 500ms 逾時，試了 3 次後放棄。</li>
+      <li><strong>ftp://files.test</strong>：送出之前就被擋下來。</li>
+    </ul>
+    <p>有任何一個失敗，exit code 就是 1，可以直接接在 CI 或排程裡。程式分成四個檔案：</p>
+    <ul class="notes">
+      <li><strong>fetch.go</strong>：Fetcher interface 和真正送出 HTTP 請求的 httpFetcher。</li>
+      <li><strong>check.go</strong>：worker pool、逾時、限速、重試。</li>
+      <li><strong>main.go</strong>：旗標、讀網址、輸出、Ctrl-C。</li>
+      <li><strong>*_test.go</strong>：假的 Fetcher、synctest、golden file。</li>
+    </ul>
+    <p>先備：<a href="14-goroutines.html">14 章 goroutine</a>、<a href="15-channels.html">15 章 channel</a>、<a href="18-context.html">18 章 context</a>、<a href="19-concurrency-patterns.html">19 章並行模式</a>、<a href="27-http-client.html">27 章 HTTP 用戶端</a>、<a href="30-testing.html#synctest">30 章的 synctest</a>。</p>
   </section>
 
-  <section aria-labelledby="code">
-    <h2 id="code">核心程式</h2>
-    <pre class="code"><code>func Check(ctx context.Context, urls []string, workers int, timeout time.Duration, f Fetcher) []Result {
-	results := make([]Result, len(urls))
-	sem := make(chan struct{}, max(workers, 1))
-	var wg sync.WaitGroup
-	for i, u := range urls {
-		wg.Go(func() {
-			select {
-			case sem &lt;- struct{}{}: <span class="c">// 拿到號碼牌才開始</span>
-			case &lt;-ctx.Done():
-				results[i] = Result{URL: u, Err: ctx.Err()}
-				return
-			}
-			defer func() { &lt;-sem }()
+  <section aria-labelledby="fetcher">
+    <h2 id="fetcher">1. 把網路藏在 interface 後面</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 200" role="img" aria-label="Check 只認得 Fetcher interface，它有一個方法 Fetch(ctx, url)。正式執行時傳入 httpFetcher，真的送出 HTTP 請求；測試時傳入 fakeFetcher，用計時器模擬延遲，不碰網路">
+        <title>Check 只認得 Fetcher</title>
+        <rect class="acc" x="8" y="76" width="120" height="48" rx="8"/>
+        <text class="sm mono" x="68" y="97" text-anchor="middle">Check</text>
+        <text class="sm" x="68" y="115" text-anchor="middle">只認得介面</text>
+        <path class="wire" d="M128 100 H160"/>
+        <rect class="soft" x="160" y="76" width="140" height="48" rx="8"/>
+        <text class="sm mono bold" x="230" y="97" text-anchor="middle">Fetcher</text>
+        <text class="sm mono" x="230" y="115" text-anchor="middle">Fetch(ctx, url)</text>
+        <path class="wire" d="M300 100 C320 100 320 46 340 46"/>
+        <path class="wire" d="M300 100 C320 100 320 154 340 154"/>
+        <rect class="acc" x="340" y="22" width="132" height="48" rx="8"/>
+        <text class="sm mono" x="406" y="42" text-anchor="middle">httpFetcher</text>
+        <text class="sm" x="406" y="60" text-anchor="middle">真的送出請求</text>
+        <rect class="hot" x="340" y="130" width="132" height="48" rx="8"/>
+        <text class="sm mono" x="406" y="150" text-anchor="middle">fakeFetcher</text>
+        <text class="sm" x="406" y="168" text-anchor="middle">測試用，不碰網路</text>
+      </svg>
+      <figcaption>並行、逾時、重試這些邏輯都在 Check 裡，和「怎麼送出請求」分開。測試換掉 Fetcher，就能在沒有網路的地方，用精確的時間測這些邏輯。</figcaption>
+    </figure>
+    <pre class="code" data-src="projects/urlchecker/fetch.go#Fetcher,httpFetcher,httpFetcher.Fetch,httpFetcher.do"><code>type Fetcher interface {
+	Fetch(ctx context.Context, rawURL string) (int, error)
+}
 
-			reqCtx, cancel := context.WithTimeout(ctx, timeout)
-			defer cancel()
-			start := time.Now()
-			status, err := f.Fetch(reqCtx, u)
-			results[i] = Result{URL: u, Status: status, Err: err, Took: time.Since(start)}
+type httpFetcher struct{ client *http.Client }
+
+func (f httpFetcher) Fetch(ctx context.Context, rawURL string) (int, error) {
+	status, err := f.do(ctx, http.MethodHead, rawURL)
+	if err == nil &amp;&amp; status == http.StatusMethodNotAllowed {
+		return f.do(ctx, http.MethodGet, rawURL)
+	}
+	return status, err
+}
+
+func (f httpFetcher) do(ctx context.Context, method, rawURL string) (int, error) {
+	req, err := http.NewRequestWithContext(ctx, method, rawURL, nil)
+	if err != nil {
+		return 0, err
+	}
+	resp, err := f.client.Do(req)
+	if err != nil {
+		return 0, err
+	}
+	resp.Body.Close() // 只需要狀態碼，GET 的內容不讀，直接關掉
+	return resp.StatusCode, nil
+}</code></pre>
+    <ul class="notes">
+      <li><strong>小的 interface</strong>：Fetcher 只有一個方法，剛好是 Check 需要的，不多也不少。方法越少，假的版本越好寫（<a href="10-interfaces.html#design">10 章</a>）。</li>
+      <li><strong>HEAD 只拿標頭</strong>：檢查網址只需要狀態碼，HEAD 不下載內容。有些伺服器不接受 HEAD，回 405 Method Not Allowed，這時改用 GET。</li>
+      <li><strong>Body 一定要關</strong>：就算不讀內容，也要 Close，否則底下的連線不會釋放（<a href="27-http-client.html#pit-close">27 章</a>）。這裡不讀 GET 的內容就關掉，連線可能沒辦法重複使用；檢查工具送的請求不多，這是可以接受的取捨。</li>
+      <li><strong>http.Client 沒有設 Timeout</strong>：逾時由 ctx 控制（第 3 節）。轉址則用預設的規則，最多跟著轉 10 次，回報最後一個狀態碼。</li>
+    </ul>
+    <p>httpFetcher 本身也要測，但 sandbox 和 CI 不一定能開 port。<a href="27-http-client.html#roundtripper">27 章</a>的做法是換掉 Client 的 Transport，請求根本不會送到網路上：</p>
+    <pre class="code" data-src="projects/urlchecker/fetch_test.go#roundTripFunc,roundTripFunc.RoundTrip"><code>type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }</code></pre>
+    <p>TestHTTPFetcher 用它檢查三種情況：HEAD 就夠了、404 不要改用 GET、405 才改用 GET，而且每一個 Body 都被關掉。送出請求前，先擋掉明顯不對的網址，不必浪費一次請求：</p>
+    <pre class="code" data-src="projects/urlchecker/fetch.go#validateURL"><code>func validateURL(rawURL string) error {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return err
+	}
+	if u.Scheme != "http" &amp;&amp; u.Scheme != "https" {
+		return errScheme
+	}
+	if u.Host == "" {
+		return errors.New("網址裡沒有主機名稱")
+	}
+	return nil
+}</code></pre>
+    <pre class="out" data-example="projects/urlchecker#Example_validateURL"><code>"https://go.dev"         &lt;nil&gt;
+"go.dev"                 只檢查 http 和 https 網址
+"ftp://files.test"       只檢查 http 和 https 網址
+"https://"               網址裡沒有主機名稱
+"https://shop.test/%zz"  parse "https://shop.test/%zz": invalid URL escape "%zz"</code></pre>
+  </section>
+
+  <section aria-labelledby="pool">
+    <h2 id="pool">2. worker pool</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 214" role="img" aria-label="派工的迴圈把網址的 index 依序送進 jobs channel，三個 worker 輪流取出 index、檢查那個網址，把結果寫進 results 的同一格。每個 index 只會被一個 worker 拿到，所以寫 results 不需要鎖">
+        <title>三個 worker 從同一個 channel 拿工作</title>
+        <rect class="soft" x="8" y="84" width="96" height="46" rx="8"/>
+        <text class="sm mono" x="56" y="104" text-anchor="middle">jobs &lt;- i</text>
+        <text class="sm" x="56" y="122" text-anchor="middle">依序派工</text>
+        <path class="wire" d="M104 107 H124"/>
+        <rect class="soft" x="124" y="92" width="96" height="30" rx="4"/>
+        <text class="sm mono" x="172" y="112" text-anchor="middle">… 5 4 3</text>
+        <text class="sm mute" x="172" y="142" text-anchor="middle">jobs</text>
+        <path class="wire" d="M220 107 C236 107 236 40 252 40"/>
+        <path class="wire" d="M220 107 H252"/>
+        <path class="wire" d="M220 107 C236 107 236 174 252 174"/>
+        <text class="sm mono" x="298" y="14" text-anchor="middle">worker</text>
+        <rect class="acc" x="252" y="22" width="92" height="36" rx="6"/><text class="sm" x="298" y="45" text-anchor="middle">拿到 0</text>
+        <rect class="acc" x="252" y="89" width="92" height="36" rx="6"/><text class="sm" x="298" y="112" text-anchor="middle">拿到 1</text>
+        <rect class="acc" x="252" y="156" width="92" height="36" rx="6"/><text class="sm" x="298" y="179" text-anchor="middle">拿到 2</text>
+        <text class="sm mono" x="370" y="16">results</text>
+        <rect class="acc" x="370" y="24" width="102" height="28" rx="3"/><text class="sm mono" x="421" y="43" text-anchor="middle">[0]</text>
+        <rect class="acc" x="370" y="56" width="102" height="28" rx="3"/><text class="sm mono" x="421" y="75" text-anchor="middle">[1]</text>
+        <rect class="acc" x="370" y="88" width="102" height="28" rx="3"/><text class="sm mono" x="421" y="107" text-anchor="middle">[2]</text>
+        <rect class="soft" x="370" y="120" width="102" height="28" rx="3"/><text class="sm mono" x="421" y="139" text-anchor="middle">[3]</text>
+        <rect class="soft" x="370" y="152" width="102" height="28" rx="3"/><text class="sm mono" x="421" y="171" text-anchor="middle">[4]</text>
+        <rect class="soft" x="370" y="184" width="102" height="28" rx="3"/><text class="sm mono" x="421" y="203" text-anchor="middle">[5]</text>
+        <path class="wire acc-ln" d="M344 40 H370"/>
+        <path class="wire acc-ln" d="M344 107 C357 107 357 70 370 70"/>
+        <path class="wire acc-ln" d="M344 174 C357 174 357 102 370 102"/>
+      </svg>
+      <figcaption>channel 裡傳的是 index，不是網址。worker 拿到 i，就把結果寫進 results[i]：結果的順序自然和輸入相同，也不需要鎖。</figcaption>
+    </figure>
+    <pre class="code" data-src="projects/urlchecker/check.go#Config,Result,Result.OK,Check"><code>type Config struct {
+	Workers   int           // 同時最多幾個請求，至少 1
+	Timeout   time.Duration // 每一次請求最多等多久
+	PerSecond int           // 每秒最多送出幾個請求；0 是不限制
+	Retries   int           // 失敗後最多再試幾次
+	Backoff   time.Duration // 第一次重試前等多久，之後每次加倍
+}
+
+type Result struct {
+	URL      string
+	Status   int           // HTTP 狀態碼；沒有收到回應時是 0
+	Err      error         // 沒有收到回應的原因
+	Attempts int           // 實際送出幾次請求
+	Took     time.Duration // 包含等待限速和重試的時間
+}
+
+func (r Result) OK() bool { return r.Err == nil &amp;&amp; r.Status &lt; 400 }
+
+func Check(ctx context.Context, urls []string, cfg Config, f Fetcher) []Result {
+	var tick &lt;-chan time.Time // nil 代表不限速
+	if cfg.PerSecond &gt; 0 {
+		t := time.NewTicker(time.Second / time.Duration(cfg.PerSecond))
+		defer t.Stop()
+		tick = t.C
+	}
+
+	results := make([]Result, len(urls))
+	jobs := make(chan int)
+	var wg sync.WaitGroup
+	for range max(cfg.Workers, 1) {
+		wg.Go(func() {
+			for i := range jobs {
+				results[i] = checkOne(ctx, urls[i], cfg, f, tick)
+			}
 		})
 	}
+	for i := range urls {
+		jobs &lt;- i
+	}
+	close(jobs)
 	wg.Wait()
 	return results
 }</code></pre>
-    <p class="label">測試裡用假的 Fetcher 跑出的結果</p>
-    <pre class="out"><code>OK   200 https://ok.test
-FAIL 404 https://missing.test
-FAIL --- https://slow.test（context deadline exceeded）</code></pre>
+    <ul class="notes">
+      <li><strong>固定數量的 goroutine</strong>：不管有幾個網址，都只開 Workers 個 goroutine。舊版是每個網址開一個 goroutine，再用 buffered channel 當號碼牌限制同時的數量（<a href="19-concurrency-patterns.html#semaphore">19 章的 semaphore</a>）。兩種都能限制同時的請求數；worker pool 的 goroutine 數量固定，網址有一萬個時也一樣。</li>
+      <li><strong>不需要鎖</strong>：每個 index 只會被一個 worker 拿到，不同的 results[i] 是不同的記憶體位置，同時寫不會互相干擾。wg.Wait() 回傳之後，所有的寫入都已經完成，主 goroutine 可以安全地讀（<a href="17-sync.html">17 章</a>）。go test -race 會檢查這件事。</li>
+      <li><strong>unbuffered 的 jobs</strong>：派工的迴圈要等到有 worker 空下來才送得出去，自然不會一次塞一大堆工作。全部送完再 close，worker 的 for range 就會結束。</li>
+      <li><strong>wg.Go</strong>（Go 1.25 起）把 Add(1)、go 和 defer Done() 合成一步，不會忘記其中一個（<a href="14-goroutines.html#waitgroup">14 章</a>）。</li>
+    </ul>
+    <p>TestCheckWorkers 用 20 個網址、3 個 worker 驗證：同時最多 3 個請求，每個 120ms，分 7 輪做完，總共剛好 840ms。「剛好」是因為用了假的時鐘，第 7 節再說明。</p>
   </section>
 
-  <section aria-labelledby="notes">
-    <h2 id="notes">工程師筆記</h2>
+  <section aria-labelledby="timeout">
+    <h2 id="timeout">3. 每一次請求的逾時</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 196" role="img" aria-label="context 樹：最上面是 signal.NotifyContext 建立的 ctx，按 Ctrl-C 時取消。每一次請求都從它衍生一個 WithTimeout 500ms 的子 ctx。逾時只會取消那一次請求；Ctrl-C 會讓整棵樹一起取消">
+        <title>每一次請求一個子 context</title>
+        <rect class="acc" x="130" y="12" width="220" height="44" rx="8"/>
+        <text class="sm mono" x="240" y="32" text-anchor="middle">signal.NotifyContext</text>
+        <text class="sm" x="240" y="49" text-anchor="middle">按 Ctrl-C 時取消</text>
+        <path class="wire" d="M240 56 V74 M80 74 H400 M80 74 V94 M240 74 V94 M400 74 V94"/>
+        <rect class="soft" x="12" y="94" width="136" height="44" rx="8"/>
+        <text class="sm mono" x="80" y="114" text-anchor="middle">WithTimeout</text>
+        <text class="sm" x="80" y="131" text-anchor="middle">ok.test 第 1 次</text>
+        <rect class="hot" x="172" y="94" width="136" height="44" rx="8"/>
+        <text class="sm mono" x="240" y="114" text-anchor="middle">WithTimeout</text>
+        <text class="sm" x="240" y="131" text-anchor="middle">slow.test 第 1 次</text>
+        <rect class="soft" x="332" y="94" width="136" height="44" rx="8"/>
+        <text class="sm mono" x="400" y="114" text-anchor="middle">WithTimeout</text>
+        <text class="sm" x="400" y="131" text-anchor="middle">slow.test 第 2 次</text>
+        <text class="sm t-hot" x="240" y="160" text-anchor="middle">逾時：只取消自己這一次</text>
+        <text class="sm t-acc" x="240" y="184" text-anchor="middle">Ctrl-C：整棵樹一起取消</text>
+      </svg>
+      <figcaption>子 context 會跟著父 context 一起取消，反過來不會。每一次請求一個子 context，逾時就不會影響其他請求（<a href="18-context.html#tree">18 章</a>）。</figcaption>
+    </figure>
+    <pre class="code" data-src="projects/urlchecker/check.go#fetchOnce"><code>func fetchOnce(ctx context.Context, rawURL string, timeout time.Duration, f Fetcher) (int, error) {
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	return f.Fetch(ctx, rawURL)
+}</code></pre>
     <ul class="notes">
-      <li>每個 goroutine 把結果寫進 <code>results[i]</code> 自己的格子，順序和輸入一樣，也不需要加鎖。</li>
-      <li>每個請求用 <code>context.WithTimeout</code> 各自計時；外層 ctx 取消時，還沒拿到號碼牌的請求直接放棄。</li>
-      <li>用 HEAD 只拿狀態碼、不下載內容；有些網站不支援 HEAD 會回 405，可以改用 GET。</li>
-      <li><code>http.Client</code> 沒設 <code>Timeout</code>，因為逾時交給 context 控制；兩種方式擇一就好。</li>
-      <li>有任何失敗就用非 0 結束，接在 CI 或排程裡可以直接判斷成功或失敗。</li>
-      <li>測試用的 fakeFetcher 順便記錄同時執行的最大數量，用來驗證 semaphore 真的有限制住。</li>
+      <li><strong>每一次請求一個逾時</strong>，不是每個網址一個：重試的時候，新的一次又有完整的 500ms。如果整個網址共用一個逾時，第一次就把時間用完，後面的重試根本來不及。</li>
+      <li><strong>defer cancel()</strong>：請求提早完成時，計時器也要釋放。go vet 的 lostcancel 會檢查有沒有忘記呼叫 cancel。</li>
+      <li><strong>ctx 要一路傳下去</strong>：httpFetcher 用 NewRequestWithContext 把 ctx 交給請求，逾時一到，正在等的連線就會被中斷。傳了 ctx 卻沒有往下傳，逾時就沒有作用（<a href="18-context.html#pit-ignore">18 章</a>）。</li>
+    </ul>
+    <p>逾時和取消的錯誤會被一層一層包起來，例如 http.Client 回傳的是 <code>Head "https://slow.test": context deadline exceeded</code>。用 errors.Is 判斷，而不是比對字串（<a href="11-errors.html">11 章</a>）：</p>
+    <pre class="code" data-src="projects/urlchecker/main.go#describe"><code>func describe(err error) string {
+	switch {
+	case errors.Is(err, context.DeadlineExceeded):
+		return "逾時"
+	case errors.Is(err, context.Canceled):
+		return "已取消"
+	}
+	return err.Error()
+}</code></pre>
+  </section>
+
+  <section aria-labelledby="rate">
+    <h2 id="rate">4. 限速：節拍器</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 196" role="img" aria-label="時間軸從 0 到 700 毫秒。-rate 10 時節拍器每 100 毫秒響一次，在 100、200、300、400、500 毫秒各放行一個請求。每個請求花 120 毫秒，所以前後兩個請求會重疊一小段">
+        <title>每 100ms 放行一個請求</title>
+        <path class="wire faint" d="M40 160 H460"/>
+        <text class="sm mono" x="40" y="180" text-anchor="middle">0</text>
+        <text class="sm mono" x="100" y="180" text-anchor="middle">100</text>
+        <text class="sm mono" x="160" y="180" text-anchor="middle">200</text>
+        <text class="sm mono" x="220" y="180" text-anchor="middle">300</text>
+        <text class="sm mono" x="280" y="180" text-anchor="middle">400</text>
+        <text class="sm mono" x="340" y="180" text-anchor="middle">500</text>
+        <text class="sm mono" x="400" y="180" text-anchor="middle">600</text>
+        <text class="sm mono" x="460" y="180" text-anchor="middle">ms</text>
+        <path class="wire dash" d="M100 14 V160 M160 14 V160 M220 14 V160 M280 14 V160 M340 14 V160"/>
+        <rect class="acc" x="100" y="26" width="72" height="18" rx="3"/>
+        <rect class="acc" x="160" y="52" width="72" height="18" rx="3"/>
+        <rect class="acc" x="220" y="78" width="72" height="18" rx="3"/>
+        <rect class="acc" x="280" y="104" width="72" height="18" rx="3"/>
+        <rect class="acc" x="340" y="130" width="72" height="18" rx="3"/>
+        <text class="sm" x="8" y="40">請求 1</text>
+        <text class="sm" x="8" y="144">請求 5</text>
+      </svg>
+      <figcaption>-rate 10 是每秒最多 10 個請求，也就是每 100ms 一個。worker 有空也要等節拍；節拍決定「多快送出」，worker 數量決定「同時最多幾個」。</figcaption>
+    </figure>
+    <p>Check 開頭建立一個 time.Ticker，所有 worker 共用它的 channel；每次送出請求前，先拿走一拍：</p>
+    <pre class="code" data-src="projects/urlchecker/check.go#waitTurn"><code>func waitTurn(ctx context.Context, tick &lt;-chan time.Time) error {
+	if tick == nil {
+		return ctx.Err()
+	}
+	select {
+	case &lt;-tick:
+		return nil
+	case &lt;-ctx.Done():
+		return ctx.Err()
+	}
+}</code></pre>
+    <ul class="notes">
+      <li><strong>共用一個 channel</strong>：不管有幾個 worker，每一拍只有一個人拿得到，所以整體的速度不會超過設定（<a href="19-concurrency-patterns.html#rate">19 章</a>）。</li>
+      <li><strong>不限速就不等</strong>：-rate 0 時 tick 是 nil。從 nil channel 接收會永遠卡住（<a href="15-channels.html#nil">15 章</a>），所以 waitTurn 先檢查 nil；但還是回傳 ctx.Err()，已經取消的檢查就不再送出請求。</li>
+      <li><strong>拍子不會累積</strong>：沒人拿的拍子會被丟掉，閒置一陣子之後，不會突然一口氣送出一大批請求。</li>
+      <li><strong>defer t.Stop()</strong>：Check 結束時停掉節拍器。</li>
+    </ul>
+    <p>限速是不是真的照節拍送出？測試記錄每個請求開始的時間，精確地和 100、200、300、400、500ms 比較：</p>
+    <pre class="code" data-src="projects/urlchecker/check_test.go#TestCheckRate"><code>func TestCheckRate(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		urls := slices.Repeat([]string{"https://ok.test"}, 5)
+		f := newFake()
+		start := time.Now()
+		Check(t.Context(), urls, Config{Workers: 5, Timeout: time.Second, PerSecond: 10}, f)
+
+		var got []time.Duration
+		for _, s := range f.starts {
+			got = append(got, s.Sub(start))
+		}
+		want := []time.Duration{100 * time.Millisecond, 200 * time.Millisecond,
+			300 * time.Millisecond, 400 * time.Millisecond, 500 * time.Millisecond}
+		if !slices.Equal(got, want) {
+			t.Errorf("請求開始的時間 = %v，想要 %v", got, want)
+		}
+	})
+}</code></pre>
+  </section>
+
+  <section aria-labelledby="retry">
+    <h2 id="retry">5. 退避重試</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 198" role="img" aria-label="兩條時間軸。flaky.test：第一次 50 毫秒回 503，等 200 毫秒，第二次又是 503，等 400 毫秒，第三次回 200，總共 750 毫秒。slow.test：每次都在 500 毫秒逾時，中間等 200 和 400 毫秒，三次都失敗，總共 2.1 秒">
+        <title>等待時間每次加倍</title>
+        <text class="sm mono bold" x="40" y="22">flaky.test</text>
+        <rect class="hot" x="40" y="44" width="10" height="20"/><text class="sm mono t-hot" x="45" y="38" text-anchor="middle">503</text>
+        <path class="wire dash" d="M50 54 H90"/><text class="sm" x="70" y="82" text-anchor="middle">等 200</text>
+        <rect class="hot" x="90" y="44" width="10" height="20"/><text class="sm mono t-hot" x="95" y="38" text-anchor="middle">503</text>
+        <path class="wire dash" d="M100 54 H180"/><text class="sm" x="140" y="82" text-anchor="middle">等 400</text>
+        <rect class="acc" x="180" y="44" width="10" height="20"/><text class="sm mono t-acc" x="185" y="38" text-anchor="middle">200</text>
+        <text class="sm" x="204" y="59">750ms，成功</text>
+        <text class="sm mono bold" x="40" y="114">slow.test</text>
+        <rect class="hot" x="40" y="136" width="100" height="20"/><text class="sm t-hot" x="90" y="130" text-anchor="middle">逾時</text>
+        <path class="wire dash" d="M140 146 H180"/><text class="sm" x="160" y="174" text-anchor="middle">200</text>
+        <rect class="hot" x="180" y="136" width="100" height="20"/><text class="sm t-hot" x="230" y="130" text-anchor="middle">逾時</text>
+        <path class="wire dash" d="M280 146 H360"/><text class="sm" x="320" y="174" text-anchor="middle">400</text>
+        <rect class="hot" x="360" y="136" width="100" height="20"/><text class="sm t-hot" x="410" y="130" text-anchor="middle">逾時</text>
+        <text class="sm" x="460" y="194" text-anchor="end">2.1s，放棄</text>
+      </svg>
+      <figcaption>兩條時間軸用同樣的比例。伺服器暫時出問題時，等一下再試常常就好了；等待的時間每次加倍，對方越忙，我們催得越慢。</figcaption>
+    </figure>
+    <pre class="code" data-src="projects/urlchecker/check.go#checkOne,retryable,sleep"><code>func checkOne(ctx context.Context, rawURL string, cfg Config, f Fetcher, tick &lt;-chan time.Time) Result {
+	r := Result{URL: rawURL}
+	if err := validateURL(rawURL); err != nil {
+		r.Err = err
+		return r
+	}
+	start := time.Now()
+	backoff := cfg.Backoff
+	for {
+		if err := waitTurn(ctx, tick); err != nil {
+			r.Status, r.Err = 0, err
+			break
+		}
+		r.Attempts++
+		r.Status, r.Err = fetchOnce(ctx, rawURL, cfg.Timeout, f)
+		if r.Attempts &gt; cfg.Retries || !retryable(ctx, r) {
+			break
+		}
+		if err := sleep(ctx, backoff); err != nil {
+			r.Status, r.Err = 0, err
+			break
+		}
+		backoff *= 2
+	}
+	r.Took = time.Since(start)
+	return r
+}
+
+func retryable(ctx context.Context, r Result) bool {
+	if ctx.Err() != nil {
+		return false
+	}
+	return r.Err != nil || r.Status == http.StatusTooManyRequests || r.Status &gt;= 500
+}
+
+func sleep(ctx context.Context, d time.Duration) error {
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case &lt;-t.C:
+		return nil
+	case &lt;-ctx.Done():
+		return ctx.Err()
+	}
+}</code></pre>
+    <ul class="notes">
+      <li><strong>什麼值得重試</strong>：5xx 和 429 Too Many Requests 代表伺服器暫時有問題；沒有收到回應（逾時、連線失敗）也可能下一次就好。404 這種 4xx 是請求本身有問題，重試幾次都一樣。</li>
+      <li><strong>簡化之處</strong>：任何錯誤都重試，連 DNS 查不到主機這種不會自己好的錯誤也是。實務上還會加上隨機的抖動（jitter），避免很多用戶端同時重試（<a href="27-http-client.html#retry">27 章</a>）。</li>
+      <li><strong>只重試安全的請求</strong>：HEAD 和 GET 重送不會改變伺服器的狀態。POST 這類請求重送，可能訂了兩次便當（<a href="27-http-client.html#pit-retry-post">27 章</a>）。</li>
+      <li><strong>等待也要能取消</strong>：sleep 用 select 同時等計時器和 ctx.Done()。如果寫成 time.Sleep，按了 Ctrl-C 還要等退避時間結束才會停。</li>
+      <li><strong>取消了就不重試</strong>：retryable 先看 ctx.Err()。整個檢查已經被取消時，這一次失敗正是因為取消，再試也沒有意義。</li>
+    </ul>
+    <p>TestCheckRetry 是一張表：不同的 Retries 下，狀態碼、錯誤、送出幾次、花了多久，每一格都是精確的值，例如 flaky.test 允許重試 2 次時，剛好 750ms、送出 3 次。</p>
+  </section>
+
+  <section aria-labelledby="cancel">
+    <h2 id="cancel">6. Ctrl-C：取消整個檢查</h2>
+    <pre class="code" data-src="projects/urlchecker/main.go#main"><code>func main() {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	f := httpFetcher{client: &amp;http.Client{}} // 逾時由 context 控制
+	code := run(ctx, os.Args[1:], os.Stdin, os.Stdout, os.Stderr, f)
+	stop()
+	os.Exit(code)
+}</code></pre>
+    <ul class="notes">
+      <li><strong>signal.NotifyContext</strong>：收到 Ctrl-C（os.Interrupt）時取消回傳的 ctx（<a href="21-cli.html#signal">21 章</a>）。這個 ctx 是整棵 context 樹的根，正在等的請求、退避中的 sleep、還在等節拍的 worker 都會馬上結束。</li>
+      <li><strong>stop()</strong> 停止攔截訊號：之後再按一次 Ctrl-C，就是預設的行為，直接結束程式。</li>
+      <li><strong>os.Exit 不會執行 defer</strong>，所以 stop() 寫在 os.Exit 之前，而不是 defer stop()。</li>
+    </ul>
+    <p>取消之後，派工的迴圈仍然會把剩下的 index 送完，但 worker 拿到之後，waitTurn 立刻回傳 ctx.Err()，一個請求都不會送出：</p>
+    <pre class="code" data-src="projects/urlchecker/check_test.go#TestCheckCanceled"><code>func TestCheckCanceled(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		time.AfterFunc(300*time.Millisecond, cancel)
+
+		urls := []string{"https://slow.test", "https://ok.test", "https://ok.test"}
+		cfg := Config{Workers: 1, Timeout: time.Second, Retries: 2}
+		start := time.Now()
+		results := Check(ctx, urls, cfg, newFake())
+		if took := time.Since(start); took != 300*time.Millisecond {
+			t.Errorf("花了 %v，想要 300ms", took)
+		}
+		for i, r := range results {
+			wantAttempts := 0
+			if i == 0 {
+				wantAttempts = 1
+			}
+			if !errors.Is(r.Err, context.Canceled) || r.Attempts != wantAttempts {
+				t.Errorf("results[%d]：錯誤 %v、送了 %d 次；想要 Canceled、%d 次", i, r.Err, r.Attempts, wantAttempts)
+			}
+		}
+	})
+}</code></pre>
+  </section>
+
+  <section aria-labelledby="testing">
+    <h2 id="testing">7. 假的時鐘：synctest 與 golden file</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 196" role="img" aria-label="synctest.Test 裡的 goroutine 照常執行；當全部的 goroutine 都卡在泡泡裡的 channel、計時器或 time.Sleep 上，假的時鐘就直接跳到最近的計時器，喚醒它，再繼續執行。卡在 Mutex、網路 I/O 或系統呼叫上不算">
+        <title>全部卡住時，時鐘直接往前跳</title>
+        <rect class="soft" x="8" y="20" width="140" height="56" rx="8"/>
+        <text class="sm" x="78" y="44" text-anchor="middle">goroutine</text>
+        <text class="sm" x="78" y="64" text-anchor="middle">照常執行</text>
+        <path class="wire" d="M148 48 H178"/>
+        <rect class="soft" x="178" y="20" width="140" height="56" rx="8"/>
+        <text class="sm" x="248" y="44" text-anchor="middle">全部都卡在</text>
+        <text class="sm" x="248" y="64" text-anchor="middle">channel、計時器？</text>
+        <path class="wire acc-ln" d="M318 48 H340"/>
+        <rect class="acc" x="340" y="20" width="132" height="56" rx="8"/>
+        <text class="sm" x="406" y="44" text-anchor="middle">時鐘跳到</text>
+        <text class="sm" x="406" y="64" text-anchor="middle">最近的計時器</text>
+        <path class="wire dash" d="M406 76 V100 H78 V76"/>
+        <text class="sm" x="242" y="118" text-anchor="middle">喚醒它，繼續執行</text>
+        <rect class="hot" x="8" y="140" width="464" height="44" rx="8"/>
+        <text class="sm" x="240" y="167" text-anchor="middle">卡在 Mutex、網路 I/O、系統呼叫不算：時鐘不會跳</text>
+      </svg>
+      <figcaption>在 synctest.Test（Go 1.25 起）裡，time.Now、計時器、Ticker 和 context 的逾時都用假的時鐘。測試不用真的等 2.22 秒，時間也不會因為機器忙碌而多出幾毫秒。</figcaption>
+    </figure>
+    <p>假的 Fetcher 用計時器模擬每個網址的延遲，同時記錄同時有幾個請求、每個請求什麼時候開始：</p>
+    <pre class="code" data-src="projects/urlchecker/check_test.go#fakeFetcher,fakeFetcher.Fetch,respond"><code>type fakeFetcher struct {
+	mu      sync.Mutex
+	calls   map[string]int // 每個網址被請求了幾次
+	running int            // 現在有幾個請求在進行
+	peak    int            // running 曾經到過的最大值
+	starts  []time.Time    // 每個請求開始的時間
+}
+
+func (f *fakeFetcher) Fetch(ctx context.Context, rawURL string) (int, error) {
+	f.mu.Lock()
+	f.calls[rawURL]++
+	n := f.calls[rawURL]
+	f.running++
+	f.peak = max(f.peak, f.running)
+	f.starts = append(f.starts, time.Now())
+	f.mu.Unlock()
+	defer func() {
+		f.mu.Lock()
+		f.running--
+		f.mu.Unlock()
+	}()
+
+	switch rawURL {
+	case "https://ok.test":
+		return respond(ctx, 120*time.Millisecond, 200)
+	case "https://missing.test":
+		return respond(ctx, 80*time.Millisecond, 404)
+	case "https://flaky.test": // 前兩次 503，第三次才成功
+		if n &lt; 3 {
+			return respond(ctx, 50*time.Millisecond, 503)
+		}
+		return respond(ctx, 50*time.Millisecond, 200)
+	}
+	&lt;-ctx.Done() // 其他網址永遠不回應，直到逾時或被取消
+	return 0, ctx.Err()
+}
+
+func respond(ctx context.Context, d time.Duration, status int) (int, error) {
+	select {
+	case &lt;-time.After(d):
+		return status, nil
+	case &lt;-ctx.Done():
+		return 0, ctx.Err()
+	}
+}</code></pre>
+    <ul class="notes">
+      <li><strong>用計時器，不用真的網路</strong>：時鐘只有在 goroutine 全部「確實卡住」時才會跳。卡在網路 I/O 不算，因為事件可能從泡泡外面來；所以這個測試需要假的 Fetcher，不能接真的伺服器。</li>
+      <li><strong>Mutex 只拿一下</strong>：fakeFetcher 用 Mutex 保護計數，鎖住的時間很短，不會影響時鐘。</li>
+      <li><strong>計時器要在泡泡裡建立</strong>：Check 裡的 Ticker、fetchOnce 裡的逾時、respond 裡的 time.After 都在 synctest.Test 的函式裡建立，才會用假的時鐘。</li>
+    </ul>
+    <p>本頁開頭的輸出就是這個測試產生的。它跑完整支程式，把輸出和 testdata/report.golden 逐字比對；要更新時加上 -update（<a href="30-testing.html#golden">30 章</a>）：</p>
+    <pre class="code" data-src="projects/urlchecker/main_test.go#TestReport"><code>func TestReport(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		args := []string{"-workers", "2", "-timeout", "500ms",
+			"https://ok.test", "https://missing.test", "https://flaky.test", "https://slow.test", "ftp://files.test"}
+		var out bytes.Buffer
+		if code := run(t.Context(), args, nil, &amp;out, &amp;out, newFake()); code != 1 {
+			t.Errorf("exit code = %d，想要 1", code)
+		}
+
+		golden := filepath.Join("testdata", "report.golden")
+		if *update {
+			if err := os.WriteFile(golden, out.Bytes(), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+		want, err := os.ReadFile(golden)
+		if err != nil {
+			t.Fatalf("%v（第一次請加 -update 產生）", err)
+		}
+		if got := out.String(); got != string(want) {
+			t.Errorf("輸出和 %s 不一樣：\n--- got\n%s--- want\n%s", golden, got, want)
+		}
+	})
+}</code></pre>
+    <ul class="notes">
+      <li>golden file 鎖住的是整個輸出的樣子：欄位對齊、括號裡的說明、合計那一行。改了 formatResult，測試就會失敗，用 -update 重新產生之後，再用 git diff 確認改變是不是你要的。</li>
+      <li>golden file 不證明數字是對的，只證明它沒變。數字本身由 TestCheckWorkers、TestCheckRate、TestCheckRetry 各自用算得出來的值驗證。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="cli">
+    <h2 id="cli">8. 命令列介面與 exit code</h2>
+    <pre class="code" data-src="projects/urlchecker/main.go#run"><code>func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer, f Fetcher) int {
+	fs := flag.NewFlagSet("urlchecker", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	var cfg Config
+	fs.IntVar(&amp;cfg.Workers, "workers", 4, "同時最多幾個請求")
+	fs.DurationVar(&amp;cfg.Timeout, "timeout", 5*time.Second, "每一次請求最多等多久")
+	fs.IntVar(&amp;cfg.PerSecond, "rate", 0, "每秒最多送出幾個請求，0 是不限制")
+	fs.IntVar(&amp;cfg.Retries, "retries", 2, "失敗後最多再試幾次")
+	fs.DurationVar(&amp;cfg.Backoff, "backoff", 200*time.Millisecond, "第一次重試前等多久，之後每次加倍")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if cfg.Workers &lt; 1 || cfg.Timeout &lt;= 0 || cfg.PerSecond &lt; 0 || cfg.Retries &lt; 0 || cfg.Backoff &lt; 0 {
+		fmt.Fprintln(stderr, "urlchecker：-workers 至少是 1，-timeout 要大於 0，其他數值不能是負數")
+		return 2
+	}
+
+	urls := fs.Args()
+	if len(urls) == 0 {
+		var err error
+		if urls, err = readURLs(stdin); err != nil {
+			fmt.Fprintf(stderr, "urlchecker：讀取網址：%v\n", err)
+			return 2
+		}
+	}
+	if len(urls) == 0 {
+		fmt.Fprintln(stderr, "用法：urlchecker [旗標] URL...（或從標準輸入每行讀一個網址）")
+		return 2
+	}
+
+	start := time.Now()
+	results := Check(ctx, urls, cfg, f)
+	ok := 0
+	for _, r := range results {
+		fmt.Fprintln(stdout, formatResult(r))
+		if r.OK() {
+			ok++
+		}
+	}
+	fmt.Fprintf(stdout, "共 %d 個網址：%d 個正常，%d 個失敗，花了 %v\n",
+		len(results), ok, len(results)-ok, time.Since(start).Round(time.Millisecond))
+	if ok &lt; len(results) {
+		return 1
+	}
+	return 0
+}</code></pre>
+    <ul class="notes">
+      <li><strong>參數都從外面傳進來</strong>：ctx、args、stdin、stdout、stderr 和 Fetcher。main 傳真的，測試傳假的，run 本身不知道差別（<a href="21-cli.html">21 章</a>）。</li>
+      <li><strong>先檢查旗標的值</strong>：-timeout 0 會讓每個請求一送出就逾時，-workers 0 則沒有意義。與其照做或偷偷改掉使用者的設定，不如在開始之前用 exit code 2 說清楚。</li>
+      <li><strong>exit code</strong>：0 全部正常、1 有網址失敗、2 用法錯誤。CI 的腳本只要看 exit code 就知道要不要發警報。TestRunExitCodes 把每一種情況都跑過一次。</li>
+    </ul>
+    <p>沒有給網址時，從標準輸入讀，每行一個，可以在清單裡寫註解：</p>
+    <pre class="code" data-src="projects/urlchecker/main.go#readURLs"><code>func readURLs(r io.Reader) ([]string, error) {
+	var urls []string
+	sc := bufio.NewScanner(r)
+	for sc.Scan() {
+		s := strings.TrimSpace(sc.Text())
+		if s != "" &amp;&amp; !strings.HasPrefix(s, "#") {
+			urls = append(urls, s)
+		}
+	}
+	return urls, sc.Err()
+}</code></pre>
+    <pre class="out" data-example="projects/urlchecker#Example_readURLs"><code>2 &lt;nil&gt;
+https://shop.test
+https://shop.test/menu</code></pre>
+    <pre class="code" data-src="projects/urlchecker/main.go#formatResult"><code>func formatResult(r Result) string {
+	mark, code := "OK", strconv.Itoa(r.Status)
+	if !r.OK() {
+		mark = "FAIL"
+	}
+	if r.Err != nil {
+		code = "---"
+	}
+	s := fmt.Sprintf("%-4s %3s %6v  %s", mark, code, r.Took.Round(time.Millisecond), r.URL)
+
+	var notes []string
+	if r.Err != nil {
+		notes = append(notes, describe(r.Err))
+	}
+	if r.Attempts &gt; 1 {
+		notes = append(notes, fmt.Sprintf("試了 %d 次", r.Attempts))
+	}
+	if len(notes) &gt; 0 {
+		s += "（" + strings.Join(notes, "，") + "）"
+	}
+	return s
+}</code></pre>
+  </section>
+
+  <section aria-labelledby="challenges">
+    <h2 id="challenges">延伸挑戰</h2>
+    <p>這些題目沒有附測試。用假的 Fetcher 和 synctest 先寫出你期望的時間，再改程式。</p>
+    <ol class="exercises">
+      <li>
+        <h3><span class="level l1">入門</span>挑戰 1：標出慢的網址</h3>
+        <p>加一個 -slow 旗標（例如 1s）：成功但花的時間超過它的網址，標記從 OK 改成 SLOW，但不算失敗。</p>
+        <details><summary>提示</summary><p>Result 已經有 Took。改 formatResult 時要決定 SLOW 的判斷要放在 Result（例如一個方法）還是交給呼叫端；用 TestReport 的 golden file 看輸出的改變。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l2">進階</span>挑戰 2：不重試永久性的錯誤</h3>
+        <p>讓 retryable 不再重試「不會自己好」的錯誤，例如 DNS 查不到主機（*net.DNSError 的 IsNotFound 是 true）。</p>
+        <details><summary>提示</summary><p>用 errors.As（或 Go 1.26 起的 errors.AsType）取出 *net.DNSError。在假的 Fetcher 加一個網址，直接回傳 <code>&amp;net.DNSError{IsNotFound: true}</code>，測試它只送出一次。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l2">進階</span>挑戰 3：照 Retry-After 等待</h3>
+        <p>伺服器回 429 或 503 時常帶 Retry-After 標頭（秒數），告訴你多久之後再來。有這個標頭時，用它取代退避的時間。</p>
+        <details><summary>提示</summary><p>Fetcher 現在只回傳狀態碼，需要改成回傳一個小的 struct（狀態碼和 Retry-After）。想一想：改 interface 會影響哪些地方？假的 Fetcher 和 roundTripFunc 的測試都要跟著改。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l2">進階</span>挑戰 4：每個主機分開限速</h3>
+        <p>-rate 改成「對每個主機」每秒最多幾個請求：檢查 shop.test 的十個頁面要排隊，但不同的主機互不影響。</p>
+        <details><summary>提示</summary><p>用 <code>map[string]*time.Ticker</code>，以 url.Parse 取出的 Host 當 key；這個 map 會被多個 worker 同時讀寫，要用 Mutex 保護（<a href="17-sync.html">17 章</a>）。測試兩個主機交錯時，各自的請求開始時間。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l3">挑戰</span>挑戰 5：第一個失敗就停</h3>
+        <p>加一個 -failfast 旗標：任何一個網址失敗，就取消其他還沒完成的檢查，並在輸出裡說明是因為哪一個網址而停止。</p>
+        <details><summary>提示</summary><p>在 Check 裡用 context.WithCancelCause 建立子 ctx，失敗的 worker 呼叫 <code>cancel(fmt.Errorf("%s 失敗", url))</code>；其他結果用 context.Cause(ctx) 取出原因（<a href="18-context.html#cause">18 章</a>）。小心：被取消的網址本身也是「失敗」，不要讓它們再觸發一次取消。</p></details>
+      </li>
+    </ol>
+  </section>
+
+  <section aria-labelledby="recap">
+    <h2 id="recap">重點回顧</h2>
+    <ul class="recap">
+      <li>把外部的依賴（網路）藏在小的 interface 後面，邏輯就能在沒有網路的地方測試。</li>
+      <li>worker pool 用固定數量的 goroutine；channel 傳 index，結果寫進 results[i]，順序不變也不需要鎖。</li>
+      <li>每一次請求一個 WithTimeout 的子 context，逾時只影響自己；ctx 要一路傳到 NewRequestWithContext。</li>
+      <li>多個 worker 共用一個 Ticker 的 channel，就是整體的限速。</li>
+      <li>只重試暫時性的失敗，等待時間加倍，而且等待本身也要能被取消。</li>
+      <li>signal.NotifyContext 讓 Ctrl-C 變成 context 的取消；os.Exit 不會執行 defer。</li>
+      <li>synctest 的假時鐘讓並行和時間的測試又快又精確；golden file 鎖住整個輸出。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="further">
+    <h2 id="further">延伸閱讀</h2>
+    <ul class="notes">
+      <li>套件文件：<a href="https://pkg.go.dev/testing/synctest">testing/synctest</a>、<a href="https://pkg.go.dev/time#NewTicker">time.NewTicker</a>、<a href="https://pkg.go.dev/os/signal#NotifyContext">signal.NotifyContext</a>、<a href="https://pkg.go.dev/net/http#Client">http.Client</a>、<a href="https://pkg.go.dev/context#WithTimeout">context.WithTimeout</a>。</li>
     </ul>
   </section>
 
   <section aria-labelledby="run">
     <h2 id="run">動手跑</h2>
     <p class="label">在 repo 根目錄（需要網路）</p>
-    <pre class="shell"><code>go run ./projects/urlchecker -workers 4 -timeout 5s https://go.dev https://github.com
-go test -race ./projects/urlchecker   <span class="c"># 測試不需要網路</span></code></pre>
-    <p><a href="https://github.com/xinqilin/GO-Playground/tree/main/projects/urlchecker">在 GitHub 看完整程式碼</a></p>
+    <pre class="shell"><code>go run ./projects/urlchecker https://go.dev https://pkg.go.dev https://go.dev/nosuchpage
+go test ./projects/urlchecker
+go test -race -count=10 ./projects/urlchecker
+go test ./projects/urlchecker -run TestReport -update   # 改了輸出格式之後</code></pre>
+    <p><a href="https://github.com/xinqilin/GO-Playground/tree/main/projects/urlchecker">在 GitHub 看完整程式碼</a>。</p>
   </section>
 </main>
 

@@ -1,108 +1,128 @@
 // 專題 3：並行網址檢查器。
 //
-// 同時檢查一批網址，最多同時發出 workers 個請求，每個請求最多等 timeout。
-// 用到：goroutine 與 WaitGroup（第 14 章）、semaphore（第 19 章）、context 逾時（第 18 章）、
-// interface 讓測試可以換掉真正的網路請求（第 10 章）。
+// 同時檢查一批網址：固定數量的 worker、每次請求的逾時、每秒請求數的上限、失敗後的退避重試，
+// 按 Ctrl-C 會取消還沒完成的檢查。有任何網址失敗時以 exit code 1 結束，方便接在 CI 或排程裡。
 //
-// 執行：go run ./projects/urlchecker https://go.dev https://github.com
+// 執行：go run ./projects/urlchecker https://go.dev https://pkg.go.dev
+//
+//	go run ./projects/urlchecker -workers 8 -rate 5 < urls.txt
 package main
 
 import (
+	"bufio"
 	"context"
+	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
-	"sync"
+	"os/signal"
+	"strconv"
+	"strings"
 	"time"
 )
 
-// Result 是一個網址的檢查結果。
-type Result struct {
-	URL    string
-	Status int
-	Err    error
-	Took   time.Duration
+// run 是整支程式：args 不含程式名稱，沒有給網址時從 stdin 每行讀一個，回傳 exit code。
+func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer, f Fetcher) int {
+	fs := flag.NewFlagSet("urlchecker", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	var cfg Config
+	fs.IntVar(&cfg.Workers, "workers", 4, "同時最多幾個請求")
+	fs.DurationVar(&cfg.Timeout, "timeout", 5*time.Second, "每一次請求最多等多久")
+	fs.IntVar(&cfg.PerSecond, "rate", 0, "每秒最多送出幾個請求，0 是不限制")
+	fs.IntVar(&cfg.Retries, "retries", 2, "失敗後最多再試幾次")
+	fs.DurationVar(&cfg.Backoff, "backoff", 200*time.Millisecond, "第一次重試前等多久，之後每次加倍")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if cfg.Workers < 1 || cfg.Timeout <= 0 || cfg.PerSecond < 0 || cfg.Retries < 0 || cfg.Backoff < 0 {
+		fmt.Fprintln(stderr, "urlchecker：-workers 至少是 1，-timeout 要大於 0，其他數值不能是負數")
+		return 2
+	}
+
+	urls := fs.Args()
+	if len(urls) == 0 {
+		var err error
+		if urls, err = readURLs(stdin); err != nil {
+			fmt.Fprintf(stderr, "urlchecker：讀取網址：%v\n", err)
+			return 2
+		}
+	}
+	if len(urls) == 0 {
+		fmt.Fprintln(stderr, "用法：urlchecker [旗標] URL...（或從標準輸入每行讀一個網址）")
+		return 2
+	}
+
+	start := time.Now()
+	results := Check(ctx, urls, cfg, f)
+	ok := 0
+	for _, r := range results {
+		fmt.Fprintln(stdout, formatResult(r))
+		if r.OK() {
+			ok++
+		}
+	}
+	fmt.Fprintf(stdout, "共 %d 個網址：%d 個正常，%d 個失敗，花了 %v\n",
+		len(results), ok, len(results)-ok, time.Since(start).Round(time.Millisecond))
+	if ok < len(results) {
+		return 1
+	}
+	return 0
 }
 
-// String 把結果排成一行，例如「OK   200 https://go.dev」。
-func (r Result) String() string {
+// readURLs 每行讀一個網址，略過空白行和 # 開頭的註解。
+func readURLs(r io.Reader) ([]string, error) {
+	var urls []string
+	sc := bufio.NewScanner(r)
+	for sc.Scan() {
+		s := strings.TrimSpace(sc.Text())
+		if s != "" && !strings.HasPrefix(s, "#") {
+			urls = append(urls, s)
+		}
+	}
+	return urls, sc.Err()
+}
+
+// formatResult 把一個結果排成一行：狀態、狀態碼、花的時間、網址，再加上失敗原因和重試次數。
+func formatResult(r Result) string {
+	mark, code := "OK", strconv.Itoa(r.Status)
+	if !r.OK() {
+		mark = "FAIL"
+	}
+	if r.Err != nil {
+		code = "---"
+	}
+	s := fmt.Sprintf("%-4s %3s %6v  %s", mark, code, r.Took.Round(time.Millisecond), r.URL)
+
+	var notes []string
+	if r.Err != nil {
+		notes = append(notes, describe(r.Err))
+	}
+	if r.Attempts > 1 {
+		notes = append(notes, fmt.Sprintf("試了 %d 次", r.Attempts))
+	}
+	if len(notes) > 0 {
+		s += "（" + strings.Join(notes, "，") + "）"
+	}
+	return s
+}
+
+// describe 把常見的錯誤換成短的說明。
+func describe(err error) string {
 	switch {
-	case r.Err != nil:
-		return fmt.Sprintf("FAIL --- %s（%v）", r.URL, r.Err)
-	case r.Status >= 400:
-		return fmt.Sprintf("FAIL %d %s", r.Status, r.URL)
-	default:
-		return fmt.Sprintf("OK   %d %s", r.Status, r.URL)
+	case errors.Is(err, context.DeadlineExceeded):
+		return "逾時"
+	case errors.Is(err, context.Canceled):
+		return "已取消"
 	}
-}
-
-// Fetcher 送出請求、回傳 HTTP 狀態碼。真正上線用 httpFetcher，測試時換成假的。
-type Fetcher interface {
-	Fetch(ctx context.Context, url string) (int, error)
-}
-
-// httpFetcher 用 HEAD 請求檢查網址，不下載內容。
-type httpFetcher struct{ client *http.Client }
-
-func (f httpFetcher) Fetch(ctx context.Context, url string) (int, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodHead, url, nil)
-	if err != nil {
-		return 0, err
-	}
-	resp, err := f.client.Do(req)
-	if err != nil {
-		return 0, err
-	}
-	resp.Body.Close()
-	return resp.StatusCode, nil
-}
-
-// Check 同時檢查 urls，回傳的結果順序和 urls 相同。
-func Check(ctx context.Context, urls []string, workers int, timeout time.Duration, f Fetcher) []Result {
-	results := make([]Result, len(urls))
-	sem := make(chan struct{}, max(workers, 1))
-	var wg sync.WaitGroup
-	for i, u := range urls {
-		wg.Go(func() {
-			select {
-			case sem <- struct{}{}: // 拿到號碼牌才開始
-			case <-ctx.Done():
-				results[i] = Result{URL: u, Err: ctx.Err()}
-				return
-			}
-			defer func() { <-sem }()
-
-			reqCtx, cancel := context.WithTimeout(ctx, timeout)
-			defer cancel()
-			start := time.Now()
-			status, err := f.Fetch(reqCtx, u)
-			results[i] = Result{URL: u, Status: status, Err: err, Took: time.Since(start)}
-		})
-	}
-	wg.Wait()
-	return results
+	return err.Error()
 }
 
 func main() {
-	workers := flag.Int("workers", 4, "同時最多幾個請求")
-	timeout := flag.Duration("timeout", 5*time.Second, "每個請求最多等多久")
-	flag.Parse()
-	urls := flag.Args()
-	if len(urls) == 0 {
-		fmt.Fprintln(os.Stderr, "用法：urlchecker [-workers 4] [-timeout 5s] URL...")
-		os.Exit(2)
-	}
-
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	f := httpFetcher{client: &http.Client{}} // 逾時由 context 控制
-	failed := 0
-	for _, r := range Check(context.Background(), urls, *workers, *timeout, f) {
-		fmt.Printf("%s  %v\n", r, r.Took.Round(time.Millisecond))
-		if r.Err != nil || r.Status >= 400 {
-			failed++
-		}
-	}
-	if failed > 0 {
-		os.Exit(1) // 有任何失敗就用非 0 結束，方便接在 CI 或排程裡
-	}
+	code := run(ctx, os.Args[1:], os.Stdin, os.Stdout, os.Stderr, f)
+	stop()
+	os.Exit(code)
 }
