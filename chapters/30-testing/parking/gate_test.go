@@ -129,6 +129,37 @@ func TestGateChargeTimeout(t *testing.T) {
 	})
 }
 
+// reenterPayments 在收費途中讓同一個車牌再進場一次，然後收費失敗。
+type reenterPayments struct {
+	g     *Gate
+	clock *fakeClock
+}
+
+func (r *reenterPayments) Charge(ctx context.Context, plate string, amount int) error {
+	r.clock.Advance(time.Minute)
+	if err := r.g.Enter(plate); err != nil {
+		return err
+	}
+	return errors.New("刷卡失敗")
+}
+
+// TestGatePaymentFailsAfterReenter：收費失敗時把車放回場內，不能蓋掉等金流的這段時間裡新的進場時間。
+func TestGatePaymentFailsAfterReenter(t *testing.T) {
+	clock := &fakeClock{now: at(20, 9, 0)}
+	pay := &reenterPayments{clock: clock}
+	g := NewGate(clock.Now, pay)
+	pay.g = g
+	mustEnter(t, g, "ABC-1234")
+	clock.Advance(time.Hour)
+
+	if _, err := g.Exit(t.Context(), "ABC-1234"); err == nil {
+		t.Fatal("收費失敗，Exit 應該回傳錯誤")
+	}
+	if in, want := g.inside["ABC-1234"], at(20, 10, 1); !in.Equal(want) {
+		t.Errorf("場內的進場時間 = %v，want 新的進場時間 %v", in, want)
+	}
+}
+
 // TestGateConcurrentExit：同一台車同時出場兩次，只能收一次錢。用 go test -race 跑。
 func TestGateConcurrentExit(t *testing.T) {
 	g, clock, pay := newTestGate(t)

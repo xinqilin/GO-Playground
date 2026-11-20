@@ -84,7 +84,9 @@ func (g *Gate) Exit(ctx context.Context, plate string) (Record, error) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	if err != nil {
-		g.inside[p] = in // 放回場內
+		if _, again := g.inside[p]; !again { // 等金流的時候同一個車牌又進場了，以新的進場時間為準
+			g.inside[p] = in // 放回場內
+		}
 		return Record{}, fmt.Errorf("%s 出場失敗：%w", p, err)
 	}
 	g.done = append(g.done, rec)

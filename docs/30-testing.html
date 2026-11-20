@@ -403,7 +403,9 @@ func (g *Gate) Exit(ctx context.Context, plate string) (Record, error) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	if err != nil {
-		g.inside[p] = in // 放回場內
+		if _, again := g.inside[p]; !again { // 等金流的時候同一個車牌又進場了，以新的進場時間為準
+			g.inside[p] = in // 放回場內
+		}
 		return Record{}, fmt.Errorf("%s 出場失敗：%w", p, err)
 	}
 	g.done = append(g.done, rec)
@@ -784,7 +786,7 @@ string("0")</code></pre>
   <section aria-labelledby="coverage">
     <h2 id="coverage">8. Example、覆蓋率與 benchmark</h2>
     <figure class="fig">
-      <svg viewBox="0 0 480 236" role="img" aria-label="parking 每個函式的測試覆蓋率長條圖：Fee、NormalizePlate 是 100%，Exit 95.5%，Enter 88.9%，WriteReport 83.3%，SaveReport 72.7%，Records 是 0%，因為沒有任何測試直接呼叫它">
+      <svg viewBox="0 0 480 236" role="img" aria-label="parking 每個函式的測試覆蓋率長條圖：Fee、NormalizePlate 是 100%，Exit 95.7%，Enter 88.9%，WriteReport 83.3%，SaveReport 72.7%，Records 是 0%，因為沒有任何測試直接呼叫它">
         <title>每個函式的覆蓋率</title>
         <text class="sm mono" x="128" y="30" text-anchor="end">Fee</text>
         <rect class="acc" x="140" y="18" width="240" height="16" rx="3"/>
@@ -793,8 +795,8 @@ string("0")</code></pre>
         <rect class="acc" x="140" y="46" width="240" height="16" rx="3"/>
         <text class="sm" x="388" y="59">100%</text>
         <text class="sm mono" x="128" y="86" text-anchor="end">Exit</text>
-        <rect class="acc" x="140" y="74" width="229" height="16" rx="3"/>
-        <text class="sm" x="388" y="87">95.5%</text>
+        <rect class="acc" x="140" y="74" width="230" height="16" rx="3"/>
+        <text class="sm" x="388" y="87">95.7%</text>
         <text class="sm mono" x="128" y="114" text-anchor="end">Enter</text>
         <rect class="acc" x="140" y="102" width="213" height="16" rx="3"/>
         <text class="sm" x="388" y="115">88.9%</text>
@@ -839,7 +841,7 @@ func ExampleNormalizePlate_unordered() {
     <p><strong>覆蓋率</strong>：測試跑過的程式碼佔多少。</p>
     <pre class="shell"><code>go test -cover ./chapters/30-testing/parking</code></pre>
     <p class="label">輸出</p>
-    <pre class="out"><code>ok  	github.com/xinqilin/GO-Playground/chapters/30-testing/parking	0.327s	coverage: 88.9% of statements</code></pre>
+    <pre class="out"><code>ok  	github.com/xinqilin/GO-Playground/chapters/30-testing/parking	0.314s	coverage: 89.0% of statements</code></pre>
     <pre class="shell"><code>go test -coverprofile=c.out ./chapters/30-testing/parking
 go tool cover -func=c.out    <span class="c"># 每個函式的覆蓋率</span>
 go tool cover -html=c.out    <span class="c"># 在瀏覽器裡標出哪幾行沒跑到</span></code></pre>
@@ -849,12 +851,12 @@ github.com/xinqilin/GO-Playground/chapters/30-testing/parking/fee.go:43:	nextMid
 github.com/xinqilin/GO-Playground/chapters/30-testing/parking/fee.go:49:	dayFee		100.0%
 github.com/xinqilin/GO-Playground/chapters/30-testing/parking/gate.go:43:	NewGate		100.0%
 github.com/xinqilin/GO-Playground/chapters/30-testing/parking/gate.go:48:	Enter		88.9%
-github.com/xinqilin/GO-Playground/chapters/30-testing/parking/gate.go:63:	Exit		95.5%
-github.com/xinqilin/GO-Playground/chapters/30-testing/parking/gate.go:95:	Records		0.0%
+github.com/xinqilin/GO-Playground/chapters/30-testing/parking/gate.go:63:	Exit		95.7%
+github.com/xinqilin/GO-Playground/chapters/30-testing/parking/gate.go:97:	Records		0.0%
 github.com/xinqilin/GO-Playground/chapters/30-testing/parking/plate.go:12:	NormalizePlate	100.0%
 github.com/xinqilin/GO-Playground/chapters/30-testing/parking/report.go:12:	WriteReport	83.3%
 github.com/xinqilin/GO-Playground/chapters/30-testing/parking/report.go:31:	SaveReport	72.7%
-total:										(statements)	88.9%</code></pre>
+total:										(statements)	89.0%</code></pre>
     <p>沒跑到的地方是「車牌格式錯誤時 Enter 回傳錯誤」「沒有紀錄時的報表」「建立檔案失敗」這些分支，以及 Records。覆蓋率的用處是找出這種漏掉的地方，然後判斷值不值得補。它不是目標：100% 的覆蓋率只代表每一行都執行過，不代表檢查過結果。一個什麼都不比較的測試，也能把覆蓋率衝高。</p>
     <p><strong>benchmark</strong> 量測一段程式碼要多久、配置多少記憶體。函式名稱以 Benchmark 開頭，Go 1.24 起用 <code>b.Loop()</code> 當迴圈條件，它會自己決定要跑幾次：</p>
     <pre class="code" data-src="chapters/30-testing/parking/fee_test.go#BenchmarkFee"><code>func BenchmarkFee(b *testing.B) {
