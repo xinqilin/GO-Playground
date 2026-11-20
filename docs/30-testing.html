@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>測試｜Go 圖解手冊</title>
-<meta name="description" content="Go 內建的測試：table-driven test 與 t.Run、Example、Go 1.24 的 b.Loop benchmark，以及 fuzz test。">
+<meta name="description" content="Go 的測試：go test 怎麼運作、t.Errorf 與 t.Fatalf、table-driven 與子測試、測試替身、t.Helper 與 t.Cleanup 等輔助、golden file、用 synctest 測時間與並行、fuzz、Example、覆蓋率與 benchmark，附可執行的練習題。">
 <link rel="stylesheet" href="assets/style.css">
 </head>
 <body>
@@ -13,122 +13,904 @@
   <span class="count">30 / 33</span>
 </header>
 
-<main class="page">
+<main class="page long">
   <header class="hero">
     <div class="num" aria-hidden="true">30</div>
     <p class="eyebrow">Part 5 · 工程實務 · 第 30 章</p>
     <h1>測試</h1>
-    <p class="analogy">測試是自動檢查員：每次改完程式跑一次 go test，該檢查的地方它全部再看一遍。</p>
+    <p class="analogy">停車場開幕前，先拿一疊寫好的情境卡去試：停 9 分鐘、停到午夜整、刷卡機當機、同一台車按兩次出場。每張卡寫著「這樣做，應該得到什麼」。以後每次改計費規則，就把整疊卡重跑一次，哪張不對立刻知道。go test 就是那疊卡加上自動跑卡的人。</p>
   </header>
 
-  <section aria-labelledby="look">
-    <h2 id="look">看圖</h2>
-    <div class="figs">
-      <figure class="fig">
-        <svg viewBox="0 0 480 222" role="img" aria-label="table-driven test：案例排成一張表，有名稱、輸入、期望三欄；t.Run 讓每一列各跑一次，也可以只跑其中一列">
-          <title>table-driven test</title>
-          <rect class="soft" x="16" y="20" width="284" height="32"/>
-          <rect class="box" x="16" y="52" width="284" height="40"/>
-          <rect class="box" x="16" y="92" width="284" height="40"/>
-          <rect class="box" x="16" y="132" width="284" height="40"/>
-          <path class="wire faint" d="M96 20 V172 M196 20 V172"/>
-          <text class="small" x="56" y="41" text-anchor="middle">名稱</text>
-          <text class="small" x="146" y="41" text-anchor="middle">輸入</text>
-          <text class="small" x="248" y="41" text-anchor="middle">期望</text>
-          <text class="small" x="56" y="77" text-anchor="middle">英文</text>
-          <text class="small mono" x="146" y="77" text-anchor="middle">Go</text>
-          <text class="small mono" x="248" y="77" text-anchor="middle">oG</text>
-          <text class="small" x="56" y="117" text-anchor="middle">中文</text>
-          <text class="small" x="146" y="117" text-anchor="middle">你好世界</text>
-          <text class="small" x="248" y="117" text-anchor="middle">界世好你</text>
-          <text class="small" x="56" y="157" text-anchor="middle">混合</text>
-          <text class="small mono" x="146" y="157" text-anchor="middle">Go語言</text>
-          <text class="small mono" x="248" y="157" text-anchor="middle">言語oG</text>
-          <path class="wire" d="M300 96 H318"/>
-          <path class="tip" d="M328 96 L316 90 L316 102 Z"/>
-          <rect class="acc" x="330" y="60" width="134" height="72" rx="10"/>
-          <text class="small mono" x="397" y="90" text-anchor="middle">t.Run(…)</text>
-          <text class="small" x="397" y="114" text-anchor="middle">每一列跑一次</text>
-          <text class="small t-acc" x="397" y="158" text-anchor="middle">3 個 PASS</text>
-          <text class="sm mono" x="16" y="206">go test -run 'TestReverse/中文'   只跑一列</text>
-        </svg>
-        <figcaption>把案例排成一張表，用一個迴圈跑完。<code>t.Run</code> 讓每一列有自己的名字，失敗時一眼看出是哪一列，也能只跑某一列。</figcaption>
-      </figure>
+  <nav class="toc-inline" aria-labelledby="toc-title">
+    <p class="label" id="toc-title">本章內容</p>
+    <ol>
+      <li><a href="#goals">本章你會學到</a></li>
+      <li><a href="#gotest">go test 怎麼運作</a></li>
+      <li><a href="#table">table-driven 與子測試</a></li>
+      <li><a href="#doubles">測試替身</a></li>
+      <li><a href="#helpers">測試輔助函式</a></li>
+      <li><a href="#golden">golden file 與 testdata</a></li>
+      <li><a href="#synctest">時間與並行的測試</a></li>
+      <li><a href="#fuzz">fuzz</a></li>
+      <li><a href="#coverage">Example、覆蓋率與 benchmark</a></li>
+      <li><a href="#pitfalls">常見錯誤</a></li>
+      <li><a href="#java">從 Java 來的你</a></li>
+      <li><a href="#exercises">練習</a></li>
+      <li><a href="#recap">重點回顧</a></li>
+      <li><a href="#further">延伸閱讀</a></li>
+    </ol>
+  </nav>
 
-      <figure class="fig">
-        <svg viewBox="0 0 480 248" role="img" aria-label="_test.go 裡的四種函式：Test 檢查對錯，Example 比對輸出，Benchmark 量速度要加 -bench，Fuzz 自動產生隨機輸入要加 -fuzz">
-          <title>四種測試函式</title>
-          <rect class="acc" x="12" y="12" width="224" height="110" rx="10"/>
-          <rect class="soft" x="244" y="12" width="224" height="110" rx="10"/>
-          <rect class="soft" x="12" y="126" width="224" height="110" rx="10"/>
-          <rect class="soft" x="244" y="126" width="224" height="110" rx="10"/>
-          <text class="mono bold" x="26" y="42">TestXxx</text>
-          <text class="small" x="26" y="68">檢查結果對不對</text>
-          <text class="sm mono" x="26" y="104">go test</text>
-          <text class="mono bold" x="258" y="42">ExampleXxx</text>
-          <text class="small" x="258" y="68">比對印出來的輸出</text>
-          <text class="sm mono" x="258" y="104">go test，也會出現在 go doc</text>
-          <text class="mono bold" x="26" y="156">BenchmarkXxx</text>
-          <text class="small" x="26" y="182">量速度和記憶體</text>
-          <text class="sm mono" x="26" y="218">go test -bench=.</text>
-          <text class="mono bold" x="258" y="156">FuzzXxx</text>
-          <text class="small" x="258" y="182">自動產生隨機輸入</text>
-          <text class="sm mono" x="258" y="218">go test -fuzz=FuzzXxx</text>
-        </svg>
-        <figcaption>同一個 <code>_test.go</code> 檔案裡可以放四種函式，都用 <code>go test</code> 執行；Benchmark 和 Fuzz 要加上旗標才會跑。</figcaption>
-      </figure>
-    </div>
+  <section aria-labelledby="goals">
+    <h2 id="goals">本章你會學到</h2>
+    <ul class="notes">
+      <li>go test 做了什麼、失敗時長什麼樣子，t.Errorf 和 t.Fatalf 的差別。</li>
+      <li>把案例排成表格、用 t.Run 拆成子測試，以及只跑其中幾個。</li>
+      <li>依賴 interface，測試時換成假的金流和時鐘。</li>
+      <li>t.Helper、t.Cleanup、t.TempDir、t.Context 這些輔助。</li>
+      <li>用 golden file 檢查大段的輸出。</li>
+      <li>用 synctest 和 -race 測試逾時與並行。</li>
+      <li>用 fuzz 找出你沒想到的輸入。</li>
+      <li>Example、覆蓋率和 benchmark 的用法與限制。</li>
+    </ul>
+    <p>先備：<a href="10-interfaces.html#design">10 章的 interface 設計</a>、<a href="22-time.html#testing">22 章讓時間可以測試</a>、<a href="29-packages-modules.html#package">29 章的 package</a>。前面每一章都用 Example 鎖住輸出，這一章把 Go 的測試工具從頭整理一次。</p>
   </section>
 
-  <section aria-labelledby="code">
-    <h2 id="code">最小範例</h2>
-    <p class="label">textutil/textutil_test.go（節錄）</p>
-    <pre class="code"><code>func TestReverse(t *testing.T) {
-	tests := []struct {
-		name, in, want string
-	}{
-		{"英文", "Go", "oG"},
-		{"中文", "你好世界", "界世好你"},
+  <section aria-labelledby="gotest">
+    <h2 id="gotest">1. go test 怎麼運作</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 214" role="img" aria-label="go test 把 package 的程式碼和 _test.go 檔一起編譯成一個暫時的測試執行檔，執行裡面所有 Test、Example、Fuzz 的種子，最後印出 PASS 或 FAIL。go build 不會編譯 _test.go，所以測試程式碼不會進到正式的執行檔">
+        <title>go test 建出一個測試執行檔</title>
+        <rect class="soft" x="16" y="20" width="130" height="40" rx="8"/>
+        <text class="sm mono" x="81" y="45" text-anchor="middle">fee.go gate.go</text>
+        <rect class="acc" x="16" y="74" width="130" height="40" rx="8"/>
+        <text class="sm mono" x="81" y="99" text-anchor="middle">*_test.go</text>
+        <path class="wire" d="M146 40 H180 V64"/>
+        <path class="wire" d="M146 94 H180 V70"/>
+        <path class="wire" d="M180 67 H196"/>
+        <path class="tip" d="M208 67 L196 61 L196 73 Z"/>
+        <rect class="soft" x="208" y="40" width="130" height="54" rx="8"/>
+        <text class="sm" x="273" y="63" text-anchor="middle">暫時的</text>
+        <text class="sm" x="273" y="83" text-anchor="middle">測試執行檔</text>
+        <path class="wire" d="M338 67 H354"/>
+        <path class="tip" d="M366 67 L354 61 L354 73 Z"/>
+        <rect class="acc" x="366" y="40" width="98" height="54" rx="8"/>
+        <text class="sm mono" x="415" y="63" text-anchor="middle">PASS</text>
+        <text class="sm mono t-hot" x="415" y="83" text-anchor="middle">FAIL</text>
+        <text class="sm" x="16" y="150">執行：TestXxx、ExampleXxx、FuzzXxx 的種子</text>
+        <text class="sm" x="16" y="174">加旗標才跑：-bench 跑 Benchmark，-fuzz 產生新輸入</text>
+        <text class="sm t-acc" x="16" y="198">go build 不會編譯 _test.go，測試不會進到正式的執行檔</text>
+      </svg>
+      <figcaption>測試檔和程式碼放在同一個目錄，名字以 _test.go 結尾。不需要測試框架，標準庫的 testing 就是全部。</figcaption>
+    </figure>
+    <p>這一章測試的是 parking 套件：一個停車場的計費、車牌整理、柵欄機和日報表。先看計費規則，後面每一節都在測它：</p>
+    <pre class="code" data-src="chapters/30-testing/parking/fee.go"><code>// Package parking 是第 30 章用來練習寫測試的停車場：計費、車牌、柵欄機和日報表。
+package parking
+
+import (
+	"errors"
+	"time"
+)
+
+// 計費規則。
+const (
+	Grace     = 10 * time.Minute // 整段停車不到 10 分鐘免費
+	Unit      = 30 * time.Minute // 每 30 分鐘一個單位，不足一個單位也算一個
+	UnitPrice = 20               // 每個單位 20 元
+	DailyCap  = 240              // 每個日曆日最多收 240 元
+)
+
+// ErrOutBeforeIn 表示出場時間比進場時間早。
+var ErrOutBeforeIn = errors.New("出場時間比進場時間早")
+
+// Fee 計算從 in 停到 out 的停車費。
+// 整段停車不到 Grace 免費；否則在 in 所在時區的每個午夜切開，
+// 每一天各自以 Unit 為單位進位計費，每天最多收 DailyCap。
+func Fee(in, out time.Time) (int, error) {
+	if out.Before(in) {
+		return 0, ErrOutBeforeIn
+	}
+	if out.Sub(in) &lt; Grace {
+		return 0, nil
+	}
+	total := 0
+	for start := in; start.Before(out); {
+		end := nextMidnight(start)
+		if end.After(out) {
+			end = out
+		}
+		total += dayFee(end.Sub(start))
+		start = end
+	}
+	return total, nil
+}
+
+// nextMidnight 回傳 t 之後的第一個午夜。
+func nextMidnight(t time.Time) time.Time {
+	y, m, d := t.Date()
+	return time.Date(y, m, d+1, 0, 0, 0, 0, t.Location())
+}
+
+// dayFee 是同一天裡停了 d 的費用。
+func dayFee(d time.Duration) int {
+	units := int((d + Unit - 1) / Unit)
+	return min(units*UnitPrice, DailyCap)
+}</code></pre>
+    <p>測試函式的名字以 Test 開頭，參數是 <code>*testing.T</code>。Go 沒有 assert，比較用一般的 if，不對就呼叫 t.Errorf 或 t.Fatalf。為了看清楚失敗的樣子，testdata/failing 是一個故意寫錯的小 module：</p>
+    <pre class="code" data-src="chapters/30-testing/testdata/failing/price.go#MemberPrice"><code>func MemberPrice(price int) int {
+	return price / 10 * 9 // bug：先除再乘，個位數直接不見了
+}</code></pre>
+    <pre class="code" data-src="chapters/30-testing/testdata/failing/price_test.go"><code>package failing
+
+import (
+	"os"
+	"strings"
+	"testing"
+)
+
+// t.Errorf 記下失敗，繼續檢查下一個案例。
+func TestMemberPrice(t *testing.T) {
+	tests := []struct{ price, want int }{
+		{100, 90},
+		{95, 86}, // 85.5 四捨五入
+		{55, 50}, // 49.5 四捨五入
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := Reverse(tt.in); got != tt.want {
-				t.Errorf("Reverse(%q) = %q, want %q", tt.in, got, tt.want)
-			}
-		})
+		if got := MemberPrice(tt.price); got != tt.want {
+			t.Errorf("MemberPrice(%d) = %d，want %d", tt.price, got, tt.want)
+		}
 	}
 }
 
-func BenchmarkReverse(b *testing.B) {
-	s := strings.Repeat("Go語言", 100)
-	for b.Loop() { <span class="c">// Go 1.24 起</span>
-		Reverse(s)
+// t.Fatalf 記下失敗，並且立刻結束這個測試：後面都用到 data，讀不到就沒有必要再檢查。
+func TestMenuPrices(t *testing.T) {
+	data, err := os.ReadFile("testdata/menu.txt")
+	if err != nil {
+		t.Fatalf("讀不到菜單：%v", err)
+	}
+	if !strings.Contains(string(data), "排骨飯") {
+		t.Error("菜單裡沒有排骨飯")
 	}
 }</code></pre>
-    <p class="label">go test -v -run TestReverse（節錄）</p>
-    <pre class="out"><code>=== RUN   TestReverse
-=== RUN   TestReverse/空字串
-=== RUN   TestReverse/英文
-=== RUN   TestReverse/中文
-=== RUN   TestReverse/混合
---- PASS: TestReverse (0.00s)
-    --- PASS: TestReverse/空字串 (0.00s)
-    --- PASS: TestReverse/英文 (0.00s)
-    --- PASS: TestReverse/中文 (0.00s)
-    --- PASS: TestReverse/混合 (0.00s)
-PASS</code></pre>
+    <pre class="shell"><code>cd chapters/30-testing/testdata/failing
+go test</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out err"><code>--- FAIL: TestMemberPrice (0.00s)
+    price_test.go:18: MemberPrice(95) = 81，want 86
+    price_test.go:18: MemberPrice(55) = 45，want 50
+--- FAIL: TestMenuPrices (0.00s)
+    price_test.go:27: 讀不到菜單：open testdata/menu.txt: no such file or directory
+FAIL
+exit status 1
+FAIL	example.com/failing	0.671s</code></pre>
+    <ul class="notes">
+      <li><strong>t.Errorf</strong> 記下失敗、繼續執行，所以兩個錯的案例都看得到。大部分的檢查用它。</li>
+      <li><strong>t.Fatalf</strong> 記下失敗、立刻結束這個測試函式。後面的檢查都依賴前面的結果（檔案讀不到、物件建不起來）時才用它。它只能在測試本身的 goroutine 呼叫，在自己開的 goroutine 裡呼叫是錯的，go vet 會抓出來。</li>
+      <li>失敗訊息要讓人不看程式碼就知道哪裡錯：寫出呼叫、實際得到的值、期望的值，例如 <code>MemberPrice(95) = 81，want 86</code>。這是 Go 標準庫的慣例：got 在前，want 在後。</li>
+      <li>沒有失敗也沒有 panic，測試就算通過。t.Log 的訊息只有在失敗或加上 -v 時才會印出來。</li>
+    </ul>
+    <p>常用的旗標：</p>
+    <pre class="shell"><code>go test ./...                      <span class="c"># 目前目錄底下所有 package</span>
+go test -v ./chapters/30-testing/parking   <span class="c"># 每個測試都印出 RUN、PASS</span>
+go test -run 'TestGate' ./chapters/30-testing/parking   <span class="c"># 只跑名稱符合 regexp 的測試</span>
+go test -count=1 ./...             <span class="c"># 不用快取，一定重跑</span>
+go test -failfast ./...            <span class="c"># 第一個失敗之後就不再開始新的測試</span>
+go test -shuffle=on ./...          <span class="c"># 打亂順序，抓出依賴執行順序的測試</span></code></pre>
+    <p>程式碼和測試都沒改時，go test 直接用上次的結果：</p>
+    <pre class="out"><code>ok  	github.com/xinqilin/GO-Playground/chapters/30-testing/parking	0.111s
+ok  	github.com/xinqilin/GO-Playground/chapters/30-testing/parking	(cached)</code></pre>
+    <p><strong>外部測試 package</strong>：同一個目錄的 _test.go 可以宣告成 <code>package parking_test</code>（<a href="00-hello.html#files">00 章</a>提過的唯一例外）。它是另一個 package，只看得到大寫開頭的名稱，用起來和真正的使用者一樣。本章 parking/example_test.go 就是這樣寫的。放在 <code>package parking</code> 的測試（內部測試）則可以直接測沒有匯出的函式。兩種可以並存，大部分的測試寫成內部測試就好；想確認「從外面用起來順不順」，或測試需要 import 一個本身又 import parking 的 package 時（內部測試會形成 import 循環），用外部測試。</p>
   </section>
 
-  <section aria-labelledby="notes">
-    <h2 id="notes">工程師筆記</h2>
+  <section aria-labelledby="table">
+    <h2 id="table">2. table-driven 與子測試</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 220" role="img" aria-label="一張表格列出案例名稱、進場、出場和期望的金額。for 迴圈對每一列呼叫 t.Run，每一列變成一個子測試，名稱是 TestFee 斜線加上案例名稱，名稱裡的空白會被換成底線">
+        <title>一列一個子測試</title>
+        <rect class="soft" x="16" y="16" width="220" height="132" rx="8"/>
+        <text class="sm bold" x="28" y="38">名稱</text>
+        <text class="sm bold" x="160" y="38">want</text>
+        <text class="sm" x="28" y="64">剛好 10 分鐘</text>
+        <text class="sm mono" x="160" y="64">20</text>
+        <text class="sm" x="28" y="88">31 分鐘進位</text>
+        <text class="sm mono" x="160" y="88">40</text>
+        <text class="sm" x="28" y="112">跨夜分兩天算</text>
+        <text class="sm mono" x="160" y="112">80</text>
+        <text class="sm" x="28" y="136">…</text>
+        <path class="wire" d="M236 82 H262"/>
+        <path class="tip" d="M274 82 L262 76 L262 88 Z"/>
+        <rect class="acc" x="274" y="16" width="190" height="132" rx="8"/>
+        <text class="sm mono" x="286" y="42">t.Run(tt.name, …)</text>
+        <text class="sm mono" x="286" y="74">TestFee/剛好_10_分鐘</text>
+        <text class="sm mono" x="286" y="98">TestFee/31_分鐘進位</text>
+        <text class="sm mono" x="286" y="122">TestFee/跨夜分兩天算</text>
+        <text class="sm" x="16" y="182">加一個案例只要加一列；每一列各自 PASS 或 FAIL</text>
+        <text class="sm t-acc" x="16" y="206">子測試名稱裡的空白會換成 _，-run 可以只跑其中幾列</text>
+      </svg>
+      <figcaption>計費規則的難處都在邊界：剛好 10 分鐘、剛好 30 分鐘、出場在午夜整。表格讓這些邊界一目了然，也很容易補上漏掉的。</figcaption>
+    </figure>
+    <p>同一個函式要用很多組輸入測，就把案例排成一張表，用一個迴圈跑完。每一列用 t.Run 包成<strong>子測試</strong>：</p>
+    <pre class="code" data-src="chapters/30-testing/parking/fee_test.go#taipei,at,TestFee"><code>var taipei = time.FixedZone("UTC+8", 8*60*60)
+
+func at(day, hour, min int) time.Time {
+	return time.Date(2026, 11, day, hour, min, 0, 0, taipei)
+}
+
+func TestFee(t *testing.T) {
+	tests := []struct {
+		name    string
+		in, out time.Time
+		want    int
+	}{
+		{"剛進場就出來", at(20, 9, 0), at(20, 9, 0), 0},
+		{"9 分 59 秒免費", at(20, 9, 0), at(20, 9, 0).Add(Grace - time.Second), 0},
+		{"剛好 10 分鐘", at(20, 9, 0), at(20, 9, 10), 20},
+		{"剛好 30 分鐘", at(20, 9, 0), at(20, 9, 30), 20},
+		{"31 分鐘進位", at(20, 9, 0), at(20, 9, 31), 40},
+		{"整個白天到上限", at(20, 8, 0), at(20, 20, 0), DailyCap},
+		{"跨夜分兩天算", at(20, 23, 0), at(21, 1, 0), 40 + 40},
+		{"跨夜各自進位", at(20, 23, 50), at(21, 0, 20), 20 + 20},
+		{"出場在午夜整", at(20, 23, 0), at(21, 0, 0), 40},
+		{"停三天", at(20, 12, 0), at(22, 12, 0), 3 * DailyCap},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := Fee(tt.in, tt.out)
+			if err != nil || got != tt.want {
+				t.Errorf("Fee(%s, %s) = %d, %v；want %d",
+					tt.in.Format("01-02 15:04"), tt.out.Format("01-02 15:04"), got, err, tt.want)
+			}
+		})
+	}
+}</code></pre>
+    <pre class="shell"><code>go test -v -run 'TestFee$' ./chapters/30-testing/parking</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out"><code>=== RUN   TestFee
+=== RUN   TestFee/剛進場就出來
+=== RUN   TestFee/9_分_59_秒免費
+=== RUN   TestFee/剛好_10_分鐘
+=== RUN   TestFee/剛好_30_分鐘
+=== RUN   TestFee/31_分鐘進位
+=== RUN   TestFee/整個白天到上限
+=== RUN   TestFee/跨夜分兩天算
+=== RUN   TestFee/跨夜各自進位
+=== RUN   TestFee/出場在午夜整
+=== RUN   TestFee/停三天
+--- PASS: TestFee (0.00s)
+    --- PASS: TestFee/剛進場就出來 (0.00s)
+    --- PASS: TestFee/9_分_59_秒免費 (0.00s)
+    --- PASS: TestFee/剛好_10_分鐘 (0.00s)
+    --- PASS: TestFee/剛好_30_分鐘 (0.00s)
+    --- PASS: TestFee/31_分鐘進位 (0.00s)
+    --- PASS: TestFee/整個白天到上限 (0.00s)
+    --- PASS: TestFee/跨夜分兩天算 (0.00s)
+    --- PASS: TestFee/跨夜各自進位 (0.00s)
+    --- PASS: TestFee/出場在午夜整 (0.00s)
+    --- PASS: TestFee/停三天 (0.00s)
+PASS
+ok  	github.com/xinqilin/GO-Playground/chapters/30-testing/parking	0.104s</code></pre>
+    <p>-run 的值用 / 分成好幾段，每一段是一個 regexp，分別比對每一層的名稱，而且<strong>沒有錨點</strong>：<code>-run 'TestFee/跨夜'</code> 的第一段 TestFee 也符合 TestFeeOutBeforeIn 和 TestFeesInReport。只想跑 TestFee 底下名稱有「跨夜」的子測試，第一段要加上 ^ 和 $：</p>
+    <pre class="shell"><code>go test -v -run '^TestFee$/跨夜' ./chapters/30-testing/parking</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out"><code>=== RUN   TestFee
+=== RUN   TestFee/跨夜分兩天算
+=== RUN   TestFee/跨夜各自進位
+--- PASS: TestFee (0.00s)
+    --- PASS: TestFee/跨夜分兩天算 (0.00s)
+    --- PASS: TestFee/跨夜各自進位 (0.00s)
+PASS
+ok  	github.com/xinqilin/GO-Playground/chapters/30-testing/parking	0.100s</code></pre>
+    <p>表格也可以是 map，名稱當 key。map 的走訪順序每次不同，順便確認案例之間沒有互相依賴。子測試裡呼叫 <code>t.Parallel()</code>，這些子測試就會同時執行：</p>
+    <pre class="code" data-src="chapters/30-testing/parking/plate_test.go#TestNormalizePlate"><code>func TestNormalizePlate(t *testing.T) {
+	tests := map[string]struct {
+		in, want string
+		err      error
+	}{
+		"已經是標準寫法": {"ABC-1234", "ABC-1234", nil},
+		"小寫加空白":   {" abc 1234 ", "ABC-1234", nil},
+		"兩個字母":    {"ab1234", "AB-1234", nil},
+		"數字在前":    {"1234-ab", "1234-AB", nil},
+		"空字串":     {"", "", ErrBadPlate},
+		"數字太少":    {"ABC-123", "", ErrBadPlate},
+		"字母太多":    {"ABCD-1234", "", ErrBadPlate},
+		"全形字母":    {"ＡＢＣ-1234", "", ErrBadPlate},
+	}
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			got, err := NormalizePlate(tt.in)
+			if got != tt.want || !errors.Is(err, tt.err) {
+				t.Errorf("NormalizePlate(%q) = %q, %v；want %q, %v", tt.in, got, err, tt.want, tt.err)
+			}
+		})
+	}
+}</code></pre>
     <ul class="notes">
-      <li>測試檔名以 <code>_test.go</code> 結尾，函式寫成 <code>func TestXxx(t *testing.T)</code>；<code>go test ./...</code> 一次跑全部。</li>
-      <li><code>t.Errorf</code> 記錄失敗後繼續跑；<code>t.Fatalf</code> 記錄後馬上結束這個測試。輔助函式開頭呼叫 <code>t.Helper()</code>，失敗訊息才會指向呼叫的那一行。</li>
-      <li>Example 的 <code>// Output:</code> 會被比對，等於一份不會過期的文件。</li>
-      <li>Benchmark 用 <code>b.Loop()</code>（Go 1.24）；加 <code>-benchmem</code> 可以看每次操作配置了幾次記憶體。</li>
-      <li>Fuzz 平常只跑 <code>f.Add</code> 的種子；加 <code>-fuzz</code> 才會隨機產生輸入，找到的失敗案例存在 <code>testdata/fuzz</code>，之後每次 go test 都會重跑。</li>
-      <li><code>-race</code> 和 <code>-cover</code> 是隨手就該加的旗標；牽涉時間的並行程式，可以用 <code>testing/synctest</code>（Go 1.25）讓測試不用真的等。</li>
+      <li>Go 1.22 起，for 迴圈的變數每一圈都是新的，閉包裡直接用 tt 就好，不必再寫 <code>tt := tt</code>（<a href="03-control-flow.html#range">03 章</a>）。</li>
+      <li>案例的名稱寫「這個案例在測什麼」，不要寫 case1、case2。失敗時只看名稱就知道是哪一條規則壞了。</li>
+      <li>表格裡的期望值要自己算，不要呼叫被測的函式來產生，否則永遠會通過。</li>
     </ul>
+    <section class="deep" aria-labelledby="parallel-deep">
+      <p class="tag">深入：第一次讀可以先跳過</p>
+      <h3 id="parallel-deep">平行的子測試什麼時候執行</h3>
+      <p>呼叫 t.Parallel 的子測試會先暫停，等外層的測試函式<strong>執行完畢</strong>，才和其他平行的子測試一起跑。所以外層函式裡的 <code>defer</code> 會在子測試開始之前就執行：用 defer 關掉的資料庫，子測試拿到的已經是關掉的。要在所有子測試結束後才清理，用 t.Cleanup：外層測試會等全部子測試都結束，才執行它的 Cleanup。</p>
+      <p>t.Setenv 和 t.Chdir 會改到整個程式共用的環境變數和目前目錄，所以不能用在平行的測試裡，呼叫了會 panic。</p>
+    </section>
+  </section>
+
+  <section aria-labelledby="doubles">
+    <h2 id="doubles">3. 測試替身</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 214" role="img" aria-label="Gate 不直接呼叫金流公司，而是依賴 Payments 這個 interface，時間也由傳進來的 now 函式決定。正式環境傳入真正的金流和 time.Now；測試時傳入 fakePayments、slowPayments 和 fakeClock.Now">
+        <title>依賴 interface，測試時換成假的</title>
+        <rect class="acc" x="170" y="16" width="140" height="44" rx="8"/>
+        <text class="sm mono" x="240" y="43" text-anchor="middle">Gate</text>
+        <path class="wire" d="M200 60 V84"/>
+        <path class="wire" d="M280 60 V84"/>
+        <rect class="soft" x="110" y="84" width="120" height="36" rx="8"/>
+        <text class="sm mono" x="170" y="107" text-anchor="middle">Payments</text>
+        <rect class="soft" x="250" y="84" width="120" height="36" rx="8"/>
+        <text class="sm mono" x="310" y="107" text-anchor="middle">now()</text>
+        <text class="sm bold" x="16" y="152">正式環境</text>
+        <text class="sm" x="100" y="152">金流公司的 API</text>
+        <text class="sm mono" x="300" y="152">time.Now</text>
+        <text class="sm bold t-acc" x="16" y="182">測試</text>
+        <text class="sm mono" x="100" y="182">fakePayments</text>
+        <text class="sm mono" x="300" y="182">fakeClock.Now</text>
+        <text class="sm mono" x="100" y="204">slowPayments</text>
+      </svg>
+      <figcaption>Gate 只認識 Payments 這個 interface 和 now 這個函式。把它們換掉，測試就不需要真的刷卡，也不需要真的等 95 分鐘。</figcaption>
+    </figure>
+    <p>柵欄機要收錢，收錢要呼叫外部的金流公司。測試不能真的刷卡，所以 Gate 不直接呼叫金流，而是依賴一個小 interface；現在幾點也不直接呼叫 time.Now，而是用傳進來的函式：</p>
+    <pre class="code" data-src="chapters/30-testing/parking/gate.go#Payments,Gate,NewGate,Gate.Exit"><code>type Payments interface {
+	Charge(ctx context.Context, plate string, amount int) error
+}
+
+type Gate struct {
+	now func() time.Time
+	pay Payments
+
+	mu     sync.Mutex
+	inside map[string]time.Time
+	done   []Record
+}
+
+func NewGate(now func() time.Time, pay Payments) *Gate {
+	return &amp;Gate{now: now, pay: pay, inside: make(map[string]time.Time)}
+}
+
+func (g *Gate) Exit(ctx context.Context, plate string) (Record, error) {
+	p, err := NormalizePlate(plate)
+	if err != nil {
+		return Record{}, err
+	}
+	g.mu.Lock()
+	in, ok := g.inside[p]
+	delete(g.inside, p) // 先拿出來：同一台車同時出場兩次，也只會收一次錢
+	g.mu.Unlock()
+	if !ok {
+		return Record{}, fmt.Errorf("%s：%w", p, ErrNotInside)
+	}
+
+	rec := Record{Plate: p, In: in, Out: g.now()}
+	rec.Fee, err = Fee(rec.In, rec.Out)
+	if err == nil &amp;&amp; rec.Fee &gt; 0 {
+		ctx, cancel := context.WithTimeout(ctx, ChargeTimeout)
+		err = g.pay.Charge(ctx, p, rec.Fee)
+		cancel()
+	}
+
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if err != nil {
+		g.inside[p] = in // 放回場內
+		return Record{}, fmt.Errorf("%s 出場失敗：%w", p, err)
+	}
+	g.done = append(g.done, rec)
+	return rec, nil
+}</code></pre>
+    <p>Payments 定義在使用它的 parking 裡，只有 Gate 需要的那一個方法（<a href="10-interfaces.html#design">10 章</a>：interface 由使用的一方定義）。測試裡的假金流和假時鐘都只有幾行：</p>
+    <pre class="code" data-src="chapters/30-testing/parking/gate_test.go#fakePayments,fakePayments.Charge,fakeClock,fakeClock.Now,fakeClock.Advance"><code>type fakePayments struct {
+	mu      sync.Mutex
+	charges []string
+	err     error
+}
+
+func (f *fakePayments) Charge(ctx context.Context, plate string, amount int) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.err != nil {
+		return f.err
+	}
+	f.charges = append(f.charges, fmt.Sprintf("%s %d", plate, amount))
+	return nil
+}
+
+type fakeClock struct{ now time.Time }
+
+func (c *fakeClock) Now() time.Time          { return c.now }
+
+func (c *fakeClock) Advance(d time.Duration) { c.now = c.now.Add(d) }</code></pre>
+    <pre class="code" data-src="chapters/30-testing/parking/gate_test.go#TestGateExit,TestGatePaymentFails"><code>func TestGateExit(t *testing.T) {
+	g, clock, pay := newTestGate(t)
+	mustEnter(t, g, "abc 1234")
+	clock.Advance(95 * time.Minute)
+
+	rec, err := g.Exit(t.Context(), "ABC-1234")
+	if err != nil {
+		t.Fatalf("Exit：%v", err)
+	}
+	if rec.Fee != 80 {
+		t.Errorf("Fee = %d，want 80", rec.Fee)
+	}
+	if want := []string{"ABC-1234 80"}; !slices.Equal(pay.charges, want) {
+		t.Errorf("收費紀錄 = %q，want %q", pay.charges, want)
+	}
+}
+
+func TestGatePaymentFails(t *testing.T) {
+	g, clock, pay := newTestGate(t)
+	pay.err = errors.New("刷卡機沒有回應")
+	mustEnter(t, g, "ABC-1234")
+	clock.Advance(time.Hour)
+
+	if _, err := g.Exit(t.Context(), "ABC-1234"); !errors.Is(err, pay.err) {
+		t.Fatalf("err = %v，want %v", err, pay.err)
+	}
+	pay.err = nil // 刷卡機好了，車還在場內，可以再試一次
+	if rec, err := g.Exit(t.Context(), "ABC-1234"); err != nil || rec.Fee != 40 {
+		t.Errorf("再試一次 = %+v, %v，want 40 元", rec, err)
+	}
+}</code></pre>
+    <p>這些替身各有名字，知道名字就知道該用哪一種：</p>
+    <ul class="notes">
+      <li><strong>stub</strong>：回傳固定的答案。fakePayments 的 err 欄位就是一個 stub：設定了就每一筆都失敗。</li>
+      <li><strong>fake</strong>：真的能動的簡化版，例如用 map 取代資料庫、用一個欄位取代時鐘。</li>
+      <li><strong>spy</strong>：記下自己被怎麼呼叫，讓測試事後檢查。fakePayments 的 charges 就是。</li>
+      <li><strong>mock</strong>：事先設定「應該被呼叫哪些方法、參數是什麼、順序如何」，不符合就失敗。通常用工具產生。</li>
+    </ul>
+    <p>Go 的習慣是手寫 fake 和 spy，然後檢查<strong>結果</strong>（收了幾元、車還在不在場內），而不是用 mock 鎖住<strong>呼叫的過程</strong>。鎖住過程的測試，在你重構內部實作（例如把兩次呼叫合成一次）時就會壞掉，即使行為完全沒變。interface 小，手寫的 fake 就很短；需要 mock 工具才寫得出測試，常常表示 interface 太大了。</p>
+  </section>
+
+  <section aria-labelledby="helpers">
+    <h2 id="helpers">4. 測試輔助函式</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 196" role="img" aria-label="一個測試的生命週期：先執行測試函式本身，然後等平行的子測試結束，接著取消 t.Context，再依照後註冊先執行的順序執行 t.Cleanup 註冊的函式，最後刪除 t.TempDir 建立的目錄">
+        <title>一個測試結束時發生的事</title>
+        <rect class="acc" x="16" y="20" width="96" height="52" rx="8"/>
+        <text class="sm" x="64" y="44" text-anchor="middle">測試函式</text>
+        <text class="sm" x="64" y="62" text-anchor="middle">本身</text>
+        <path class="wire" d="M112 46 H124"/>
+        <rect class="soft" x="124" y="20" width="96" height="52" rx="8"/>
+        <text class="sm" x="172" y="44" text-anchor="middle">等平行的</text>
+        <text class="sm" x="172" y="62" text-anchor="middle">子測試</text>
+        <path class="wire" d="M220 46 H232"/>
+        <rect class="soft" x="232" y="20" width="96" height="52" rx="8"/>
+        <text class="sm mono" x="280" y="44" text-anchor="middle">t.Context</text>
+        <text class="sm" x="280" y="62" text-anchor="middle">被取消</text>
+        <path class="wire" d="M328 46 H340"/>
+        <rect class="soft" x="340" y="20" width="124" height="52" rx="8"/>
+        <text class="sm mono" x="402" y="44" text-anchor="middle">t.Cleanup</text>
+        <text class="sm" x="402" y="62" text-anchor="middle">後加的先執行</text>
+        <text class="sm" x="16" y="112">t.TempDir 建的目錄，也是在這個階段自動刪除</text>
+        <text class="sm" x="16" y="138">t.Helper 不改變順序，只讓失敗訊息指向呼叫的那一行</text>
+        <text class="sm t-acc" x="16" y="164">清理的程式碼跟著建立的程式碼寫在一起，不用每個測試都記得</text>
+      </svg>
+      <figcaption>t.Cleanup 像 defer，但它可以寫在輔助函式裡，在<strong>整個測試</strong>結束時才執行，而不是在輔助函式 return 時。</figcaption>
+    </figure>
+    <p>每個 Gate 的測試都要建立假時鐘、假金流和柵欄機，進場失敗時也都要停止。重複的部分寫成輔助函式：</p>
+    <pre class="code" data-src="chapters/30-testing/parking/gate_test.go#newTestGate,mustEnter"><code>func newTestGate(t *testing.T) (*Gate, *fakeClock, *fakePayments) {
+	t.Helper()
+	clock := &amp;fakeClock{now: at(20, 9, 0)}
+	pay := &amp;fakePayments{}
+	g := NewGate(clock.Now, pay)
+	t.Cleanup(func() {
+		if t.Failed() {
+			t.Logf("出場紀錄：%+v", g.Records())
+		}
+	})
+	return g, clock, pay
+}
+
+func mustEnter(t *testing.T, g *Gate, plate string) {
+	t.Helper()
+	if err := g.Enter(plate); err != nil {
+		t.Fatalf("Enter(%q)：%v", plate, err)
+	}
+}</code></pre>
+    <ul class="notes">
+      <li><strong>t.Helper()</strong>：沒有它，mustEnter 失敗時訊息會指向 mustEnter 裡的 t.Fatalf 那一行，每個測試失敗都指到同一個地方。有了它，訊息指向呼叫 mustEnter 的那一行（練習 4 會檢查有沒有呼叫）。</li>
+      <li><strong>t.Cleanup(f)</strong>：測試結束時執行 f，後註冊的先執行。newTestGate 用它在測試失敗時印出出場紀錄，所有用到它的測試都自動有這個功能。</li>
+      <li><strong>t.TempDir()</strong>：建立一個只給這個測試用的暫存目錄，測試結束後自動刪除。測檔案的程式一律用它，不要寫到固定的路徑：</li>
+    </ul>
+    <pre class="code" data-src="chapters/30-testing/parking/report_test.go#TestSaveReport"><code>func TestSaveReport(t *testing.T) {
+	dir := t.TempDir() // 測試結束後自動刪除
+	path, err := SaveReport(dir, reportRecords)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := filepath.Join(dir, "report-2026-11-20.txt"); path != want {
+		t.Errorf("path = %q，want %q", path, want)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var want bytes.Buffer
+	WriteReport(&amp;want, reportRecords)
+	if !bytes.Equal(got, want.Bytes()) {
+		t.Errorf("存檔的內容和 WriteReport 不一樣：\n%s", got)
+	}
+}</code></pre>
+    <ul class="notes">
+      <li><strong>t.Context()</strong>（Go 1.24 起）：測試用的 context，在 Cleanup 執行之前被取消。測試裡呼叫需要 ctx 的函式，用它而不是 context.Background()，測試結束時還沒停下來的工作就會收到取消。</li>
+      <li><strong>t.Setenv(key, value)</strong>、<strong>t.Chdir(dir)</strong>（Go 1.24 起）：在這個測試裡改環境變數和目前目錄，結束時自動還原。不能和 t.Parallel 一起用。</li>
+      <li><strong>t.Skip</strong> 搭配 <strong>testing.Short()</strong>：慢的測試在 <code>go test -short</code> 時略過。本章的 module_test.go 會執行 go 指令，就是這樣處理的。</li>
+      <li>Go 1.25 起還有 <strong>t.Output()</strong>（一個 io.Writer，寫進去的東西和 t.Log 一樣出現在測試輸出裡），Go 1.26 起有 <strong>t.ArtifactDir()</strong>（測試產生的檔案放這裡，加上 -artifacts 旗標時會保留下來，方便事後檢查）。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="golden">
+    <h2 id="golden">5. golden file 與 testdata</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 200" role="img" aria-label="測試把 WriteReport 的輸出和 testdata/report.golden 比較，一樣就通過，不一樣就失敗並印出兩者。加上 -update 旗標時，改成把目前的輸出寫進 golden file，之後用 git diff 檢查改了什麼">
+        <title>golden file</title>
+        <rect class="acc" x="16" y="24" width="130" height="48" rx="8"/>
+        <text class="sm mono" x="81" y="53" text-anchor="middle">WriteReport</text>
+        <path class="wire" d="M146 48 H200"/>
+        <rect class="soft" x="200" y="24" width="80" height="48" rx="8"/>
+        <text class="sm" x="240" y="53" text-anchor="middle">比較</text>
+        <path class="wire" d="M280 48 H322"/>
+        <rect class="soft" x="322" y="24" width="142" height="48" rx="8"/>
+        <text class="sm mono" x="393" y="44" text-anchor="middle">testdata/</text>
+        <text class="sm mono" x="393" y="62" text-anchor="middle">report.golden</text>
+        <path class="wire dash" d="M81 72 V120 H393 V72"/>
+        <text class="sm t-acc" x="237" y="140" text-anchor="middle">-update：把目前的輸出寫進 golden file</text>
+        <text class="sm" x="237" y="170" text-anchor="middle">寫完用 git diff 看改了什麼，確認是你要的才 commit</text>
+      </svg>
+      <figcaption>輸出很長（報表、HTML、JSON）時，期望值寫在程式碼裡很難讀也很難改。放進檔案，差異交給 git diff 去看。</figcaption>
+    </figure>
+    <p>日報表有好幾行，每一行的對齊都重要。期望的輸出存在 testdata/report.golden：</p>
+    <pre class="code" data-src="chapters/30-testing/parking/testdata/report.golden"><code>2026-11-20 出場紀錄
+XY-5678   11-19 22:30 → 08:10  300 元
+ABC-1234  11-20 08:05 → 09:40   80 元
+1234-AB   11-20 12:00 → 12:08    0 元
+共 3 台，合計 380 元</code></pre>
+    <pre class="code" data-src="chapters/30-testing/parking/report_test.go#update,reportRecords,TestWriteReport,TestFeesInReport"><code>var update = flag.Bool("update", false, "用目前的輸出覆寫 testdata 裡的 golden file")
+
+var reportRecords = []Record{
+	{"XY-5678", at(19, 22, 30), at(20, 8, 10), 300},
+	{"ABC-1234", at(20, 8, 5), at(20, 9, 40), 80},
+	{"1234-AB", at(20, 12, 0), at(20, 12, 8), 0},
+}
+
+func TestWriteReport(t *testing.T) {
+	var buf bytes.Buffer
+	if err := WriteReport(&amp;buf, reportRecords); err != nil {
+		t.Fatal(err)
+	}
+	golden := filepath.Join("testdata", "report.golden")
+	if *update {
+		if err := os.WriteFile(golden, buf.Bytes(), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	want, err := os.ReadFile(golden)
+	if err != nil {
+		t.Fatalf("%v（第一次請加 -update 產生）", err)
+	}
+	if got := buf.String(); got != string(want) {
+		t.Errorf("報表和 %s 不一樣：\n--- got\n%s--- want\n%s", golden, got, want)
+	}
+}
+
+func TestFeesInReport(t *testing.T) {
+	for _, r := range reportRecords {
+		if fee, _ := Fee(r.In, r.Out); fee != r.Fee {
+			t.Errorf("%s 的費用寫成 %d，Fee 算出來是 %d", r.Plate, r.Fee, fee)
+		}
+	}
+}</code></pre>
+    <p>改了報表的格式之後，用 -update 重新產生，再看 diff：</p>
+    <pre class="shell"><code>go test ./chapters/30-testing/parking -run TestWriteReport -update
+git diff chapters/30-testing/parking/testdata</code></pre>
+    <ul class="notes">
+      <li>-update 是這個 package 的測試自己用 flag 定義的，所以只能用在這個 package。對 <code>./...</code> 加上它，其他沒有定義這個旗標的 package 會失敗。</li>
+      <li>golden file 鎖住的是「目前的輸出」，不管它對不對。所以 TestFeesInReport 另外確認報表用的金額真的是 Fee 算出來的，並且第一次產生之後一定要親眼看過內容。</li>
+      <li><strong>testdata</strong> 是 go 指令保留的名字：它底下的檔案不會被當成 package 編譯，<code>./...</code> 也會略過它。測試執行時，目前目錄就是 package 的目錄，所以用相對路徑 testdata/… 就讀得到。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="synctest">
+    <h2 id="synctest">6. 時間與並行的測試</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 200" role="img" aria-label="synctest.Test 建立一個泡泡，泡泡裡的時間是假的。測試 sleep 一小時，再等金流逾時五秒，現實中只過了一瞬間；泡泡裡所有 goroutine 都卡住在等時間時，假時鐘直接跳到下一個會發生的時間點">
+        <title>synctest 的泡泡</title>
+        <rect class="acc" x="16" y="16" width="448" height="120" rx="14"/>
+        <text class="sm bold" x="32" y="40">synctest.Test 的泡泡：時間是假的</text>
+        <text class="sm mono" x="40" y="70">time.Sleep(time.Hour)</text>
+        <text class="sm" x="290" y="70">立刻跳過一小時</text>
+        <text class="sm mono" x="40" y="96">Exit：等金流 5 秒逾時</text>
+        <text class="sm" x="290" y="96">立刻跳過 5 秒</text>
+        <text class="sm mono" x="40" y="122">time.Since(start)</text>
+        <text class="sm" x="290" y="122">剛好是 5s</text>
+        <text class="sm" x="16" y="164">大家都在等時間時，假時鐘直接跳到下一個時間點</text>
+        <text class="sm t-acc" x="16" y="188">測試不必真的等，結果也不會因為機器忙碌而不穩定</text>
+      </svg>
+      <figcaption>Go 1.25 起的 testing/synctest。<a href="22-time.html#testing">22 章</a>用它測 Timer，<a href="15-channels.html#deadlock">15 章</a>用它抓 goroutine 洩漏。</figcaption>
+    </figure>
+    <p>注入假時鐘（第 3 節）適合「現在幾點」這種問題。程式裡有逾時、Sleep、Timer 時，假時鐘就不夠了：context.WithTimeout 用的是真正的時間。synctest 讓整個測試，連同標準庫的計時器，都用假的時間：</p>
+    <pre class="code" data-src="chapters/30-testing/parking/gate_test.go#slowPayments,slowPayments.Charge,TestGateChargeTimeout"><code>type slowPayments struct{}
+
+func (slowPayments) Charge(ctx context.Context, plate string, amount int) error {
+	&lt;-ctx.Done()
+	return ctx.Err()
+}
+
+func TestGateChargeTimeout(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		g := NewGate(time.Now, slowPayments{})
+		mustEnter(t, g, "ABC-1234")
+		time.Sleep(time.Hour)
+
+		start := time.Now()
+		_, err := g.Exit(t.Context(), "ABC-1234")
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("err = %v，want DeadlineExceeded", err)
+		}
+		if waited := time.Since(start); waited != ChargeTimeout {
+			t.Errorf("等了 %v，want %v", waited, ChargeTimeout)
+		}
+		if err := g.Enter("ABC-1234"); !errors.Is(err, ErrInside) {
+			t.Errorf("收費逾時後車應該還在場內，Enter 回傳 %v", err)
+		}
+	})
+}</code></pre>
+    <p>慢的金流永遠不回應，Exit 等滿 ChargeTimeout 之後放棄，車留在場內。這個測試證明了三件事：真的會逾時、逾時的時間剛好是 5 秒、逾時後狀態正確，而它跑完只要幾毫秒。</p>
+    <p>並行的 bug 則交給 <a href="17-sync.html#race">-race</a>。同一台車同時按兩次出場，只能收一次錢：</p>
+    <pre class="code" data-src="chapters/30-testing/parking/gate_test.go#TestGateConcurrentExit"><code>func TestGateConcurrentExit(t *testing.T) {
+	g, clock, pay := newTestGate(t)
+	mustEnter(t, g, "ABC-1234")
+	clock.Advance(time.Hour)
+
+	var wg sync.WaitGroup
+	errs := make([]error, 2)
+	for i := range errs {
+		wg.Go(func() {
+			_, errs[i] = g.Exit(t.Context(), "ABC-1234")
+		})
+	}
+	wg.Wait()
+	if n := len(pay.charges); n != 1 {
+		t.Errorf("收了 %d 次錢，want 1", n)
+	}
+	if !errors.Is(errs[0], ErrNotInside) &amp;&amp; !errors.Is(errs[1], ErrNotInside) {
+		t.Errorf("其中一次應該是 ErrNotInside，拿到 %v", errs)
+	}
+}</code></pre>
+    <ul class="notes">
+      <li>這個測試沒有 -race 也會跑，但只有加上 <code>go test -race</code>，忘了加鎖這種 data race 才會被確實抓到。CI 一律用 -race 跑測試。</li>
+      <li>Exit 在收費之前就把車從 inside 拿出來，所以第二次 Exit 一定看到 ErrNotInside。如果改成收費成功後才刪除，兩次 Exit 都會收到錢，這個測試就會失敗。</li>
+      <li>不要用 time.Sleep 等另一個 goroutine「應該已經做完了」：機器忙的時候就會失敗。用 channel、WaitGroup 等它真的做完，或在 synctest 裡用 synctest.Wait。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="fuzz">
+    <h2 id="fuzz">7. fuzz</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 214" role="img" aria-label="fuzz 從 f.Add 加入的種子開始，不斷改變輸入並觀察程式走過哪些路徑，找到讓測試失敗的輸入後，把它縮到最小，存進 testdata/fuzz。之後每次 go test 都會重跑這個輸入，變成一個永久的回歸測試">
+        <title>fuzz 的流程</title>
+        <rect class="soft" x="16" y="20" width="92" height="48" rx="8"/>
+        <text class="sm mono" x="62" y="49" text-anchor="middle">f.Add 種子</text>
+        <path class="wire" d="M108 44 H124"/>
+        <rect class="acc" x="124" y="20" width="110" height="48" rx="8"/>
+        <text class="sm" x="179" y="40" text-anchor="middle">改變輸入</text>
+        <text class="sm" x="179" y="58" text-anchor="middle">看走過的路徑</text>
+        <path class="wire" d="M234 44 H250"/>
+        <rect class="hot" x="250" y="20" width="92" height="48" rx="8"/>
+        <text class="sm" x="296" y="49" text-anchor="middle">失敗了</text>
+        <path class="wire" d="M342 44 H358"/>
+        <rect class="soft" x="358" y="20" width="106" height="48" rx="8"/>
+        <text class="sm" x="411" y="49" text-anchor="middle">縮到最小</text>
+        <path class="wire" d="M411 68 V100"/>
+        <rect class="soft" x="210" y="100" width="254" height="44" rx="8"/>
+        <text class="sm mono" x="337" y="127" text-anchor="middle">testdata/fuzz/FuzzX/771e…</text>
+        <text class="sm" x="16" y="178">一般的 go test 只跑種子和 testdata/fuzz 裡的輸入</text>
+        <text class="sm t-acc" x="16" y="202">找到的輸入 commit 進去，就成了永久的回歸測試</text>
+      </svg>
+      <figcaption>table-driven 測試只能測你想得到的案例。fuzz 替你產生想不到的：空字串、一個字、奇怪的 Unicode。</figcaption>
+    </figure>
+    <p>fuzz 測試不寫「這個輸入應該得到什麼」，而是寫「任何輸入都要成立的性質」。車牌整理的性質：不能 panic；整理成功的結果，再整理一次要一模一樣：</p>
+    <pre class="code" data-src="chapters/30-testing/parking/plate_test.go#FuzzNormalizePlate"><code>func FuzzNormalizePlate(f *testing.F) {
+	for _, s := range []string{"ABC-1234", " abc 1234", "1234ab", ""} {
+		f.Add(s)
+	}
+	f.Fuzz(func(t *testing.T, s string) {
+		p, err := NormalizePlate(s)
+		if err != nil {
+			return
+		}
+		again, err := NormalizePlate(p)
+		if err != nil || again != p {
+			t.Errorf("NormalizePlate(%q) = %q，再整理一次變成 %q, %v", s, p, again, err)
+		}
+	})
+}</code></pre>
+    <p>為了看 fuzz 怎麼找到 bug，testdata/fuzzbug 有一個寫錯的版本：使用者沒打 - 時，它在最後 4 個字之前補一個。它的一般測試全部通過：</p>
+    <pre class="code" data-src="chapters/30-testing/testdata/fuzzbug/plate.go#NormalizePlate"><code>func NormalizePlate(s string) (string, error) {
+	s = strings.ToUpper(strings.ReplaceAll(s, " ", ""))
+	if !strings.Contains(s, "-") {
+		// 使用者沒打 -：在最後 4 碼前面補一個。
+		s = s[:len(s)-4] + "-" + s[len(s)-4:]
+	}
+	if !plateRE.MatchString(s) {
+		return "", errBadPlate
+	}
+	return s, nil
+}</code></pre>
+    <pre class="shell"><code>cd chapters/30-testing/testdata/fuzzbug
+go test -fuzz=FuzzNormalizePlate</code></pre>
+    <p class="label">輸出（呼叫堆疊中間省略）</p>
+    <pre class="out err"><code>fuzz: elapsed: 0s, gathering baseline coverage: 0/2 completed
+fuzz: elapsed: 0s, gathering baseline coverage: 2/2 completed, now fuzzing with 10 workers
+fuzz: minimizing 27-byte failing input file
+fuzz: elapsed: 0s, minimizing
+--- FAIL: FuzzNormalizePlate (0.02s)
+    --- FAIL: FuzzNormalizePlate (0.00s)
+        testing.go:2078: panic: runtime error: slice bounds out of range [:-3]
+            goroutine 24 [running]:
+            …
+            example.com/fuzzbug.NormalizePlate({0x102568f60?, 0x78bae20124a0?})
+            	…/testdata/fuzzbug/plate.go:20 +0x234
+            …
+
+    Failing input written to testdata/fuzz/FuzzNormalizePlate/771e938e4458e983
+    To re-run:
+    go test -run=FuzzNormalizePlate/771e938e4458e983
+FAIL
+exit status 1
+FAIL	example.com/fuzzbug	0.338s</code></pre>
+    <p>不到一秒就找到了：先找到一個 27 個 byte 會 panic 的輸入，再把它縮到最小。存下來的檔案只有一個字：</p>
+    <pre class="code" data-src="chapters/30-testing/testdata/fuzzbug/testdata/fuzz/FuzzNormalizePlate/771e938e4458e983"><code>go test fuzz v1
+string("0")</code></pre>
+    <p>只有 1 個字的 "0"，<code>len(s)-4</code> 是 -3，切片當然 panic。這個檔案放在 testdata/fuzz 裡，之後不加 -fuzz 的一般 go test 也會重跑它，所以 bug 修好之前測試一直是紅的，修好之後它守著這個 bug 不再回來。本章的 module_test.go 就是靠這一點，確認上面的輸出是真的。</p>
+    <ul class="notes">
+      <li>一次只能 fuzz 一個函式（-fuzz 的 regexp 只能符合一個），預設一直跑到找到失敗或按 Ctrl-C，用 <code>-fuzztime=30s</code> 限制時間。</li>
+      <li>參數可以有好幾個，型別限於 string、[]byte、整數、浮點數、bool 這些基本型別。FuzzFee 就用 int64 和 uint32 組出進出場時間，檢查「費用不會是負的、不會超過每天的上限、多停一分鐘不會比較便宜」。</li>
+      <li>好用的性質：不 panic、做兩次和做一次一樣（像車牌整理）、編碼再解碼回到原樣、和另一個簡單但慢的寫法結果相同。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="coverage">
+    <h2 id="coverage">8. Example、覆蓋率與 benchmark</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 236" role="img" aria-label="parking 每個函式的測試覆蓋率長條圖：Fee、NormalizePlate 是 100%，Exit 95.5%，Enter 88.9%，WriteReport 83.3%，SaveReport 72.7%，Records 是 0%，因為沒有任何測試直接呼叫它">
+        <title>每個函式的覆蓋率</title>
+        <text class="sm mono" x="128" y="30" text-anchor="end">Fee</text>
+        <rect class="acc" x="140" y="18" width="240" height="16" rx="3"/>
+        <text class="sm" x="388" y="31">100%</text>
+        <text class="sm mono" x="128" y="58" text-anchor="end">NormalizePlate</text>
+        <rect class="acc" x="140" y="46" width="240" height="16" rx="3"/>
+        <text class="sm" x="388" y="59">100%</text>
+        <text class="sm mono" x="128" y="86" text-anchor="end">Exit</text>
+        <rect class="acc" x="140" y="74" width="229" height="16" rx="3"/>
+        <text class="sm" x="388" y="87">95.5%</text>
+        <text class="sm mono" x="128" y="114" text-anchor="end">Enter</text>
+        <rect class="acc" x="140" y="102" width="213" height="16" rx="3"/>
+        <text class="sm" x="388" y="115">88.9%</text>
+        <text class="sm mono" x="128" y="142" text-anchor="end">WriteReport</text>
+        <rect class="soft" x="140" y="130" width="200" height="16" rx="3"/>
+        <text class="sm" x="388" y="143">83.3%</text>
+        <text class="sm mono" x="128" y="170" text-anchor="end">SaveReport</text>
+        <rect class="soft" x="140" y="158" width="174" height="16" rx="3"/>
+        <text class="sm" x="388" y="171">72.7%</text>
+        <text class="sm mono" x="128" y="198" text-anchor="end">Records</text>
+        <rect class="hot" x="140" y="186" width="4" height="16" rx="1"/>
+        <text class="sm t-hot" x="388" y="199">0%</text>
+        <text class="sm" x="240" y="228" text-anchor="middle">覆蓋率告訴你哪裡沒測，不告訴你測得對不對</text>
+      </svg>
+      <figcaption>數字來自下面的 go tool cover -func。Records 只在測試失敗時才被 Cleanup 呼叫，所以是 0%。</figcaption>
+    </figure>
+    <p><strong>Example</strong> 是會被執行的文件：函式印出來的東西要和 <code>// Output:</code> 一樣，否則測試失敗。這本手冊每一章的輸出都是這樣鎖住的。寫在外部測試 package 裡，就和使用者看到的寫法一樣：</p>
+    <pre class="code" data-src="chapters/30-testing/parking/example_test.go#ExampleFee,ExampleNormalizePlate_unordered"><code>func ExampleFee() {
+	tw := time.FixedZone("UTC+8", 8*60*60)
+	in := time.Date(2026, 11, 20, 23, 50, 0, 0, tw)
+	fee, _ := parking.Fee(in, in.Add(30*time.Minute))
+	fmt.Println(fee, "元：跨過午夜，兩天各算一個單位")
+	// Output: 40 元：跨過午夜，兩天各算一個單位
+}
+
+func ExampleNormalizePlate_unordered() {
+	inputs := map[string]string{"三碼": "abc1234", "兩碼": "AB 1234", "數字在前": "1234-ab"}
+	for kind, s := range inputs {
+		p, _ := parking.NormalizePlate(s)
+		fmt.Println(kind, p)
+	}
+	// Unordered output:
+	// 數字在前 1234-AB
+	// 三碼 ABC-1234
+	// 兩碼 AB-1234
+}</code></pre>
+    <ul class="notes">
+      <li>名稱決定它附在哪裡：<code>ExampleFee</code> 附在函式 Fee，<code>ExampleGate_Exit</code> 附在方法 Gate.Exit，<code>Example</code> 附在整個 package。底線後面小寫開頭的是後綴，用來放同一個東西的第二個例子，例如 <code>ExampleNormalizePlate_unordered</code>。</li>
+      <li>輸出的順序不固定（走訪 map、並行）時，用 <code>// Unordered output:</code>，只比對有哪些行。</li>
+      <li>沒有 Output 註解的 Example 只會被編譯，不會被執行。pkg.go.dev 會把 Example 顯示在對應的函式底下，<code>go doc -ex</code> 也會列出來。</li>
+    </ul>
+    <p><strong>覆蓋率</strong>：測試跑過的程式碼佔多少。</p>
+    <pre class="shell"><code>go test -cover ./chapters/30-testing/parking</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out"><code>ok  	github.com/xinqilin/GO-Playground/chapters/30-testing/parking	0.327s	coverage: 88.9% of statements</code></pre>
+    <pre class="shell"><code>go test -coverprofile=c.out ./chapters/30-testing/parking
+go tool cover -func=c.out    <span class="c"># 每個函式的覆蓋率</span>
+go tool cover -html=c.out    <span class="c"># 在瀏覽器裡標出哪幾行沒跑到</span></code></pre>
+    <p class="label">輸出（-func）</p>
+    <pre class="out"><code>github.com/xinqilin/GO-Playground/chapters/30-testing/parking/fee.go:23:	Fee		100.0%
+github.com/xinqilin/GO-Playground/chapters/30-testing/parking/fee.go:43:	nextMidnight	100.0%
+github.com/xinqilin/GO-Playground/chapters/30-testing/parking/fee.go:49:	dayFee		100.0%
+github.com/xinqilin/GO-Playground/chapters/30-testing/parking/gate.go:43:	NewGate		100.0%
+github.com/xinqilin/GO-Playground/chapters/30-testing/parking/gate.go:48:	Enter		88.9%
+github.com/xinqilin/GO-Playground/chapters/30-testing/parking/gate.go:63:	Exit		95.5%
+github.com/xinqilin/GO-Playground/chapters/30-testing/parking/gate.go:95:	Records		0.0%
+github.com/xinqilin/GO-Playground/chapters/30-testing/parking/plate.go:12:	NormalizePlate	100.0%
+github.com/xinqilin/GO-Playground/chapters/30-testing/parking/report.go:12:	WriteReport	83.3%
+github.com/xinqilin/GO-Playground/chapters/30-testing/parking/report.go:31:	SaveReport	72.7%
+total:										(statements)	88.9%</code></pre>
+    <p>沒跑到的地方是「車牌格式錯誤時 Enter 回傳錯誤」「沒有紀錄時的報表」「建立檔案失敗」這些分支，以及 Records。覆蓋率的用處是找出這種漏掉的地方，然後判斷值不值得補。它不是目標：100% 的覆蓋率只代表每一行都執行過，不代表檢查過結果。一個什麼都不比較的測試，也能把覆蓋率衝高。</p>
+    <p><strong>benchmark</strong> 量測一段程式碼要多久、配置多少記憶體。函式名稱以 Benchmark 開頭，Go 1.24 起用 <code>b.Loop()</code> 當迴圈條件，它會自己決定要跑幾次：</p>
+    <pre class="code" data-src="chapters/30-testing/parking/fee_test.go#BenchmarkFee"><code>func BenchmarkFee(b *testing.B) {
+	in, out := at(20, 12, 0), at(27, 12, 0) // 停一週
+	for b.Loop() {
+		Fee(in, out)
+	}
+}</code></pre>
+    <pre class="code" data-src="chapters/30-testing/parking/plate_test.go#BenchmarkNormalizePlate"><code>func BenchmarkNormalizePlate(b *testing.B) {
+	b.ReportAllocs()
+	for b.Loop() {
+		NormalizePlate(" abc 1234")
+	}
+}</code></pre>
+    <pre class="shell"><code>go test -run='^$' -bench=. -benchmem ./chapters/30-testing/parking</code></pre>
+    <p class="label">輸出（數字依機器不同）</p>
+    <pre class="out"><code>goos: darwin
+goarch: arm64
+pkg: github.com/xinqilin/GO-Playground/chapters/30-testing/parking
+cpu: Apple M1 Pro
+BenchmarkFee-10               	 3847071	       305.8 ns/op	       0 B/op	       0 allocs/op
+BenchmarkNormalizePlate-10    	26402034	        44.73 ns/op	       8 B/op	       1 allocs/op
+PASS
+ok  	github.com/xinqilin/GO-Playground/chapters/30-testing/parking	2.468s</code></pre>
+    <ul class="notes">
+      <li>-run='^$' 讓一般的測試都不跑，只跑 benchmark。-10 是 GOMAXPROCS。每一行依序是：跑了幾次、每次多久、每次配置幾個 byte、每次配置幾次。</li>
+      <li>NormalizePlate 每次配置一次 8 個 byte：最後把 []byte 轉成 string 的那一次。</li>
+      <li>單次的數字意義不大，要和改之前比。怎麼比得可靠、怎麼找出慢在哪裡，是效能那一章的主題。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="pitfalls">
+    <h2 id="pitfalls">常見錯誤</h2>
+    <h3 id="pit-boundary">1. 只測一般的情況</h3>
+    <p>bug 幾乎都在邊界：剛好 10 分鐘、剛好 30 分鐘、出場在午夜整、空字串。表格裡每一條規則的兩側都放一個案例（第 2 節）。</p>
+
+    <h3 id="pit-fatal-goroutine">2. 在自己開的 goroutine 裡呼叫 t.Fatal</h3>
+    <p>t.Fatal 只會結束呼叫它的 goroutine，測試函式本身還在跑。把錯誤傳回測試的 goroutine 再回報，go vet 也會警告（第 1 節）。</p>
+
+    <h3 id="pit-shared-state">3. 測試之間共用狀態</h3>
+    <p>套件層級的變數、固定路徑的檔案、真的資料庫：單獨跑會過、一起跑就壞，或反過來。每個測試自己建立需要的東西，用 t.TempDir、t.Cleanup；用 -shuffle=on 抓出依賴順序的測試（第 1、4 節）。</p>
+
+    <h3 id="pit-sleep">4. 用 time.Sleep 等</h3>
+    <p>睡太短在忙碌的 CI 上會失敗，睡太長測試變慢。時間用注入的時鐘或 synctest，等 goroutine 用 channel 或 WaitGroup（第 3、6 節）。</p>
+
+    <h3 id="pit-environment">5. 依賴這台機器的環境</h3>
+    <p>真的網路、目前時間、機器的時區、家目錄裡的檔案。換一台機器就失敗。用 FixedZone、假的時鐘和金流、testdata 裡的檔案（第 2、3、5 節）。</p>
+
+    <h3 id="pit-message">6. 失敗訊息只寫「錯了」</h3>
+    <p>看到失敗還得打開程式碼、加 print 才知道輸入是什麼。訊息寫出呼叫、得到的值和期望的值（第 1 節）。</p>
+
+    <h3 id="pit-update">7. golden file 直接 -update 了事</h3>
+    <p>測試會變綠，但錯誤的輸出也被鎖進去了。-update 之後一定看 git diff（第 5 節）。</p>
+
+    <h3 id="pit-mock">8. 把每一個呼叫都 mock 起來</h3>
+    <p>測試鎖住的是實作的過程，一重構就全部壞掉。用小 interface 加手寫的 fake，檢查結果而不是過程（第 3 節）。</p>
   </section>
 
   <section aria-labelledby="java">
@@ -137,25 +919,151 @@ PASS</code></pre>
       <table class="vs">
         <thead><tr><th scope="col">主題</th><th scope="col">Java</th><th scope="col">Go</th></tr></thead>
         <tbody>
-          <tr><th scope="row">測試框架</th><td class="java">JUnit、AssertJ、Mockito</td><td>內建 <code>testing</code>，不用斷言函式庫也能寫</td></tr>
-          <tr><th scope="row">參數化測試</th><td class="java"><code>@ParameterizedTest</code></td><td>table-driven test 加上 <code>t.Run</code></td></tr>
-          <tr><th scope="row">效能量測</th><td class="java">JMH</td><td><code>BenchmarkXxx</code></td></tr>
-          <tr><th scope="row">模糊測試</th><td class="java">另外裝工具</td><td>內建 <code>FuzzXxx</code></td></tr>
-          <tr><th scope="row">覆蓋率</th><td class="java">JaCoCo</td><td><code>go test -cover</code></td></tr>
-          <tr><th scope="row">模擬依賴</th><td class="java">Mockito</td><td>定義一個小 interface，自己寫假的實作</td></tr>
+          <tr><th scope="row">測試放哪裡</th><td class="java">src/test/java，另一棵目錄樹</td><td>和程式碼同一個目錄的 _test.go</td></tr>
+          <tr><th scope="row">測試框架</th><td class="java">JUnit，加上 AssertJ、Hamcrest</td><td>標準庫 testing，比較用 if</td></tr>
+          <tr><th scope="row">參數化測試</th><td class="java"><code>@ParameterizedTest</code></td><td>table-driven 加 t.Run</td></tr>
+          <tr><th scope="row">前置與清理</th><td class="java"><code>@BeforeEach</code>、<code>@AfterEach</code></td><td>輔助函式加 t.Cleanup</td></tr>
+          <tr><th scope="row">暫存目錄</th><td class="java"><code>@TempDir</code></td><td>t.TempDir()</td></tr>
+          <tr><th scope="row">測試替身</th><td class="java">Mockito</td><td>小 interface 加手寫的 fake</td></tr>
+          <tr><th scope="row">時間與等待</th><td class="java">注入 Clock、Awaitility</td><td>注入 now、synctest</td></tr>
+          <tr><th scope="row">隨機輸入</th><td class="java">jqwik 等第三方函式庫</td><td>內建 fuzz</td></tr>
+          <tr><th scope="row">覆蓋率</th><td class="java">JaCoCo 外掛</td><td>go test -cover</td></tr>
+          <tr><th scope="row">benchmark</th><td class="java">JMH</td><td>Benchmark 函式加 b.Loop</td></tr>
+          <tr><th scope="row">文件裡的範例</th><td class="java">Javadoc 的範例不會被執行</td><td>Example 會被執行、比對輸出</td></tr>
         </tbody>
       </table>
     </div>
+    <p>最大的差別是 Go 不用 assert 函式庫：比較用 if，訊息自己寫。一開始會覺得囉嗦，但每個失敗訊息都是你為這個情況特別寫的，讀起來比通用的「expected: 86 but was: 81」清楚。需要重複的比較就寫成有 t.Helper 的輔助函式。</p>
+  </section>
+
+  <section aria-labelledby="exercises">
+    <h2 id="exercises">練習</h2>
+    <p>題目在 <code>exercises/30-testing/exercises.go</code>：自己做幾個寫測試時會用到的小工具。</p>
+    <pre class="shell"><code>go test ./exercises/30-testing/                   <span class="c"># 跑全部練習</span>
+go test ./exercises/30-testing/ -run TestShrink   <span class="c"># 只跑一題</span>
+go test -tags solution ./exercises/30-testing/    <span class="c"># 跑參考解答</span></code></pre>
+    <p>共用的型別在 doc.go：</p>
+    <pre class="code" data-src="exercises/30-testing/doc.go#ErrUnreachable,Recorder,Cleanups,Cleanups.Add"><code>var ErrUnreachable = errors.New("聯絡不到")
+
+type Recorder struct {
+	FailOn map[string]bool
+
+	mu   sync.Mutex
+	sent []string
+}
+
+type Cleanups struct {
+	fns []func()
+}
+
+func (c *Cleanups) Add(f func()) {
+	c.fns = append(c.fns, f)
+}</code></pre>
+    <ol class="exercises">
+      <li>
+        <h3><span class="level l1">入門</span>練習 1：子測試的名稱</h3>
+        <p>算出 go test 會把 t.Run 的名稱改成什麼，-run 才寫得對。</p>
+        <pre class="code" data-src="exercises/30-testing/exercises.go#SubtestNames"><code>func SubtestNames(names []string) []string {
+	// TODO: 實作
+	return nil
+}</code></pre>
+        <p>測試：<code>TestSubtestNames</code>，最後會用真的 t.Run 對照。</p>
+        <details><summary>提示</summary><p>先用 <code>strings.Map</code> 把空白換掉，再用一個 <code>map[string]int</code> 記每個名稱出現過幾次。出現過 n 次（n 大於 0）或是空字串時，用 <code>fmt.Sprintf("%s#%02d", name, n)</code>。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l1">入門</span>練習 2：逐行比較</h3>
+        <p>golden file 不一樣時，只印出不同的那幾行。</p>
+        <pre class="code" data-src="exercises/30-testing/exercises.go#DiffLines"><code>func DiffLines(got, want string) []string {
+	// TODO: 實作
+	return nil
+}</code></pre>
+        <p>測試：<code>TestDiffLines</code>。</p>
+        <details><summary>提示</summary><p>迴圈跑到兩邊行數比較多的那個（<code>max(len(g), len(w))</code>）。超出某一邊的長度時，那一邊就是「沒有這一行」。有內容的行用 <code>strconv.Quote</code> 加上引號。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l2">進階</span>練習 3：會記錄的假簡訊服務</h3>
+        <p>第 3 節的 spy，而且要能被很多 goroutine 同時使用。</p>
+        <pre class="code" data-src="exercises/30-testing/exercises.go#Recorder.Notify,Recorder.Sent"><code>func (r *Recorder) Notify(phone, msg string) error {
+	// TODO: 實作
+	return nil
+}
+
+func (r *Recorder) Sent() []string {
+	// TODO: 實作
+	return nil
+}</code></pre>
+        <p>測試：<code>TestRecorder</code>，用 <code>go test -race</code> 跑更容易抓到沒有加鎖。</p>
+        <details><summary>提示</summary><p>FailOn 不會被修改，讀它不用加鎖；append 到 sent 和讀 sent 都要在 mu 之內。回傳複本用 <code>slices.Clone</code>。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l2">進階</span>練習 4：golden file 輔助函式</h3>
+        <p>把第 5 節的寫法包成可以重複使用的函式。</p>
+        <pre class="code" data-src="exercises/30-testing/exercises.go#Golden"><code>func Golden(tb testing.TB, path string, got []byte, update bool) {
+	// TODO: 實作
+}</code></pre>
+        <p>測試：<code>TestGolden</code>。它傳入一個會記下 Errorf、Fatalf 的假 testing.TB，所以你的程式在真的測試裡也會這樣運作。</p>
+        <details><summary>提示</summary><p>寫檔之前用 <code>os.MkdirAll(filepath.Dir(path), 0o755)</code> 建立目錄。讀檔失敗時 tb.Fatalf，內容不同時 tb.Errorf 一次，把 DiffLines 的結果用換行接起來放進訊息。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l3">挑戰</span>練習 5：縮小失敗的輸入</h3>
+        <p>fuzz 找到 27 個 byte 的失敗輸入後，會把它縮到 1 個字。自己做一個簡單的版本。</p>
+        <pre class="code" data-src="exercises/30-testing/exercises.go#Shrink"><code>func Shrink(input []int, fails func([]int) bool) []int {
+	// TODO: 實作
+	return nil
+}</code></pre>
+        <p>測試：<code>TestShrink</code>，用四種不同的失敗條件檢查結果是不是縮到不能再縮。</p>
+        <details><summary>提示</summary><p>先複製一份。依序試著拿掉每一個元素（<code>slices.Delete(slices.Clone(cur), i, i+1)</code>），拿掉後還會失敗就保留拿掉的版本。重複整輪，直到一整輪都拿不掉任何元素為止。</p></details>
+      </li>
+      <li>
+        <h3><span class="level fix">找錯</span>練習 6：清理的順序</h3>
+        <p>資料庫比檔案先關掉了，而且呼叫兩次 Run 會關兩次。</p>
+        <pre class="code" data-src="exercises/30-testing/exercises.go#Cleanups.Run"><code>func (c *Cleanups) Run() {
+	for _, f := range c.fns {
+		f()
+	}
+}</code></pre>
+        <p>測試：<code>TestCleanupsRun</code>。</p>
+        <details><summary>提示</summary><p>從最後一個往前執行（<code>slices.Backward</code>），並且在執行之前把 c.fns 設成 nil，第二次 Run 就沒有東西可以執行。</p></details>
+      </li>
+    </ol>
+    <p><a href="https://github.com/xinqilin/GO-Playground/blob/main/exercises/30-testing/solution.go">參考解答</a>：先自己寫完再看。測試通過的寫法都是對的。</p>
+  </section>
+
+  <section aria-labelledby="recap">
+    <h2 id="recap">重點回顧</h2>
+    <ul class="recap">
+      <li>測試放在同目錄的 _test.go，函式以 Test 開頭；比較用 if，t.Errorf 繼續、t.Fatalf 停止。</li>
+      <li>失敗訊息寫出呼叫、得到的值和期望的值。</li>
+      <li>多組輸入排成表格，用 t.Run 拆成子測試；-run 的每一段是沒有錨點的 regexp。</li>
+      <li>依賴小 interface 和注入的時間，測試時換成手寫的 fake；檢查結果，不鎖住過程。</li>
+      <li>重複的步驟寫成有 t.Helper 的輔助函式，清理交給 t.Cleanup、t.TempDir。</li>
+      <li>長的輸出用 golden file，-update 之後一定看 diff。</li>
+      <li>逾時和 Timer 用 synctest 測，並行用 -race 跑。</li>
+      <li>fuzz 檢查「任何輸入都成立的性質」，找到的輸入 commit 進 testdata/fuzz。</li>
+      <li>Example 是會被執行的文件；覆蓋率用來找漏掉的地方，不是目標；benchmark 要和改之前比。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="further">
+    <h2 id="further">延伸閱讀</h2>
+    <ul class="notes">
+      <li>testing 套件：<a href="https://pkg.go.dev/testing#hdr-Subtests_and_Sub_benchmarks">Subtests and Sub-benchmarks</a>、<a href="https://pkg.go.dev/testing#hdr-Examples">Examples</a>、<a href="https://pkg.go.dev/testing#hdr-Fuzzing">Fuzzing</a>、<a href="https://pkg.go.dev/testing#hdr-Benchmarks">Benchmarks</a>、<a href="https://pkg.go.dev/testing#hdr-Skipping">Skipping</a>、<a href="https://pkg.go.dev/testing#hdr-Main">Main</a>（TestMain）。</li>
+      <li><a href="https://pkg.go.dev/testing/synctest">testing/synctest</a>。</li>
+      <li>go 指令：<a href="https://pkg.go.dev/cmd/go#hdr-Testing_flags">Testing flags</a>、<a href="https://pkg.go.dev/cmd/go#hdr-Testing_functions">Testing functions</a>。</li>
+      <li>官方文件：<a href="https://go.dev/doc/tutorial/add-a-test">Add a test</a>、<a href="https://go.dev/doc/security/fuzz/">Go Fuzzing</a>、<a href="https://go.dev/doc/build-cover">Coverage profiling support for integration tests</a>。</li>
+      <li>Go 官方部落格：<a href="https://go.dev/blog/subtests">Using Subtests and Sub-benchmarks</a>、<a href="https://go.dev/blog/synctest">Testing concurrent code with testing/synctest</a>。</li>
+    </ul>
   </section>
 
   <section aria-labelledby="run">
     <h2 id="run">動手跑</h2>
     <p class="label">在 repo 根目錄</p>
-    <pre class="shell"><code>go test -v ./chapters/30-testing/...
-go test -cover ./chapters/30-testing/...
-go test -run='^$' -bench=. -benchmem ./chapters/30-testing/textutil
-go test -run='^$' -fuzz=FuzzReverse -fuzztime=10s ./chapters/30-testing/textutil</code></pre>
-    <p><a href="https://github.com/xinqilin/GO-Playground/tree/main/chapters/30-testing">在 GitHub 看完整程式碼</a></p>
+    <pre class="shell"><code>go run ./chapters/30-testing                              <span class="c"># 看看被測試的停車場</span>
+go test -v ./chapters/30-testing/parking                  <span class="c"># 每個測試的結果</span>
+go test -race -cover ./chapters/30-testing/...            <span class="c"># 加上 race detector 和覆蓋率</span>
+go test -run='^$' -fuzz=FuzzFee -fuzztime=10s ./chapters/30-testing/parking
+go test ./exercises/30-testing/                           <span class="c"># 做練習</span></code></pre>
+    <p><a href="https://github.com/xinqilin/GO-Playground/tree/main/chapters/30-testing">在 GitHub 看本章完整程式碼</a>，或看<a href="https://github.com/xinqilin/GO-Playground/tree/main/exercises/30-testing">練習題</a>。</p>
   </section>
 </main>
 
