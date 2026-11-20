@@ -19,6 +19,7 @@ func TestParseLine(t *testing.T) {
 		{`192.0.2.10 - - [21/Nov/2026:09:30:01 +0800] "GET /menu HTTP/1.1" 200 1532 0.012`, "09:30:01 GET /menu 200 12ms", false},
 		{`192.0.2.10 - - [21/Nov/2026:09:30:01 +0800] "GET /menu?lang=en HTTP/2.0" 304 - 0.003`, "09:30:01 GET /menu?lang=en 304 3ms", false},
 		{`{"time":"2026-11-21T09:35:10.120+08:00","msg":"request","method":"POST","path":"/todos","status":201,"took":2350000}`, "09:35:10 POST /todos 201 2.35ms", false},
+		{`{"time":"2026-11-21T09:35:20+08:00","msg":"request","path":"/","method":"GET","path":"/menu","status":200,"took":1000000}`, "09:35:20 GET /menu 200 1ms", false}, // slog 不會去掉重複的 key
 		{`192.0.2.16 - - [21/Nov/2026:09:32:0`, "格式不對", true},
 		{`192.0.2.17 - - [21/Nov/2026:09:32:50 +0800] "GET /menu HTTP/1.1" 2OO 1532 0.012`, "格式不對", true},
 		{`192.0.2.18 - - [31/Nov/2026:09:33:40 +0800] "GET /menu HTTP/1.1" 200 1532 0.012`, "時間不對", true},

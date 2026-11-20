@@ -204,7 +204,8 @@ func parseAccess(line string) (Entry, error) {
 
 func parseJSON(line string) (Entry, error) {
 	var l slogLine
-	if err := json.Unmarshal([]byte(line), &amp;l); err != nil {
+	// slog 不會去掉重複的 key（With 和 Info 都寫了 path），json/v2 預設卻把它當成錯誤
+	if err := json.Unmarshal([]byte(line), &amp;l, jsontext.AllowDuplicateNames(true)); err != nil {
 		return Entry{}, fmt.Errorf("JSON 不對：%w", err)
 	}
 	if l.Msg != "request" {
@@ -215,6 +216,7 @@ func parseJSON(line string) (Entry, error) {
     <ul class="notes">
       <li><strong>只宣告用得到的欄位</strong>：level、addr、err 這些欄位在 struct 裡沒有，解碼時直接略過。這和<a href="project-todoapi.html">專題 4</a> 的 API 相反：那裡用 RejectUnknownMembers 拒絕不認得的欄位，因為客戶端拼錯欄位名稱應該被告知；這裡是讀別人寫的資料，要寬鬆一點。</li>
       <li><strong>took 用 int64 讀</strong>：slog 把 time.Duration 寫成奈秒的整數。json/v2 在 Go 1.27 對 time.Duration 沒有預設的格式，直接解碼到 Duration 會得到錯誤，所以先用 int64 讀，再自己轉換。</li>
+      <li><strong>同一個 key 出現兩次</strong>：<code>logger.With("path", "/")</code> 之後又在 Info 裡寫一次 path，slog 會照實寫出兩個 "path"。json/v2 預設把重複的 key 當成錯誤，這種行就會被算成壞掉的行，請求也少算一筆。加上 <code>jsontext.AllowDuplicateNames(true)</code> 之後，以最後一個為準。</li>
       <li><strong>不是請求的紀錄</strong>：「開始服務」「內部錯誤」這些訊息沒有狀態碼，回傳 errSkip 表示「略過，不是錯誤」。</li>
     </ul>
     <figure class="fig">
@@ -605,13 +607,13 @@ GET /orders/{id},3,0,8,9,9</code></pre>
 goarch: arm64
 pkg: github.com/xinqilin/GO-Playground/projects/logstats
 cpu: Apple M1 Pro
-BenchmarkParse/regexp-10         	  988194	      1197 ns/op	     200 B/op	       3 allocs/op
-BenchmarkParse/cut-10            	 4569808	       262.1 ns/op	      72 B/op	       3 allocs/op
-BenchmarkParse/json-10           	 2051922	       584.5 ns/op	     240 B/op	       2 allocs/op
+BenchmarkParse/regexp-10         	  970408	      1227 ns/op	     200 B/op	       3 allocs/op
+BenchmarkParse/cut-10            	 4443175	       270.1 ns/op	      72 B/op	       3 allocs/op
+BenchmarkParse/json-10           	 2045720	       586.7 ns/op	     240 B/op	       2 allocs/op
 PASS
-ok  	github.com/xinqilin/GO-Playground/projects/logstats	3.914s</code></pre>
+ok  	github.com/xinqilin/GO-Playground/projects/logstats	3.876s</code></pre>
     <ul class="notes">
-      <li><strong>Cut 快了大約 4.6 倍</strong>，但換算成實際的量：regexp 版每行 1.2 微秒，一百萬行是 1.2 秒。每天跑一次的報表，這點時間不值得犧牲可讀性。</li>
+      <li><strong>Cut 快了大約 4.5 倍</strong>，但換算成實際的量：regexp 版每行 1.2 微秒，一百萬行是 1.2 秒。每天跑一次的報表，這點時間不值得犧牲可讀性。</li>
       <li><strong>Cut 版比較脆弱</strong>：它只認得分隔符號，「狀態碼是三位數字」這種檢查要另外寫。regexp 把格式寫在一個地方，壞掉的行比較不會被誤認成合法的。</li>
       <li><strong>先量再決定</strong>：如果真的要每秒處理幾十萬行，先用 pprof 確認時間花在哪裡，再換掉 regexp（<a href="31-performance.html#pit-guess">31 章</a>）。TestCutAgrees 讓兩個版本對範例檔的每一行都得到相同的結果，換掉時才有保障。</li>
       <li>-benchmem 多印出每次的配置量（B/op、allocs/op）。b.Loop（Go 1.24 起）讓迴圈裡的呼叫不會被編譯器最佳化掉（<a href="31-performance.html#measure">31 章</a>）。</li>

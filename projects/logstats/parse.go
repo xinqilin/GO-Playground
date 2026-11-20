@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"errors"
 	"fmt"
@@ -70,7 +71,8 @@ type slogLine struct {
 
 func parseJSON(line string) (Entry, error) {
 	var l slogLine
-	if err := json.Unmarshal([]byte(line), &l); err != nil {
+	// slog 不會去掉重複的 key（With 和 Info 都寫了 path），json/v2 預設卻把它當成錯誤
+	if err := json.Unmarshal([]byte(line), &l, jsontext.AllowDuplicateNames(true)); err != nil {
 		return Entry{}, fmt.Errorf("JSON 不對：%w", err)
 	}
 	if l.Msg != "request" {
