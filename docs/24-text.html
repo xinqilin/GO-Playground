@@ -79,7 +79,7 @@
       </svg>
       <figcaption>每一步只做一件事：切行、去空白、切欄位、認出數量、轉成數字。哪一步失敗，就知道是哪一行的哪個部分有問題。</figcaption>
     </figure>
-    <p>很多文字格式根本不需要正規表示式。櫃台手打的點餐單，每一行是「品項 [x數量] [備註]」，用 08 章的 strings 函式一步一步拆就好：</p>
+    <p>很多文字格式根本不需要正規表示式。櫃台手打的點餐單，每一行是「品項 [x數量] [備註]」，用 <a href="08-strings-runes.html">08 章</a>的 strings 函式一步一步拆就好：</p>
     <pre class="code" data-src="chapters/24-text/parse.go#OrderLine,parseOrder"><code>type OrderLine struct {
 	Dish string
 	Qty  int
@@ -313,7 +313,7 @@ NT\$1\.5 true</code></pre>
     <ul class="notes">
       <li>函式只拿到整段文字，要群組就在函式裡再呼叫一次 FindStringSubmatch。</li>
       <li><code>regexp.QuoteMeta</code> 把 <code>$</code>、<code>.</code>、<code>(</code> 這些特殊字元加上反斜線。要搜尋使用者輸入的文字時，一定要先 QuoteMeta，不然「NT$1.5」裡的 . 會符合任何字元。</li>
-      <li>只是要換掉固定的文字，用 08 章的 strings.ReplaceAll 或 Replacer 就好，不需要 regexp。</li>
+      <li>只是要換掉固定的文字，用 <a href="08-strings-runes.html">08 章</a>的 strings.ReplaceAll 或 Replacer 就好，不需要 regexp。</li>
     </ul>
     <p>Go 的正規表示式語法叫做 <strong>RE2</strong>，和 Java、JavaScript、Python 的大致相同，但少了兩樣：lookahead／lookbehind（<code>(?=…)</code>）和 backreference（<code>\1</code>）。寫了不會悄悄失效，而是在編譯時就回傳錯誤：</p>
     <pre class="code" data-src="chapters/24-text/replace.go#re2Demo"><code>func re2Demo() {

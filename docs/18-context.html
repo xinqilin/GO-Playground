@@ -124,7 +124,7 @@ func basicsDemo() {
     <p class="label">輸出</p>
     <pre class="out" data-example="chapters/18-context#Example_basicsDemo"><code>滷蛋 好了
 佛跳牆 放棄： context deadline exceeded</code></pre>
-    <p>cook 同時等兩件事：菜煮好，或是 ctx 被取消，和 16 章的逾時一模一樣，只是取消的訊號換成了 <code>ctx.Done()</code>。佛跳牆要煮一小時，但 ctx 只給 10 毫秒，時間一到 Done 被 close，cook 回傳 <code>ctx.Err()</code> 告訴呼叫的人為什麼停下來。</p>
+    <p>cook 同時等兩件事：菜煮好，或是 ctx 被取消，和 <a href="16-select.html#timeout">16 章</a>的逾時一模一樣，只是取消的訊號換成了 <code>ctx.Done()</code>。佛跳牆要煮一小時，但 ctx 只給 10 毫秒，時間一到 Done 被 close，cook 回傳 <code>ctx.Err()</code> 告訴呼叫的人為什麼停下來。</p>
   </section>
 
   <section aria-labelledby="tree">
@@ -344,7 +344,7 @@ context deadline exceeded / 廚房出餐太慢
       </svg>
       <figcaption>ctx 不會強制停止任何東西，它只是一個訊號。函式要自己在適當的地方檢查它。</figcaption>
     </figure>
-    <p>context 不會強迫任何 goroutine 停下來，它只是一個訊號，要每個函式自己去聽。依照函式在做什麼，有三種聽法。第一種是<strong>在等東西</strong>的時候（等 channel、等計時器），把 <code>ctx.Done()</code> 放進同一個 select。把 16 章的 done channel 換成 ctx：</p>
+    <p>context 不會強迫任何 goroutine 停下來，它只是一個訊號，要每個函式自己去聽。依照函式在做什麼，有三種聽法。第一種是<strong>在等東西</strong>的時候（等 channel、等計時器），把 <code>ctx.Done()</code> 放進同一個 select。把 <a href="16-select.html#done">16 章</a>的 done channel 換成 ctx：</p>
     <pre class="code" data-src="chapters/18-context/listen.go#prepare,listenDemo"><code>func prepare(ctx context.Context, items ...string) &lt;-chan string {
 	out := make(chan string)
 	go func() {

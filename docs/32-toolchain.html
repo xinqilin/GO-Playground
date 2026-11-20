@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>工具鏈｜Go 圖解手冊</title>
-<meta name="description" content="go 指令裡的工具：gofmt、go vet、go fix、go doc，build tag、-ldflags 寫入版本號、交叉編譯，以及 pprof。">
+<meta name="description" content="go 指令的工具箱：go vet 與 go test 內建的檢查、go fix 換成新寫法、build tag 與檔名規則、交叉編譯、用 -ldflags 和建置資訊標示版本、go generate 產生程式碼、tool 指令與 govulncheck，附可執行的練習題。">
 <link rel="stylesheet" href="assets/style.css">
 </head>
 <body>
@@ -13,118 +13,687 @@
   <span class="count">32 / 33</span>
 </header>
 
-<main class="page">
+<main class="page long">
   <header class="hero">
     <div class="num" aria-hidden="true">32</div>
     <p class="eyebrow">Part 5 · 工程實務 · 第 32 章</p>
     <h1>工具鏈</h1>
-    <p class="analogy">go 指令是一整箱工具：排版、檢查、文件、測試、編譯都在裡面，不用另外安裝。</p>
+    <p class="analogy">便當店的廚房不用到處借工具：刀、砧板、蒸籠、打包機都在同一面牆上。go 指令也是這樣，排版、檢查、測試、編譯、交叉編譯、產生程式碼、查文件，都是同一個指令的子命令，不用另外裝外掛或寫設定檔。這一章帶你把牆上每一樣工具拿下來用一次。</p>
   </header>
 
-  <section aria-labelledby="look">
-    <h2 id="look">看圖</h2>
-    <div class="figs">
-      <figure class="fig">
-        <svg viewBox="0 0 480 196" role="img" aria-label="go 指令的工具：gofmt 排版、go vet 抓可疑寫法、go fix 換成新寫法、go doc 查文件、go test 測試、go build 編譯、go run 編譯並執行、go mod 管理依賴">
-          <title>一個 go 指令，一整箱工具</title>
-          <rect class="acc" x="14" y="20" width="104" height="70" rx="8"/>
-          <rect class="acc" x="130" y="20" width="104" height="70" rx="8"/>
-          <rect class="hot" x="246" y="20" width="104" height="70" rx="8"/>
-          <rect class="acc" x="362" y="20" width="104" height="70" rx="8"/>
-          <rect class="acc" x="14" y="106" width="104" height="70" rx="8"/>
-          <rect class="acc" x="130" y="106" width="104" height="70" rx="8"/>
-          <rect class="acc" x="246" y="106" width="104" height="70" rx="8"/>
-          <rect class="acc" x="362" y="106" width="104" height="70" rx="8"/>
-          <text class="small mono bold" x="66" y="50" text-anchor="middle">gofmt</text>
-          <text class="sm" x="66" y="74" text-anchor="middle">排版</text>
-          <text class="small mono bold" x="182" y="50" text-anchor="middle">go vet</text>
-          <text class="sm" x="182" y="74" text-anchor="middle">抓可疑寫法</text>
-          <text class="small mono bold t-hot" x="298" y="50" text-anchor="middle">go fix</text>
-          <text class="sm" x="298" y="74" text-anchor="middle">換成新寫法</text>
-          <text class="small mono bold" x="414" y="50" text-anchor="middle">go doc</text>
-          <text class="sm" x="414" y="74" text-anchor="middle">查文件</text>
-          <text class="small mono bold" x="66" y="136" text-anchor="middle">go test</text>
-          <text class="sm" x="66" y="160" text-anchor="middle">測試</text>
-          <text class="small mono bold" x="182" y="136" text-anchor="middle">go build</text>
-          <text class="sm" x="182" y="160" text-anchor="middle">編譯</text>
-          <text class="small mono bold" x="298" y="136" text-anchor="middle">go run</text>
-          <text class="sm" x="298" y="160" text-anchor="middle">編譯並執行</text>
-          <text class="small mono bold" x="414" y="136" text-anchor="middle">go mod</text>
-          <text class="sm" x="414" y="160" text-anchor="middle">管理依賴</text>
-        </svg>
-        <figcaption>go 指令本身就是一整箱工具：排版、檢查、文件、測試、編譯、依賴管理都在裡面。</figcaption>
-      </figure>
+  <nav class="toc-inline" aria-labelledby="toc-title">
+    <p class="label" id="toc-title">本章內容</p>
+    <ol>
+      <li><a href="#goals">本章你會學到</a></li>
+      <li><a href="#command">一個指令，一整箱工具</a></li>
+      <li><a href="#vet">go vet：編得過，但幾乎一定錯</a></li>
+      <li><a href="#fix">go fix：換成新寫法</a></li>
+      <li><a href="#build-tags">build tag 與檔名</a></li>
+      <li><a href="#cross">交叉編譯</a></li>
+      <li><a href="#version">版本與建置資訊</a></li>
+      <li><a href="#generate">go generate</a></li>
+      <li><a href="#tools">專案用到的工具</a></li>
+      <li><a href="#pitfalls">常見錯誤</a></li>
+      <li><a href="#java">從 Java 來的你</a></li>
+      <li><a href="#exercises">練習</a></li>
+      <li><a href="#recap">重點回顧</a></li>
+      <li><a href="#further">延伸閱讀</a></li>
+    </ol>
+  </nav>
 
-      <figure class="fig">
-        <svg viewBox="0 0 480 196" role="img" aria-label="同一份 main.go，設定不同的 GOOS 和 GOARCH，就能編出 linux/amd64、windows/amd64 的 app.exe、darwin/arm64 三種執行檔">
-          <title>交叉編譯</title>
-          <path class="box" d="M16 60 H66 L86 80 V140 H16 Z"/>
-          <path class="wire" d="M66 60 V80 H86"/>
-          <path class="wire faint" d="M28 96 H72 M28 110 H62 M28 124 H70"/>
-          <text class="small mono" x="51" y="162" text-anchor="middle">main.go</text>
-          <path class="wire" d="M96 100 H140 M140 40 V160 M140 40 H170 M140 160 H170 M140 100 H170"/>
-          <path class="tip" d="M180 40 L168 34 L168 46 Z"/>
-          <path class="tip" d="M180 100 L168 94 L168 106 Z"/>
-          <path class="tip" d="M180 160 L168 154 L168 166 Z"/>
-          <rect class="acc" x="182" y="20" width="150" height="40" rx="6"/>
-          <rect class="hot" x="182" y="80" width="150" height="40" rx="6"/>
-          <rect class="acc" x="182" y="140" width="150" height="40" rx="6"/>
-          <text class="small mono" x="257" y="45" text-anchor="middle">linux/amd64</text>
-          <text class="small mono t-hot" x="257" y="105" text-anchor="middle">windows/amd64</text>
-          <text class="small mono" x="257" y="165" text-anchor="middle">darwin/arm64</text>
-          <path class="wire" d="M332 40 H344 M332 100 H344 M332 160 H344"/>
-          <path class="tip" d="M354 40 L344 34 L344 46 Z"/>
-          <path class="tip" d="M354 100 L344 94 L344 106 Z"/>
-          <path class="tip" d="M354 160 L344 154 L344 166 Z"/>
-          <text class="small mono" x="362" y="45">app</text>
-          <text class="small mono t-hot" x="362" y="105">app.exe</text>
-          <text class="small mono" x="362" y="165">app</text>
-        </svg>
-        <figcaption>設好 <code>GOOS</code> 和 <code>GOARCH</code>，同一份程式碼就能在 Mac 上編出 Linux 或 Windows 的執行檔。這個 repo 以前的 <code>.exe</code> 就是這樣來的，但編譯產物不該放進 git。</figcaption>
-      </figure>
-    </div>
+  <section aria-labelledby="goals">
+    <h2 id="goals">本章你會學到</h2>
+    <ul class="notes">
+      <li>go vet 抓哪些錯，go test 為什麼只跑其中一部分。</li>
+      <li>用 go fix 把舊寫法換成新的標準庫和語法。</li>
+      <li>用 //go:build 和檔名決定哪些檔案要編譯，做出不同版別、不同平台的程式。</li>
+      <li>在 Mac 上編出 Linux、Windows 的執行檔。</li>
+      <li>用 -ldflags -X 注入版本，用 go version -m 和 runtime/debug 讀出建置資訊。</li>
+      <li>用 go generate 從資料產生程式碼，並用測試確認產生的檔案沒有過期。</li>
+      <li>用 go.mod 的 tool 指令管理 govulncheck 這類工具。</li>
+    </ul>
+    <p>先備：<a href="00-hello.html#commands">00 章的 go run、go build</a>、<a href="00-hello.html#fmt-vet">gofmt 與 go vet</a>、<a href="29-packages-modules.html#gomod">29 章的 go.mod</a>。</p>
   </section>
 
-  <section aria-labelledby="code">
-    <h2 id="code">最小範例</h2>
-    <p class="label">edition_free.go 與 edition_pro.go</p>
-    <pre class="code"><code>//go:build !pro
+  <section aria-labelledby="command">
+    <h2 id="command">1. 一個指令，一整箱工具</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 256" role="img" aria-label="go 指令的子命令分成六組：寫程式時用 go fmt、go vet、go fix；測試用 go test、go test -race、go test -bench；建置用 go build、go run、go install；產生與工具用 go generate、go tool；依賴用 go mod、go get、go work；查詢用 go doc、go env、go list">
+        <title>go 指令的子命令</title>
+        <rect class="soft" x="8" y="8" width="148" height="116" rx="10"/>
+        <text class="sm bold" x="20" y="32">寫程式時</text>
+        <text class="sm mono" x="20" y="58">go fmt</text>
+        <text class="sm mono" x="20" y="82">go vet</text>
+        <text class="sm mono" x="20" y="106">go fix</text>
+        <rect class="acc" x="166" y="8" width="148" height="116" rx="10"/>
+        <text class="sm bold" x="178" y="32">測試</text>
+        <text class="sm mono" x="178" y="58">go test</text>
+        <text class="sm mono" x="178" y="82">go test -race</text>
+        <text class="sm mono" x="178" y="106">go test -bench</text>
+        <rect class="soft" x="324" y="8" width="148" height="116" rx="10"/>
+        <text class="sm bold" x="336" y="32">建置</text>
+        <text class="sm mono" x="336" y="58">go build</text>
+        <text class="sm mono" x="336" y="82">go run</text>
+        <text class="sm mono" x="336" y="106">go install</text>
+        <rect class="soft" x="8" y="132" width="148" height="116" rx="10"/>
+        <text class="sm bold" x="20" y="156">產生與工具</text>
+        <text class="sm mono" x="20" y="182">go generate</text>
+        <text class="sm mono" x="20" y="206">go tool</text>
+        <rect class="soft" x="166" y="132" width="148" height="116" rx="10"/>
+        <text class="sm bold" x="178" y="156">依賴</text>
+        <text class="sm mono" x="178" y="182">go mod</text>
+        <text class="sm mono" x="178" y="206">go get</text>
+        <text class="sm mono" x="178" y="230">go work</text>
+        <rect class="soft" x="324" y="132" width="148" height="116" rx="10"/>
+        <text class="sm bold" x="336" y="156">查詢</text>
+        <text class="sm mono" x="336" y="182">go doc</text>
+        <text class="sm mono" x="336" y="206">go env</text>
+        <text class="sm mono" x="336" y="230">go list</text>
+      </svg>
+      <figcaption>每個子命令都有說明：<code>go help build</code>、<code>go help test</code>。主題式的說明也有，例如 <code>go help buildconstraint</code>、<code>go help environment</code>。</figcaption>
+    </figure>
+    <p>Java 專案要先選 Maven 或 Gradle、寫設定檔、裝外掛；Go 的工具都在 go 指令裡，而且行為由 go.mod 和原始碼本身決定，沒有另外的建置腳本。這一章的程式是一支小小的「便當店點餐機」，重點不在程式本身，而在怎麼用 go 指令建置它。</p>
+    <p>先認識兩個查詢用的指令。<strong>go env</strong> 印出目前的設定：</p>
+    <pre class="shell"><code>go env GOOS GOARCH GOVERSION</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out"><code>darwin
+arm64
+go1.27.4</code></pre>
+    <p><strong>go doc</strong> 在終端機裡查文件，不只標準庫，自己寫的 package 也可以。下面查的是 <a href="30-testing.html">30 章</a>的停車場計費函式，內容就是它的 doc comment：</p>
+    <pre class="shell"><code>go doc ./chapters/30-testing/parking Fee</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out"><code>package parking // import "github.com/xinqilin/GO-Playground/chapters/30-testing/parking"
+
+func Fee(in, out time.Time) (int, error)
+    Fee 計算從 in 停到 out 的停車費。 整段停車不到 Grace 免費；否則在 in 所在時區的每個午夜切開， 每一天各自以 Unit
+    為單位進位計費，每天最多收 DailyCap。</code></pre>
+    <ul class="notes">
+      <li>go doc 會把 doc comment 重新排版：原本的換行變成空白，所以中文句子之間多了空格。寫 doc comment 時，一個段落是一段連續的註解行，段落之間空一行。</li>
+      <li><code>go doc -all ./路徑</code> 列出整個 package，<code>go doc -src 名稱</code> 直接看原始碼。</li>
+      <li><strong>go list</strong> 列出 package 的各種資訊，<code>-f</code> 用 text/template 的語法選要哪些欄位。第 4 節會用它看哪些檔案被編譯。</li>
+      <li>編輯器裡的自動完成、跳到定義、即時的錯誤標示，來自官方的語言伺服器 gopls（<a href="00-hello.html#editor">00 章</a>）。它背後用的也是 go 指令和 go vet 的分析器。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="vet">
+    <h2 id="vet">2. go vet：編得過，但幾乎一定錯</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 182" role="img" aria-label="三道關卡：編譯器擋下語法和型別錯誤；go vet 擋下編得過但很可疑的寫法，例如格式和參數不合、複製了鎖；測試擋下行為錯誤，例如營業額算錯。go test 會先跑 vet 裡最可靠的一小部分檢查">
+        <title>三道關卡</title>
+        <rect class="soft" x="8" y="8" width="144" height="124" rx="10"/>
+        <text class="sm bold" x="20" y="34">編譯器</text>
+        <text class="sm" x="20" y="60">語法、型別</text>
+        <text class="sm mute" x="20" y="88">例：少了括號</text>
+        <text class="sm mute" x="20" y="112">例：型別不合</text>
+        <rect class="acc" x="168" y="8" width="144" height="124" rx="10"/>
+        <text class="sm bold mono" x="180" y="34">go vet</text>
+        <text class="sm" x="180" y="60">可疑的寫法</text>
+        <text class="sm mute" x="180" y="88">例：格式和參數不合</text>
+        <text class="sm mute" x="180" y="112">例：複製了鎖</text>
+        <rect class="soft" x="328" y="8" width="144" height="124" rx="10"/>
+        <text class="sm bold" x="340" y="34">測試</text>
+        <text class="sm" x="340" y="60">行為對不對</text>
+        <text class="sm mute" x="340" y="88">例：營業額算錯</text>
+        <text class="sm mute" x="340" y="112">例：邊界沒處理</text>
+        <path class="wire" d="M152 70 H168"/>
+        <path class="wire" d="M312 70 H328"/>
+        <text class="sm t-acc" x="240" y="168" text-anchor="middle">go test 會先跑 vet 裡最可靠的一小部分檢查</text>
+      </svg>
+      <figcaption>vet 的每一項檢查叫做分析器（analyzer），它只報告「幾乎不可能是故意的」寫法，所以很少誤報，值得每次都跑。</figcaption>
+    </figure>
+    <p>下面這支程式編得過、也跑得起來，但 JSON 的欄位名稱不是你想的那樣：</p>
+    <pre class="code bad" data-vet-error><code>package main
+
+import (
+	"encoding/json"
+	"fmt"
+)
+
+type Dish struct {
+	Name  string `json:"name"`
+	Price int    `json:price`
+}
+
+func main() {
+	b, _ := json.Marshal(Dish{Name: "排骨飯", Price: 90})
+	fmt.Println(string(b))
+}</code></pre>
+    <p class="label">go vet</p>
+    <pre class="out err"><code>main.go:10:2: struct field tag `json:price` not compatible with reflect.StructTag.Get: bad syntax for struct tag value</code></pre>
+    <p>tag 的值少了雙引號，encoding/json 讀不到它，只好用欄位名稱，輸出變成 <code>{"name":"排骨飯","Price":90}</code>。編譯器不檢查 tag 的內容，執行也不會出錯，只有 vet 會發現。前面幾章出現過的 vet 檢查還有：</p>
+    <ul class="notes">
+      <li><strong>printf</strong>：Printf 的動詞和參數型別不合（<a href="02-input-output.html">02 章</a>）。</li>
+      <li><strong>copylocks</strong>：值 receiver 或傳值時複製了 Mutex、WaitGroup（<a href="09-structs-methods.html#pit-copylocks">09 章</a>）。</li>
+      <li><strong>lostcancel</strong>：context.WithTimeout 回傳的 cancel 沒有呼叫（<a href="18-context.html">18 章</a>）。</li>
+      <li><strong>errorsas</strong>、<strong>stringintconv</strong>、<strong>waitgroup</strong>：errors.As 的第二個參數不是指標、<code>string(65)</code> 這種轉換、在新的 goroutine 裡才呼叫 wg.Add。</li>
+    </ul>
+    <p>全部的分析器用 <code>go tool vet help</code> 列出來。go test 在編譯測試時會自動跑其中最可靠的一部分（atomic、bools、buildtag、directive、errorsas、ifaceassert、nilfunc、printf、stdversion、stringintconv、tests），其中有問題就不跑測試。<strong>copylocks 不在裡面</strong>，所以「測試都過了」不代表 vet 也會過：</p>
+    <pre class="code" data-src="chapters/32-toolchain/testdata/vetsubset/queue.go"><code>// Package vetsubset 的 Next 方法用了值 receiver，複製了整把鎖。
+// go test 會通過，go vet 才抓得到。
+package vetsubset
+
+import "sync"
+
+// Queue 是排隊叫號機。
+type Queue struct {
+	mu   sync.Mutex
+	next int
+}
+
+// Next 回傳下一個號碼。
+func (q Queue) Next() int {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	q.next++
+	return q.next
+}</code></pre>
+    <pre class="shell"><code>go -C chapters/32-toolchain/testdata/vetsubset test -count=1 .
+go -C chapters/32-toolchain/testdata/vetsubset vet .</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out"><code>ok  	example.com/vetsubset	0.378s
+queue.go:14:9: Next passes lock by value: example.com/vetsubset.Queue contains sync.Mutex</code></pre>
+    <p>Next 每次都在複本上加一，叫號機永遠只叫得出 1 號。測試只檢查了第一個號碼，剛好通過。所以 CI 要同時跑 go vet 和 go test，這個 repo 的 CI 就是這樣做的。本章的 toolchain_test.go 會實際執行這兩個指令，確認結果和頁面一致。</p>
+  </section>
+
+  <section aria-labelledby="fix">
+    <h2 id="fix">3. go fix：換成新寫法</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 200" role="img" aria-label="go fix 把舊寫法換成新寫法：sort.Slice 換成 slices.Sort，interface{} 換成 any，wg.Add 加 go func 換成 wg.Go。能用哪些新寫法，由 go.mod 裡的 go 版本決定">
+        <title>go fix 的改寫</title>
+        <rect class="soft" x="8" y="8" width="180" height="130" rx="10"/>
+        <text class="sm bold" x="20" y="34">舊寫法</text>
+        <text class="sm mono" x="20" y="64">sort.Slice(…)</text>
+        <text class="sm mono" x="20" y="90">interface{}</text>
+        <text class="sm mono" x="20" y="116">wg.Add(1); go …</text>
+        <path class="wire acc-ln" d="M196 73 H276"/>
+        <path class="tip acc-tip" d="M284 73 l-10 -6 v12 z"/>
+        <text class="sm mono t-acc" x="240" y="62" text-anchor="middle">go fix</text>
+        <rect class="acc" x="292" y="8" width="180" height="130" rx="10"/>
+        <text class="sm bold" x="304" y="34">新寫法</text>
+        <text class="sm mono" x="304" y="64">slices.Sort(p)</text>
+        <text class="sm mono" x="304" y="90">any</text>
+        <text class="sm mono" x="304" y="116">wg.Go(…)</text>
+        <text class="sm" x="240" y="176" text-anchor="middle">能用哪些新寫法，由 go.mod 的 go 版本決定</text>
+      </svg>
+      <figcaption>Go 1.26 起，go fix 改寫成和 go vet 同一套分析框架，裡面是幾十個「現代化」的改寫規則。改寫不應該改變程式的行為。</figcaption>
+    </figure>
+    <p>Go 每一版都會加入新的語法和標準庫函式，舊程式還是能編譯，只是寫法比較囉嗦。下面這個 module 故意用了舊寫法，它的 go.mod 寫的是 <code>go 1.27</code>：</p>
+    <pre class="code" data-src="chapters/32-toolchain/testdata/oldstyle/menu.go"><code>// Package oldstyle 用比較舊的寫法整理菜單，用來看 go fix 會建議怎麼改。
+package oldstyle
+
+import (
+	"sort"
+	"strings"
+	"sync"
+)
+
+// Lookup 在 menu 裡找菜名，找不到回傳 nil。
+func Lookup(menu map[string]interface{}, name string) interface{} {
+	return menu[name]
+}
+
+// Sorted 回傳排序好的價格。
+func Sorted(prices []int) []int {
+	sort.Slice(prices, func(i, j int) bool { return prices[i] &lt; prices[j] })
+	return prices
+}
+
+// HasDish 回傳 menu 裡有沒有 name。
+func HasDish(menu []string, name string) bool {
+	for _, d := range menu {
+		if d == name {
+			return true
+		}
+	}
+	return false
+}
+
+// Note 取出「備註：」後面的文字。
+func Note(line string) string {
+	if strings.HasPrefix(line, "備註：") {
+		return strings.TrimPrefix(line, "備註：")
+	}
+	return ""
+}
+
+// CookAll 同時處理每一張單。
+func CookAll(orders []string, cook func(string)) {
+	var wg sync.WaitGroup
+	for _, o := range orders {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			cook(o)
+		}()
+	}
+	wg.Wait()
+}</code></pre>
+    <pre class="shell"><code>go -C chapters/32-toolchain/testdata/oldstyle fix -diff ./...</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out"><code>--- …/chapters/32-toolchain/testdata/oldstyle/menu.go (old)
++++ …/chapters/32-toolchain/testdata/oldstyle/menu.go (new)
+@@ -2,36 +2,31 @@
+ package oldstyle
+
+ import (
+-	"sort"
++	"slices"
+ 	"strings"
+ 	"sync"
+ )
+
+ // Lookup 在 menu 裡找菜名，找不到回傳 nil。
+-func Lookup(menu map[string]interface{}, name string) interface{} {
++func Lookup(menu map[string]any, name string) any {
+ 	return menu[name]
+ }
+
+ // Sorted 回傳排序好的價格。
+ func Sorted(prices []int) []int {
+-	sort.Slice(prices, func(i, j int) bool { return prices[i] &lt; prices[j] })
++	slices.Sort(prices)
+ 	return prices
+ }
+
+ // HasDish 回傳 menu 裡有沒有 name。
+ func HasDish(menu []string, name string) bool {
+-	for _, d := range menu {
+-		if d == name {
+-			return true
+-		}
+-	}
+-	return false
++	return slices.Contains(menu, name)
+ }
+
+ // Note 取出「備註：」後面的文字。
+ func Note(line string) string {
+-	if strings.HasPrefix(line, "備註：") {
+-		return strings.TrimPrefix(line, "備註：")
++	if after, ok := strings.CutPrefix(line, "備註："); ok {
++		return after
+ 	}
+ 	return ""
+ }
+@@ -40,11 +16,9 @@
+ func CookAll(orders []string, cook func(string)) {
+ 	var wg sync.WaitGroup
+ 	for _, o := range orders {
+-		wg.Add(1)
+-		go func() {
+-			defer wg.Done()
++		wg.Go(func() {
+ 			cook(o)
+-		}()
++		})
+ 	}
+ 	wg.Wait()
+ }</code></pre>
+    <ul class="notes">
+      <li><code>-diff</code> 只印出建議、不改檔案；拿掉它，<code>go fix ./...</code> 就直接改寫。改完用 git diff 看一遍再 commit。</li>
+      <li>五個改寫：<code>interface{}</code> 換成 any（Go 1.18 起）；sort.Slice 換成 slices.Sort（Go 1.21 起），連 import 都一起改；手寫的搜尋迴圈換成 slices.Contains；HasPrefix 加 TrimPrefix 換成 strings.CutPrefix（Go 1.20 起）；wg.Add 加 go func 換成 wg.Go（Go 1.25 起，<a href="14-goroutines.html">14 章</a>）。</li>
+      <li>go fix 只會用 go.mod 的 go 版本允許的功能。同一個檔案，go.mod 改成 <code>go 1.21</code> 再跑一次，就只剩前四個建議：wg.Go 要 Go 1.25 才有。</li>
+      <li>函式庫的作者可以在要淘汰的函式上加 <code>//go:fix inline</code>，使用者執行 go fix 時，呼叫的地方會自動換成新的寫法。</li>
+      <li>這本手冊有幾章故意保留舊寫法做對照（例如 <a href="03-control-flow.html">03 章</a>的三段式 for、<a href="14-goroutines.html#waitgroup">14 章</a>的 wg.Add），go fix 會對它們提出建議，這是預期中的。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="build-tags">
+    <h2 id="build-tags">4. build tag 與檔名</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 252" role="img" aria-label="同一個目錄的檔案在三種建置下哪些會被編譯：GOOS=darwin 時編 edition_free.go、open_darwin.go 和其他檔案；GOOS=windows 時編 edition_free.go、open_windows.go 和其他檔案；GOOS=linux 加 -tags pro 時編 edition_pro.go、open_other.go 和其他檔案">
+        <title>哪些檔案會被編譯</title>
+        <text class="sm mono" x="212" y="28" text-anchor="middle">darwin</text>
+        <text class="sm mono" x="310" y="28" text-anchor="middle">windows</text>
+        <text class="sm mono" x="420" y="28" text-anchor="middle">linux+pro</text>
+        <text class="sm mono" x="8" y="62">edition_free.go</text>
+        <text class="sm mono" x="8" y="94">edition_pro.go</text>
+        <text class="sm mono" x="8" y="126">open_darwin.go</text>
+        <text class="sm mono" x="8" y="158">open_windows.go</text>
+        <text class="sm mono" x="8" y="190">open_other.go</text>
+        <text class="sm mono" x="8" y="222">main.go 等</text>
+        <rect class="acc" x="180" y="44" width="64" height="26" rx="5"/><text class="sm" x="212" y="62" text-anchor="middle">編譯</text>
+        <rect class="acc" x="278" y="44" width="64" height="26" rx="5"/><text class="sm" x="310" y="62" text-anchor="middle">編譯</text>
+        <text class="sm mute" x="420" y="62" text-anchor="middle">略過</text>
+        <text class="sm mute" x="212" y="94" text-anchor="middle">略過</text>
+        <text class="sm mute" x="310" y="94" text-anchor="middle">略過</text>
+        <rect class="hot" x="388" y="76" width="64" height="26" rx="5"/><text class="sm" x="420" y="94" text-anchor="middle">編譯</text>
+        <rect class="acc" x="180" y="108" width="64" height="26" rx="5"/><text class="sm" x="212" y="126" text-anchor="middle">編譯</text>
+        <text class="sm mute" x="310" y="126" text-anchor="middle">略過</text>
+        <text class="sm mute" x="420" y="126" text-anchor="middle">略過</text>
+        <text class="sm mute" x="212" y="158" text-anchor="middle">略過</text>
+        <rect class="acc" x="278" y="140" width="64" height="26" rx="5"/><text class="sm" x="310" y="158" text-anchor="middle">編譯</text>
+        <text class="sm mute" x="420" y="158" text-anchor="middle">略過</text>
+        <text class="sm mute" x="212" y="190" text-anchor="middle">略過</text>
+        <text class="sm mute" x="310" y="190" text-anchor="middle">略過</text>
+        <rect class="hot" x="388" y="172" width="64" height="26" rx="5"/><text class="sm" x="420" y="190" text-anchor="middle">編譯</text>
+        <rect class="acc" x="180" y="204" width="64" height="26" rx="5"/><text class="sm" x="212" y="222" text-anchor="middle">編譯</text>
+        <rect class="acc" x="278" y="204" width="64" height="26" rx="5"/><text class="sm" x="310" y="222" text-anchor="middle">編譯</text>
+        <rect class="hot" x="388" y="204" width="64" height="26" rx="5"/><text class="sm" x="420" y="222" text-anchor="middle">編譯</text>
+      </svg>
+      <figcaption>每個檔案在編譯前先過兩道篩選：檔名結尾的 _GOOS、_GOARCH，以及檔案開頭的 //go:build。通過的檔案才組成這次的 package。</figcaption>
+    </figure>
+    <p>點餐機有免費版和專業版，差別只在一個常數。兩個檔案各自宣告 edition，用 <strong>build tag</strong> 決定編哪一個：</p>
+    <pre class="code" data-src="chapters/32-toolchain/edition_free.go"><code>//go:build !pro
 
 package main
 
-const edition = "免費版"
-
-<span class="c">// ---- edition_pro.go ----</span>
-//go:build pro
+// edition 在沒有加 -tags pro 時使用這個檔案。
+const edition = "免費版"</code></pre>
+    <pre class="code" data-src="chapters/32-toolchain/edition_pro.go"><code>//go:build pro
 
 package main
 
+// edition 在加上 -tags pro 時使用這個檔案。
 const edition = "專業版"</code></pre>
-    <p class="label">main.go（節錄）</p>
-    <pre class="code"><code>var version = "dev" <span class="c">// 編譯時用 -ldflags 改掉</span>
+    <p><code>//go:build</code> 必須在 package 子句之前，後面空一行。條件可以用 <code>&amp;&amp;</code>、<code>||</code>、<code>!</code> 和括號組合，例如 <code>//go:build (linux || darwin) &amp;&amp; !cgo</code>。滿足的標籤有：目標的 GOOS 和 GOARCH、<code>unix</code>（類 Unix 系統）、<code>cgo</code>（cgo 啟用時）、<code>go1.1</code> 到目前版本的 <code>go1.N</code>，以及 <code>-tags</code> 給的自訂標籤。</p>
+    <p>只跟作業系統有關時，連 //go:build 都不用寫，用<strong>檔名</strong>就好：<code>open_darwin.go</code> 只在 GOOS=darwin 時編譯。其他系統沒有對應的檔名，open_other.go 就用 build tag 排除這兩個：</p>
+    <pre class="code" data-src="chapters/32-toolchain/open_darwin.go"><code>package main
+
+// 檔名以 _darwin.go 結尾：只有 GOOS=darwin（macOS）時才會被編譯，不需要寫 //go:build。
+
+// openCommand 回傳在這個作業系統上用預設瀏覽器打開網址的指令。
+func openCommand() []string {
+	return []string{"open"}
+}</code></pre>
+    <pre class="code" data-src="chapters/32-toolchain/open_other.go"><code>//go:build !darwin &amp;&amp; !windows
+
+package main
+
+// 其他系統（Linux、各種 BSD…）沒有對應的檔名，用 build 條件排除 darwin 和 windows。
+
+// openCommand 回傳在這個作業系統上用預設瀏覽器打開網址的指令。
+func openCommand() []string {
+	return []string{"xdg-open"}
+}</code></pre>
+    <p>go list 可以直接看到某種建置下用了哪些檔案（GoFiles）、略過了哪些（IgnoredGoFiles）：</p>
+    <pre class="shell"><code>go list -f '{{.GoFiles}} {{.IgnoredGoFiles}}' ./chapters/32-toolchain
+GOOS=windows go list -f '{{.GoFiles}} {{.IgnoredGoFiles}}' ./chapters/32-toolchain
+GOOS=linux go list -tags pro -f '{{.GoFiles}} {{.IgnoredGoFiles}}' ./chapters/32-toolchain</code></pre>
+    <p class="label">輸出（在 Mac 上）</p>
+    <pre class="out"><code>[edition_free.go main.go menu.go menu_gen.go open_darwin.go] [edition_pro.go open_other.go open_windows.go]
+[edition_free.go main.go menu.go menu_gen.go open_windows.go] [edition_pro.go open_darwin.go open_other.go]
+[edition_pro.go main.go menu.go menu_gen.go open_other.go] [edition_free.go open_darwin.go open_windows.go]</code></pre>
+    <ul class="notes">
+      <li>每種組合都要剛好有一個 edition、一個 openCommand。少了會「undefined」，多了會「redeclared」。所以每個平台都要編譯檢查過：<code>GOOS=windows go vet ./...</code> 在 Mac 上就能做到。</li>
+      <li>檔名規則的細節（_test 怎麼處理、第一個底線前面不算、<code>linux.go</code> 為什麼不算）是練習 3 的主題。</li>
+      <li>這個 repo 的練習題就是 build tag 的應用：exercises.go 是 <code>//go:build !solution</code>，solution.go 是 <code>//go:build solution</code>，<code>go test -tags solution</code> 換成參考解答。</li>
+      <li>看到 <code>// +build</code> 這種寫法，是 Go 1.17 以前的舊語法，新程式只寫 //go:build。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="cross">
+    <h2 id="cross">5. 交叉編譯</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 236" role="img" aria-label="同一份程式碼，設定不同的 GOOS 和 GOARCH，在同一台 Mac 上分別編出 Linux 伺服器用的 app、Windows 用的 app.exe、Apple 晶片 Mac 用的 app">
+        <title>交叉編譯</title>
+        <rect class="acc" x="8" y="86" width="150" height="56" rx="10"/>
+        <text class="sm" x="83" y="119" text-anchor="middle">同一份程式碼</text>
+        <path class="wire" d="M158 114 C190 114 196 42 226 42"/>
+        <path class="wire" d="M158 114 H226"/>
+        <path class="wire" d="M158 114 C190 114 196 186 226 186"/>
+        <rect class="soft" x="226" y="14" width="246" height="56" rx="8"/>
+        <text class="sm mono" x="238" y="36">GOOS=linux GOARCH=amd64</text>
+        <text class="sm" x="238" y="58">app：Linux 伺服器</text>
+        <rect class="soft" x="226" y="86" width="246" height="56" rx="8"/>
+        <text class="sm mono" x="238" y="108">GOOS=windows GOARCH=amd64</text>
+        <text class="sm" x="238" y="130">app.exe：Windows</text>
+        <rect class="soft" x="226" y="158" width="246" height="56" rx="8"/>
+        <text class="sm mono" x="238" y="180">GOOS=darwin GOARCH=arm64</text>
+        <text class="sm" x="238" y="202">app：Apple 晶片的 Mac</text>
+        <text class="sm mute" x="240" y="232" text-anchor="middle">純 Go 的程式不用另外安裝任何東西</text>
+      </svg>
+      <figcaption>Go 的編譯器本身就能產生每個平台的機器碼，標準庫也會跟著重新編譯。不需要目標平台的機器，也不需要另外裝工具鏈。</figcaption>
+    </figure>
+    <pre class="shell"><code>GOOS=linux GOARCH=amd64 go build -o app ./chapters/32-toolchain       <span class="c"># Linux 伺服器</span>
+GOOS=windows GOARCH=amd64 go build -o app.exe ./chapters/32-toolchain <span class="c"># Windows</span>
+go tool dist list                                                     <span class="c"># 所有支援的 GOOS/GOARCH 組合</span>
+go tool dist list | wc -l</code></pre>
+    <p class="label">最後一行的輸出（Go 1.27.4）</p>
+    <pre class="out"><code>      47</code></pre>
+    <ul class="notes">
+      <li>Linux 常見的組合是 amd64 和 arm64（雲端的 ARM 主機、樹莓派）。Windows 和 macOS 也各有 amd64、arm64。</li>
+      <li><strong>cgo</strong>：用到 C 程式庫的 package 需要目標平台的 C 編譯器，交叉編譯時 cgo 預設是關的。只用標準庫的程式不受影響。明確設定 <code>CGO_ENABLED=0</code> 會得到不依賴系統 C 函式庫的執行檔，適合放進極簡的容器映像。</li>
+      <li>編出來的檔案不能在 Mac 上直接執行，但 <code>go version app.exe</code> 讀得到它的建置資訊（下一節）。toolchain_test.go 用檔案開頭的幾個 byte 確認 Linux 版是 ELF、Windows 版是 PE（開頭是 MZ）。</li>
+      <li>編譯產物不要 commit。這個 repo 早期放過 .exe 檔，後來從 git 移除了；要發佈執行檔，用 GitHub Releases 這類地方。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="version">
+    <h2 id="version">6. 版本與建置資訊</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 268" role="img" aria-label="原始碼裡的 var version 預設是 dev。go build 加上 -ldflags -X main.version=1.2.3 時，連結器把字串改成 1.2.3。go build 也自動把 Go 版本、module 版本、建置參數、git commit 寫進執行檔">
+        <title>版本怎麼進到執行檔</title>
+        <rect class="soft" x="40" y="8" width="400" height="44" rx="8"/>
+        <text class="sm mono" x="240" y="35" text-anchor="middle">var version = "dev"</text>
+        <path class="wire" d="M240 52 V76"/>
+        <path class="tip" d="M240 84 l-6 -10 h12 z"/>
+        <rect class="acc" x="40" y="84" width="400" height="66" rx="8"/>
+        <text class="sm mono" x="240" y="110" text-anchor="middle">go build</text>
+        <text class="sm mono" x="240" y="136" text-anchor="middle">-ldflags "-X main.version=1.2.3"</text>
+        <path class="wire" d="M240 150 V174"/>
+        <path class="tip" d="M240 182 l-6 -10 h12 z"/>
+        <rect class="soft" x="40" y="182" width="400" height="78" rx="8"/>
+        <text class="sm bold" x="56" y="206">執行檔</text>
+        <text class="sm mono" x="56" y="230">version = "1.2.3"</text>
+        <text class="sm" x="56" y="252">自動寫進：Go 版本、module 版本、git commit</text>
+      </svg>
+      <figcaption>版本號有兩個來源：你在建置時用 -X 指定的字串，以及 go build 自動寫進執行檔的建置資訊。</figcaption>
+    </figure>
+    <pre class="code" data-src="chapters/32-toolchain/main.go#version,describe,buildInfoDemo"><code>var version = "dev"
 
 func describe() string {
 	return fmt.Sprintf("版本 %s，%s", version, edition)
+}
+
+func buildInfoDemo() {
+	info, ok := debug.ReadBuildInfo()
+	if !ok {
+		fmt.Println("沒有建置資訊")
+		return
+	}
+	fmt.Printf("Go 版本：%s\n", info.GoVersion)
+	fmt.Printf("module 版本：%s\n", info.Main.Version)
+	for _, s := range info.Settings {
+		switch s.Key {
+		case "-tags", "-ldflags", "GOOS", "GOARCH", "vcs.revision", "vcs.modified":
+			fmt.Printf("%s = %s\n", s.Key, s.Value)
+		}
+	}
 }</code></pre>
+    <pre class="out" data-example="chapters/32-toolchain#Example_describe"><code>版本 dev，免費版</code></pre>
+    <p>發版時，用連結器的 <code>-X</code> 把 version 換掉，再加上 -tags pro 編專業版：</p>
+    <pre class="shell"><code>go build -tags pro -ldflags "-X main.version=1.2.3" -o app ./chapters/32-toolchain
+./app | head -2
+go version -m app | grep -v CGO_</code></pre>
     <p class="label">輸出</p>
-    <pre class="out"><code>$ go run -tags pro ./chapters/32-toolchain
-版本 dev，專業版
-平台 darwin/arm64
-$ go run -ldflags "-X main.version=1.2.3" ./chapters/32-toolchain
-版本 1.2.3，免費版
-平台 darwin/arm64</code></pre>
+    <pre class="out"><code>== 1. 版本與版別 ==
+版本 1.2.3，專業版
+app: go1.27.4
+	path	github.com/xinqilin/GO-Playground/chapters/32-toolchain
+	mod	github.com/xinqilin/GO-Playground	v0.0.0-20261120175533-e29293b9197c+dirty
+	build	-buildmode=exe
+	build	-compiler=gc
+	build	-ldflags="-X main.version=1.2.3"
+	build	-tags=pro
+	build	GOARCH=arm64
+	build	GOOS=darwin
+	build	GOARM64=v8.0
+	build	vcs=git
+	build	vcs.revision=e29293b9197c5e5eb11bddb0fa7a0fee9bf0680b
+	build	vcs.time=2026-11-20T17:55:33Z
+	build	vcs.modified=true</code></pre>
+    <ul class="notes">
+      <li><strong>-X 的規則</strong>：只能改 package 層級的 string 變數，不能改常數；變數的初始值必須是常數字串或沒有初始值，初始值呼叫了函式就沒有效果，而且不會報錯。不在 main 的變數要寫完整的 import path，例如 <code>-X github.com/xinqilin/GO-Playground/internal/build.Version=1.2.3</code>。</li>
+      <li><strong>go version -m</strong> 讀出執行檔裡的建置資訊：用哪一版 Go、哪些參數、從哪個 commit 建的。vcs.modified=true 表示建置時有還沒 commit 的改動。線上出了問題，先用它確認跑的是哪個版本。</li>
+      <li>程式裡用 <code>runtime/debug.ReadBuildInfo</code> 讀同樣的資訊，也就是 buildInfoDemo 做的事。練習 4 用它決定程式要顯示的版本。</li>
+      <li><strong>module 版本</strong>：Go 1.24 起，go build 會依 git 的 tag 和 commit 填入 main module 的版本，有未 commit 的改動時加上 +dirty，上面的 <code>v0.0.0-20261120175533-e29293b9197c+dirty</code> 就是這樣來的。go run 不寫入版本控制的資訊，所以 <code>go run ./chapters/32-toolchain</code> 看到的是 <code>(devel)</code>。</li>
+      <li><code>-ldflags "-s"</code> 去掉符號表和除錯資訊，執行檔變小，但 Delve 這類除錯器就沒辦法用了。</li>
+    </ul>
   </section>
 
-  <section aria-labelledby="notes">
-    <h2 id="notes">工程師筆記</h2>
+  <section aria-labelledby="generate">
+    <h2 id="generate">7. go generate</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 220" role="img" aria-label="手寫的 menu.csv 由 genmenu 產生器轉成 menu_gen.go，這一步只有執行 go generate 時才會發生。go build 和 go test 只編譯現有的檔案，不會執行 go generate，所以產生的檔案也要 commit，並用測試確認它沒有過期">
+        <title>從資料產生程式碼</title>
+        <rect class="soft" x="10" y="20" width="130" height="48" rx="8"/>
+        <text class="sm mono" x="75" y="49" text-anchor="middle">menu.csv</text>
+        <path class="wire acc-ln" d="M140 44 H166"/>
+        <path class="tip acc-tip" d="M175 44 l-10 -6 v12 z"/>
+        <rect class="acc" x="175" y="20" width="130" height="48" rx="8"/>
+        <text class="sm mono" x="240" y="49" text-anchor="middle">genmenu</text>
+        <path class="wire acc-ln" d="M305 44 H331"/>
+        <path class="tip acc-tip" d="M340 44 l-10 -6 v12 z"/>
+        <rect class="soft" x="340" y="20" width="130" height="48" rx="8"/>
+        <text class="sm mono" x="405" y="49" text-anchor="middle">menu_gen.go</text>
+        <text class="sm" x="75" y="92" text-anchor="middle">手寫，要 commit</text>
+        <text class="sm t-acc" x="240" y="92" text-anchor="middle">go generate 才執行</text>
+        <text class="sm" x="405" y="92" text-anchor="middle">產生的，也要 commit</text>
+        <rect class="hot" x="10" y="118" width="460" height="48" rx="8"/>
+        <text class="sm" x="240" y="147" text-anchor="middle">go build、go test 只編譯現有的檔案，不會執行 go generate</text>
+        <text class="sm mute" x="240" y="200" text-anchor="middle">用測試確認產生的檔案和資料一致</text>
+      </svg>
+      <figcaption>go generate 只是「依照原始碼裡的註解執行指令」的工具，它不知道產生器做了什麼，也不追蹤什麼時候該重新產生。</figcaption>
+    </figure>
+    <p>菜單常常改，每次手動改 Go 程式容易出錯。把菜單放在 CSV，讓程式產生 Go 原始碼：</p>
+    <pre class="code" data-src="chapters/32-toolchain/menu.csv"><code>菜名,價格
+排骨飯,90
+雞腿飯,100
+滷肉飯,50
+魚排飯,95
+素食便當,80</code></pre>
+    <pre class="code" data-src="chapters/32-toolchain/menu.go"><code>package main
+
+import "fmt"
+
+// 改了 menu.csv 之後，在這個目錄執行 go generate，menu_gen.go 就會重新產生。
+//go:generate go run ./genmenu -in menu.csv -out menu_gen.go
+
+// dish 是菜單上的一道菜。menu 這個變數在 menu_gen.go，由 genmenu 產生。
+type dish struct {
+	name  string
+	price int
+}
+
+// menuDemo 印出產生出來的菜單。
+func menuDemo() {
+	for _, d := range menu {
+		fmt.Printf("%s %d 元\n", d.name, d.price)
+	}
+}</code></pre>
+    <p><code>//go:generate</code> 後面就是要執行的指令，工作目錄是這個檔案所在的目錄。產生器是同一個 repo 裡的一支小程式，用 <a href="23-json.html">23 章</a>的 encoding/csv 讀資料，最後交給 go/format 排版：</p>
+    <pre class="code" data-src="chapters/32-toolchain/genmenu/main.go#generate"><code>func generate(r io.Reader, source string) ([]byte, error) {
+	rows, err := csv.NewReader(r).ReadAll()
+	if err != nil {
+		return nil, err
+	}
+	if len(rows) &lt; 2 {
+		return nil, errors.New("菜單是空的")
+	}
+	var b bytes.Buffer
+	fmt.Fprintf(&amp;b, "// Code generated by genmenu from %s; DO NOT EDIT.\n\n", source)
+	b.WriteString("package main\n\nvar menu = []dish{\n")
+	for i, row := range rows[1:] {
+		price, err := strconv.Atoi(row[1])
+		if err != nil {
+			return nil, fmt.Errorf("第 %d 行的價格：%w", i+2, err)
+		}
+		fmt.Fprintf(&amp;b, "{%q, %d},\n", row[0], price)
+	}
+	b.WriteString("}\n")
+	return format.Source(b.Bytes())
+}</code></pre>
+    <pre class="shell"><code>go generate -x ./chapters/32-toolchain   <span class="c"># -x 印出執行的指令</span></code></pre>
+    <p class="label">輸出</p>
+    <pre class="out"><code>go run ./genmenu -in menu.csv -out menu_gen.go</code></pre>
+    <pre class="code" data-src="chapters/32-toolchain/menu_gen.go"><code>// Code generated by genmenu from menu.csv; DO NOT EDIT.
+
+package main
+
+var menu = []dish{
+	{"排骨飯", 90},
+	{"雞腿飯", 100},
+	{"滷肉飯", 50},
+	{"魚排飯", 95},
+	{"素食便當", 80},
+}</code></pre>
+    <pre class="out" data-example="chapters/32-toolchain#Example_menuDemo"><code>排骨飯 90 元
+雞腿飯 100 元
+滷肉飯 50 元
+魚排飯 95 元
+素食便當 80 元</code></pre>
     <ul class="notes">
-      <li><code>gofmt -l .</code>、<code>go vet ./...</code>、<code>go test -race ./...</code> 是提交前的基本三件事，這個 repo 的 CI 也是跑這三個。</li>
-      <li><code>go fix -diff ./...</code> 會列出可以換成新寫法的地方（例如三段式迴圈改成 <code>range 3</code>、<code>errors.As</code> 改成 <code>errors.AsType</code>）。這個 repo 有幾處刻意保留舊寫法做對照，所以會被列出來。</li>
-      <li>build tag 寫在檔案第一行：<code>//go:build pro</code>，用 <code>-tags pro</code> 切換；檔名結尾是 <code>_windows.go</code>、<code>_linux.go</code> 的檔案會自動依平台挑選。</li>
-      <li><code>-ldflags "-X main.version=1.2.3"</code> 在編譯時寫入版本號，CI 發版時很常用。</li>
-      <li>交叉編譯只要設 <code>GOOS</code>、<code>GOARCH</code>；只有用到 cgo 的程式才會麻煩。</li>
-      <li>效能分析：<code>go test -cpuprofile cpu.out</code> 產生 profile，再用 <code>go tool pprof cpu.out</code> 找熱點；服務可以匯入 <code>net/http/pprof</code> 線上查看。依賴的已知漏洞用 <code>govulncheck</code> 掃描（另外安裝）。</li>
+      <li><strong>第一行的格式是約定好的</strong>：<code>// Code generated 任意文字 DO NOT EDIT.</code>，放在 package 子句之前。編輯器看到它會提醒你不要手動改，很多工具也會跳過這種檔案。練習 6 會實作這條規則的判斷。</li>
+      <li><strong>產生的檔案要 commit</strong>：使用者 <code>go install</code> 你的程式時不會執行 go generate，產生器需要的工具也不一定裝了。</li>
+      <li><strong>用測試確認沒有過期</strong>：genmenu/main_test.go 的 TestMenuUpToDate 讀 menu.csv 重新產生一次，和 commit 的 menu_gen.go 比較。改了 CSV 卻忘了 go generate，CI 就會失敗。</li>
+      <li>Go 團隊維護的 stringer（golang.org/x/tools/cmd/stringer）是最常見的產生器：替一組常數產生 String 方法。協定、資料庫存取的程式碼也常用產生器。</li>
+      <li>//go:generate 的參數規則（引號、tab）是練習 5 的主題。</li>
     </ul>
+  </section>
+
+  <section aria-labelledby="tools">
+    <h2 id="tools">8. 專案用到的工具</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 196" role="img" aria-label="go.mod 的 tool 指令記錄專案用到的工具，例如 govulncheck，版本和其他依賴一樣記在 go.mod 和 go.sum。每個開發者和 CI 都用 go tool govulncheck 執行同一個版本">
+        <title>tool 指令</title>
+        <rect class="acc" x="8" y="8" width="226" height="120" rx="10"/>
+        <text class="sm mono bold" x="20" y="34">go.mod</text>
+        <text class="sm mono" x="20" y="62">tool golang.org/x/vuln/</text>
+        <text class="sm mono" x="36" y="84">cmd/govulncheck</text>
+        <text class="sm mono" x="20" y="110">require …</text>
+        <rect class="soft" x="246" y="8" width="226" height="120" rx="10"/>
+        <text class="sm bold" x="258" y="34">大家執行的都是</text>
+        <text class="sm mono" x="258" y="62">go tool govulncheck</text>
+        <text class="sm" x="258" y="90">同一個版本</text>
+        <text class="sm" x="258" y="114">不用另外安裝</text>
+        <path class="wire" d="M234 68 H246"/>
+        <text class="sm" x="240" y="170" text-anchor="middle">工具的版本也和依賴一樣，記在 go.mod 和 go.sum</text>
+      </svg>
+      <figcaption>Go 1.24 起，go.mod 可以用 tool 指令記錄專案用到的命令列工具。以前常見的「tools.go 裡寫空白 import」的做法不再需要。</figcaption>
+    </figure>
+    <p>這個 repo 只用標準庫，下面的指令沒有實際加進來；在你自己的專案裡執行它們，go.mod 就會多出 tool 和 require：</p>
+    <pre class="shell"><code>go get -tool golang.org/x/vuln/cmd/govulncheck   <span class="c"># 加進 go.mod 的 tool 指令</span>
+go tool govulncheck ./...                       <span class="c"># 檢查用到的依賴有沒有已知的漏洞</span>
+go get tool                                     <span class="c"># 把所有工具升到最新版</span></code></pre>
+    <ul class="notes">
+      <li><strong>govulncheck</strong> 是 Go 官方的漏洞檢查工具，比對 Go 的漏洞資料庫。它會分析呼叫關係，只報告程式真的呼叫到的有漏洞的函式，所以雜訊很少。適合放進 CI。</li>
+      <li><strong>Delve</strong>（<code>dlv</code>）是 Go 最常用的除錯器：設中斷點、一步一步執行、看變數和 goroutine。<code>dlv debug ./chapters/32-toolchain</code> 除錯程式，<code>dlv test ./exercises/32-toolchain</code> 除錯測試。VS Code 和 GoLand 的除錯功能背後用的就是它。GDB 也能用，但官方文件建議 Delve。</li>
+      <li>只想試用一次的工具，可以不加進 go.mod，直接 <code>go run golang.org/x/vuln/cmd/govulncheck@latest ./...</code>。</li>
+    </ul>
+    <section class="deep" aria-labelledby="toolchain-deep">
+      <p class="tag">深入：第一次讀可以先跳過</p>
+      <h3 id="toolchain-deep">GOTOOLCHAIN 與 go env -w</h3>
+      <p>go.mod 的 <code>go 1.27</code> 是這個 module 至少需要的 Go 版本。你的 go 比它舊時，預設的 <code>GOTOOLCHAIN=auto</code> 會自動下載夠新的工具鏈來用（<a href="00-hello.html#install">00 章</a>）。go.mod 還可以加一行 <code>toolchain go1.27.4</code>，指定「建議」使用的版本。<code>GOTOOLCHAIN=local</code> 則是只用目前安裝的版本，不自動下載。</p>
+      <p><code>go env -w GOFLAGS=-mod=mod</code> 這類指令把設定寫進使用者的設定檔（<code>go env GOENV</code> 印出它的位置），之後每次執行 go 都會套用。很方便，但也容易忘記：別人用同樣的指令得到不同的結果時，先比對 <code>go env</code> 的輸出。要取消用 <code>go env -u GOFLAGS</code>。</p>
+    </section>
+  </section>
+
+  <section aria-labelledby="pitfalls">
+    <h2 id="pitfalls">常見錯誤</h2>
+    <h3 id="pit-test-only">1. 只跑 go test，不跑 go vet</h3>
+    <p>go test 只跑 vet 的一小部分，複製鎖這類問題要 go vet 才抓得到。CI 兩個都要跑（第 2 節）。</p>
+
+    <h3 id="pit-tag-blank">2. //go:build 的位置不對</h3>
+    <p>寫在 package 子句後面，或和 package 說明的註解黏在一起，它就只是普通的註解，條件不會生效。放在檔案最前面，後面空一行。</p>
+
+    <h3 id="pit-one-platform">3. 只在自己的平台上編譯</h3>
+    <p>用了 _windows.go 檔案，卻從來沒有用 GOOS=windows 編譯過，某個函式漏了 Windows 版也不知道。CI 裡至少對每個支援的平台跑一次 go vet（第 4 節）。</p>
+
+    <h3 id="pit-x-const">4. -X 改不了版本</h3>
+    <p>把 version 寫成常數，或初始值呼叫了函式，-X 都會默默沒有效果。用 package 層級的 string 變數，初始值寫常數字串；路徑要寫完整的 import path（第 6 節）。</p>
+
+    <h3 id="pit-generate-stale">5. 改了資料，忘了 go generate</h3>
+    <p>go build 不會幫你執行 go generate，程式用的還是舊的產生結果。寫一個比對的測試（第 7 節）。</p>
+
+    <h3 id="pit-edit-generated">6. 手動修改產生的檔案</h3>
+    <p>下次 go generate 就被蓋掉了。要改的是資料或產生器。</p>
+
+    <h3 id="pit-binaries">7. 把執行檔 commit 進 git</h3>
+    <p>執行檔很大、每次建置都不同，而且只適用一個平台。加進 .gitignore，用 Releases 發佈（第 5 節）。</p>
+
+    <h3 id="pit-fix-blind">8. go fix 改完不看就 commit</h3>
+    <p>改寫不應該改變行為，但還是要看過 diff、跑過測試。一次只套一種改寫，review 起來比較容易（第 3 節）。</p>
   </section>
 
   <section aria-labelledby="java">
@@ -133,34 +702,146 @@ $ go run -ldflags "-X main.version=1.2.3" ./chapters/32-toolchain
       <table class="vs">
         <thead><tr><th scope="col">主題</th><th scope="col">Java</th><th scope="col">Go</th></tr></thead>
         <tbody>
-          <tr><th scope="row">建置</th><td class="java">Maven / Gradle 與外掛</td><td><code>go build</code>，內建</td></tr>
-          <tr><th scope="row">靜態檢查</th><td class="java">SpotBugs、Error Prone</td><td><code>go vet</code></td></tr>
-          <tr><th scope="row">格式化</th><td class="java">各家 formatter 設定</td><td><code>gofmt</code>，只有一種</td></tr>
-          <tr><th scope="row">產物</th><td class="java"><code>.jar</code>，要有 JVM</td><td>單一原生執行檔</td></tr>
-          <tr><th scope="row">多平台</th><td class="java">一個 jar 到處跑</td><td>每個平台編一次，用 <code>GOOS</code>/<code>GOARCH</code> 交叉編譯</td></tr>
-          <tr><th scope="row">效能分析</th><td class="java">JFR、async-profiler</td><td><code>pprof</code></td></tr>
+          <tr><th scope="row">建置工具</th><td class="java">Maven、Gradle，另外的設定檔</td><td>go 指令，go.mod 加上原始碼本身</td></tr>
+          <tr><th scope="row">靜態檢查</th><td class="java">SpotBugs、Error Prone 等外掛</td><td>go vet 內建，go test 自動跑一部分</td></tr>
+          <tr><th scope="row">產物</th><td class="java">jar，需要 JVM</td><td>單一執行檔，不需要執行環境</td></tr>
+          <tr><th scope="row">跨平台</th><td class="java">一個 jar 到處跑，JVM 依平台不同</td><td>每個平台編一個執行檔，GOOS/GOARCH 一行搞定</td></tr>
+          <tr><th scope="row">條件編譯</th><td class="java">沒有，用設定檔或 profile 切換</td><td>build tag 和檔名，在編譯時就決定</td></tr>
+          <tr><th scope="row">版本資訊</th><td class="java">MANIFEST.MF、資源檔</td><td>-ldflags -X，加上自動寫入的建置資訊</td></tr>
+          <tr><th scope="row">程式碼產生</th><td class="java">annotation processor，編譯時自動執行</td><td>go generate，手動執行，結果要 commit</td></tr>
+          <tr><th scope="row">除錯器</th><td class="java">JDWP，IDE 內建</td><td>Delve，IDE 也是用它</td></tr>
         </tbody>
       </table>
     </div>
+    <p>最大的差別在於「建置過程是否可以寫程式」。Gradle 的建置腳本本身就是程式，可以做任何事；go build 沒有外掛、沒有腳本，只看原始碼和 go.mod。代價是彈性比較小，好處是任何人 clone 下來，go build 的結果都一樣。需要額外步驟時，Go 的做法是把它變成明確的指令（go generate）或 Makefile，而不是藏在建置工具裡。</p>
+  </section>
+
+  <section aria-labelledby="exercises">
+    <h2 id="exercises">練習</h2>
+    <p>題目在 <code>exercises/32-toolchain/exercises.go</code>：自己實作 go 指令裡的幾個小規則。有一題的測試會和 go/build 本身的判斷比對。</p>
+    <pre class="shell"><code>go test ./exercises/32-toolchain/                        <span class="c"># 跑全部練習</span>
+go test ./exercises/32-toolchain/ -run TestFileMatches   <span class="c"># 只跑一題</span>
+go test -tags solution ./exercises/32-toolchain/         <span class="c"># 跑參考解答</span></code></pre>
+    <p>共用的定義在 doc.go：</p>
+    <pre class="code" data-src="exercises/32-toolchain/doc.go#ErrNotDirective,KnownOS,KnownArch"><code>var ErrNotDirective = errors.New("不是 //go:generate 指令")
+
+var KnownOS = map[string]bool{
+	"aix": true, "android": true, "darwin": true, "dragonfly": true, "freebsd": true,
+	"illumos": true, "ios": true, "js": true, "linux": true, "netbsd": true,
+	"openbsd": true, "plan9": true, "solaris": true, "wasip1": true, "windows": true,
+}
+
+var KnownArch = map[string]bool{
+	"386": true, "amd64": true, "arm": true, "arm64": true, "loong64": true,
+	"mips": true, "mipsle": true, "mips64": true, "mips64le": true,
+	"ppc64": true, "ppc64le": true, "riscv64": true, "s390x": true, "wasm": true,
+}</code></pre>
+    <ol class="exercises">
+      <li>
+        <h3><span class="level l1">入門</span>練習 1：交叉編譯的檔名</h3>
+        <p>一次編好幾個平台時，每個執行檔要有不同的名字。</p>
+        <pre class="code" data-src="exercises/32-toolchain/exercises.go#BinaryName"><code>func BinaryName(name, goos, goarch string) string {
+	// TODO: 實作
+	return ""
+}</code></pre>
+        <p>測試：<code>TestBinaryName</code>。</p>
+        <details><summary>提示</summary><p>字串相加就好，只有 goos 是 "windows" 時多加 .exe。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l1">入門</span>練習 2：判斷 build 條件</h3>
+        <p>不用自己寫 parser：標準庫有現成的 package。</p>
+        <pre class="code" data-src="exercises/32-toolchain/exercises.go#Matches"><code>func Matches(expr string, tags []string) (bool, error) {
+	// TODO: 實作
+	return false, nil
+}</code></pre>
+        <p>測試：<code>TestMatches</code>。</p>
+        <details><summary>提示</summary><p><code>constraint.Parse("//go:build " + expr)</code>（go/build/constraint）回傳一個 Expr，它的 <code>Eval(func(tag string) bool)</code> 會對每個標籤呼叫你給的函式。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l2">進階</span>練習 3：檔名規則</h3>
+        <p>第 4 節的檔名規則。測試除了列出答案，還會和 go/build 的 MatchFile 比對。</p>
+        <pre class="code" data-src="exercises/32-toolchain/exercises.go#FileMatches"><code>func FileMatches(name, goos, goarch string) bool {
+	// TODO: 實作
+	return false
+}</code></pre>
+        <p>測試：<code>TestFileMatches</code>、<code>TestFileMatchesTable</code>。</p>
+        <details><summary>提示</summary><p>依序處理：strings.Cut 切掉第一個 . 之後、TrimSuffix 去掉 _test、strings.Cut 取第一個 _ 之後、strings.Split 以 _ 分段。注意 tools_unix.go：unix 不在 KnownOS 裡，所以檔名不算條件。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l2">進階</span>練習 4：要顯示哪個版本</h3>
+        <p>結合第 6 節的兩個來源：-X 注入的字串和建置資訊。</p>
+        <pre class="code" data-src="exercises/32-toolchain/exercises.go#Version"><code>func Version(info *debug.BuildInfo, injected string) string {
+	// TODO: 實作
+	return ""
+}</code></pre>
+        <p>測試：<code>TestVersion</code>。</p>
+        <details><summary>提示</summary><p>info.Settings 是 <code>[]debug.BuildSetting</code>，每一個有 Key 和 Value。先處理 info 是 nil 的情況。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l3">挑戰</span>練習 5：解析 //go:generate</h3>
+        <p>go generate 怎麼把一行註解切成指令和參數。</p>
+        <pre class="code" data-src="exercises/32-toolchain/exercises.go#GenerateArgs"><code>func GenerateArgs(line string) ([]string, error) {
+	// TODO: 實作
+	return nil, nil
+}</code></pre>
+        <p>測試：<code>TestGenerateArgs</code>。</p>
+        <details><summary>提示</summary><p>每一圈先去掉開頭的空白和 tab。不是雙引號開頭的參數，到下一個空白或 tab 為止；雙引號開頭的，往後找右引號，遇到反斜線就多跳過一個字元，找到後整段交給 strconv.Unquote。</p></details>
+      </li>
+      <li>
+        <h3><span class="level fix">找錯</span>練習 6：誰是產生的檔案</h3>
+        <p>只要檔案裡出現 DO NOT EDIT 就當成產生的檔案，結果一支檢查工具把自己也跳過了。</p>
+        <pre class="code" data-src="exercises/32-toolchain/exercises.go#IsGenerated"><code>func IsGenerated(src []byte) bool {
+	return bytes.Contains(src, []byte("DO NOT EDIT"))
+}</code></pre>
+        <p>測試：<code>TestIsGenerated</code>。</p>
+        <details><summary>提示</summary><p>用 go/parser 的 <code>ParseFile</code> 加上 <code>parser.PackageClauseOnly|parser.ParseComments</code> 只解析到 package 子句，再交給 <code>ast.IsGenerated</code>（Go 1.21 起）。或者自己逐行檢查 package 之前的註解。</p></details>
+      </li>
+    </ol>
+    <p><a href="https://github.com/xinqilin/GO-Playground/blob/main/exercises/32-toolchain/solution.go">參考解答</a>：先自己寫完再看。測試通過的寫法都是對的。</p>
+  </section>
+
+  <section aria-labelledby="recap">
+    <h2 id="recap">重點回顧</h2>
+    <ul class="recap">
+      <li>go 指令就是工具箱：go help 主題、go env 看設定、go doc 查文件、go list 看 package 的細節。</li>
+      <li>go vet 抓編得過但幾乎一定錯的寫法；go test 只跑其中一部分，CI 兩個都要跑。</li>
+      <li>go fix 依 go.mod 的版本把舊寫法換成新的，先用 -diff 看，改完 review。</li>
+      <li>//go:build 放在 package 之前、後面空一行；檔名 _GOOS、_GOARCH 也是條件。</li>
+      <li>GOOS/GOARCH 交叉編譯；每個支援的平台都要編譯檢查。</li>
+      <li>-ldflags -X 改 package 層級的 string 變數；go version -m、debug.ReadBuildInfo 讀建置資訊。</li>
+      <li>go generate 要手動執行，產生的檔案要有 Code generated 標頭、要 commit、要有測試確認沒過期。</li>
+      <li>go.mod 的 tool 指令管理工具版本；govulncheck 檢查漏洞，Delve 除錯。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="further">
+    <h2 id="further">延伸閱讀</h2>
+    <ul class="notes">
+      <li>go 指令：<a href="https://pkg.go.dev/cmd/go#hdr-Build_constraints">Build constraints</a>、<a href="https://pkg.go.dev/cmd/go#hdr-Generate_Go_files_by_processing_source">Generate Go files by processing source</a>、<a href="https://pkg.go.dev/cmd/vet">cmd/vet</a>、<a href="https://pkg.go.dev/cmd/link">cmd/link</a>（-X、-s）。</li>
+      <li>官方文件：<a href="https://go.dev/doc/install/source#environment">GOOS 與 GOARCH 的組合</a>、<a href="https://go.dev/doc/toolchain">Go Toolchains</a>、<a href="https://go.dev/doc/modules/managing-dependencies#tools">Managing tool dependencies</a>、<a href="https://go.dev/doc/security/vuln/">Go Vulnerability Management</a>、<a href="https://go.dev/doc/gdb">Debugging Go Code with GDB</a>（開頭建議改用 Delve）。</li>
+      <li>套件文件：<a href="https://pkg.go.dev/runtime/debug#ReadBuildInfo">debug.ReadBuildInfo</a>、<a href="https://pkg.go.dev/go/build/constraint">go/build/constraint</a>、<a href="https://pkg.go.dev/go/ast#IsGenerated">ast.IsGenerated</a>。</li>
+      <li>Go 官方部落格：<a href="https://go.dev/blog/gofix">Using go fix to modernize Go code</a>、<a href="https://go.dev/blog/inliner">//go:fix inline and the source-level inliner</a>、<a href="https://go.dev/blog/govulncheck">Govulncheck v1.0.0 is released!</a>。</li>
+    </ul>
   </section>
 
   <section aria-labelledby="run">
     <h2 id="run">動手跑</h2>
     <p class="label">在 repo 根目錄</p>
-    <pre class="shell"><code>gofmt -l .
-go vet ./...
-go fix -diff ./...
-go doc strings.Cut
-go run -tags pro ./chapters/32-toolchain
-GOOS=windows GOARCH=amd64 go build -o bin/hello.exe ./chapters/00-hello</code></pre>
-    <p><a href="https://github.com/xinqilin/GO-Playground/tree/main/chapters/32-toolchain">在 GitHub 看完整程式碼</a></p>
+    <pre class="shell"><code>go run ./chapters/32-toolchain                                   <span class="c"># 免費版，版本 dev</span>
+go run -tags pro ./chapters/32-toolchain                         <span class="c"># 專業版</span>
+go build -ldflags "-X main.version=1.2.3" -o app ./chapters/32-toolchain &amp;&amp; ./app
+GOOS=windows go vet ./chapters/32-toolchain                      <span class="c"># 檢查 Windows 版</span>
+go generate ./chapters/32-toolchain                              <span class="c"># 改了 menu.csv 之後</span>
+go test ./chapters/32-toolchain/...                              <span class="c"># 包含實際執行 go 指令的測試</span>
+go test ./exercises/32-toolchain/                                <span class="c"># 做練習</span></code></pre>
+    <p>建出來的 app 用完可以刪掉，不要 commit。<a href="https://github.com/xinqilin/GO-Playground/tree/main/chapters/32-toolchain">在 GitHub 看本章完整程式碼</a>，或看<a href="https://github.com/xinqilin/GO-Playground/tree/main/exercises/32-toolchain">練習題</a>。</p>
   </section>
 </main>
 
 <nav class="pager" aria-label="章節導覽">
-  <a class="prev" href="30-testing.html">← 30 測試</a>
+  <a class="prev" href="31-performance.html">← 31 效能與 profiling</a>
   <a class="home" href="index.html">目錄</a>
-  <a class="next" href="project-fibonacci.html">專題：fibonacci →</a>
+  <a class="next" href="33-idiomatic-go.html">33 寫出道地的 Go →</a>
 </nav>
 </body>
 </html>

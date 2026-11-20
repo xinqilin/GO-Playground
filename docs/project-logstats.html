@@ -1,0 +1,694 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>日誌分析｜Go 圖解手冊</title>
+<meta name="description" content="寫一個分析 HTTP 日誌的命令列工具：一邊讀一邊解壓縮 .gz、用 regexp 和具名群組解析 access log、同一個工具也讀 slog 的 JSON、把請求分類、算 p50 和 p95、輸出文字表格、JSON 或 CSV，再用 exit code 接上排程警報。">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<header class="site">
+  <a href="index.html">Go 圖解手冊</a>
+  <span class="count">專題 5 / 7</span>
+</header>
+
+<main class="page long">
+  <header class="hero">
+    <div class="num" aria-hidden="true">P5</div>
+    <p class="eyebrow">專題 5 · regexp、time、gzip、json/v2、csv、tabwriter、benchmark</p>
+    <h1>日誌分析</h1>
+    <p class="analogy">中午尖峰過後，老闆問：「剛剛是不是有人訂不到便當？」答案就在伺服器的日誌裡，但它有幾萬行。這個專題寫一個工具，把日誌讀完，算出有幾個請求失敗、哪一個網址最慢、哪一分鐘最忙；發現失敗太多時，用 exit code 讓排程發出警報。</p>
+  </header>
+
+  <nav class="toc-inline" aria-labelledby="toc-title">
+    <p class="label" id="toc-title">本專題內容</p>
+    <ol>
+      <li><a href="#goal">這個專題做什麼</a></li>
+      <li><a href="#input">讀檔、stdin 和 .gz</a></li>
+      <li><a href="#regexp">用 regexp 解析 access log</a></li>
+      <li><a href="#json">JSON 日誌和壞掉的行</a></li>
+      <li><a href="#route">把請求分類</a></li>
+      <li><a href="#percentile">p50 和 p95</a></li>
+      <li><a href="#output">三種輸出</a></li>
+      <li><a href="#filter">時間範圍和 exit code</a></li>
+      <li><a href="#bench">regexp 的成本</a></li>
+      <li><a href="#challenges">延伸挑戰</a></li>
+      <li><a href="#recap">重點回顧</a></li>
+      <li><a href="#further">延伸閱讀</a></li>
+    </ol>
+  </nav>
+
+  <section aria-labelledby="goal">
+    <h2 id="goal">這個專題做什麼</h2>
+    <p>testdata/access.log 是便當店網站五分鐘內的 access log，其中有三行是壞的。分析它：</p>
+    <p class="label">在 projects/logstats 目錄</p>
+    <pre class="shell"><code>go run . testdata/access.log</code></pre>
+    <pre class="out" data-src="projects/logstats/testdata/access.golden"><code>期間：2026-11-21 09:30:01 +08:00 到 2026-11-21 09:34:30 +08:00
+請求：19 筆，另有 3 行無法解析
+狀態：2xx 14、3xx 1、4xx 2、5xx 2（10.5%）
+最忙的一分鐘：09:31，9 筆
+
+  count  5xx   p50     p95     max  route
+      6    0  11ms    14ms    14ms  GET /menu
+      6    2  52ms  1.204s  1.204s  POST /orders
+      3    0   8ms     9ms     9ms  GET /orders/{id}
+      2    0   1ms     1ms     1ms  GET /healthz
+      1    0   1ms     1ms     1ms  GET /nosuch
+      1    0   1ms     1ms     1ms  GET /orders/abc</code></pre>
+    <p>無法解析的行不會讓整個分析停下來，而是把前幾行的位置和原因寫到 stderr：</p>
+    <pre class="out" data-example="projects/logstats#Example_warnings"><code>testdata/access.log 第 15 行：格式不對
+testdata/access.log 第 18 行：格式不對
+testdata/access.log 第 21 行：時間不對：parsing time "31/Nov/2026:09:33:40 +0800": day out of range</code></pre>
+    <ul class="notes">
+      <li><strong>摘要</strong>：期間、總數、狀態碼分布、5xx 的比例、最忙的一分鐘。</li>
+      <li><strong>表格</strong>：每一類請求一列，依次數排序。POST /orders 有兩次 5xx，最慢的一次花了 1.2 秒。</li>
+      <li>/orders/17 和 /orders/18 被歸成同一類 /orders/{id}，/menu?lang=en 也算進 /menu。</li>
+    </ul>
+    <p>程式分成四個檔案：main.go（旗標、讀檔）、parse.go（解析一行）、stats.go（累計和計算）、output.go（三種輸出）。先備：<a href="20-files.html">20 章檔案</a>、<a href="22-time.html">22 章時間</a>、<a href="23-json.html">23 章 JSON 與 CSV</a>、<a href="24-text.html#regexp">24 章 regexp</a>、<a href="25-logging.html">25 章日誌</a>、<a href="31-performance.html">31 章效能</a>。</p>
+  </section>
+
+  <section aria-labelledby="input">
+    <h2 id="input">1. 讀檔、stdin 和 .gz</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 176" role="img" aria-label="讀取的管線：os.File 讀出壓縮過的位元組，交給 gzip.Reader 解壓縮，再交給 bufio.Scanner 切成一行一行，最後每一行交給回呼函式。每一層都是 io.Reader，所以 .gz 只是多接一層，後面的程式完全不用改">
+        <title>一層接一層的 io.Reader</title>
+        <rect class="soft" x="8" y="30" width="100" height="50" rx="8"/>
+        <text class="sm mono" x="58" y="52" text-anchor="middle">os.File</text>
+        <text class="sm" x="58" y="70" text-anchor="middle">壓縮的位元組</text>
+        <path class="wire" d="M108 55 H128"/>
+        <rect class="hot" x="128" y="30" width="100" height="50" rx="8"/>
+        <text class="sm mono" x="178" y="52" text-anchor="middle">gzip.Reader</text>
+        <text class="sm" x="178" y="70" text-anchor="middle">只有 .gz 才接</text>
+        <path class="wire" d="M228 55 H248"/>
+        <rect class="soft" x="248" y="30" width="110" height="50" rx="8"/>
+        <text class="sm mono" x="303" y="52" text-anchor="middle">bufio.Scanner</text>
+        <text class="sm" x="303" y="70" text-anchor="middle">切成一行一行</text>
+        <path class="wire acc-ln" d="M358 55 H378"/>
+        <rect class="acc" x="378" y="30" width="94" height="50" rx="8"/>
+        <text class="sm mono" x="425" y="52" text-anchor="middle">fn(n, line)</text>
+        <text class="sm" x="425" y="70" text-anchor="middle">解析、累計</text>
+        <text class="sm" x="240" y="120" text-anchor="middle">每一層都是 io.Reader：多接一層解壓縮，後面不用改</text>
+        <text class="sm mute" x="240" y="150" text-anchor="middle">記憶體裡同時只有一小段資料，幾 GB 的檔案也讀得完</text>
+      </svg>
+      <figcaption>日誌通常每天輪替一次，舊的會壓縮成 .gz。一邊讀一邊解壓縮，不用先把整個檔案解開放在磁碟上（<a href="20-files.html#stream">20 章</a>）。</figcaption>
+    </figure>
+    <pre class="code" data-src="projects/logstats/main.go#readFile"><code>func readFile(name string, stdin io.Reader, fn func(n int, line string)) error {
+	var r io.Reader = stdin
+	if name != "-" {
+		f, err := os.Open(name)
+		if err != nil {
+			return err
+		}
+		defer f.Close()
+		r = f
+		if strings.HasSuffix(name, ".gz") {
+			zr, err := gzip.NewReader(f)
+			if err != nil {
+				return fmt.Errorf("%s：%w", name, err)
+			}
+			r = zr
+		}
+	}
+
+	sc := bufio.NewScanner(r)
+	sc.Buffer(make([]byte, 0, 64*1024), 1024*1024) // 一行最長 1MB，預設只有 64KB
+	n := 0
+	for sc.Scan() {
+		n++
+		fn(n, sc.Text())
+	}
+	if err := sc.Err(); err != nil {
+		return fmt.Errorf("%s 第 %d 行之後：%w", name, n, err)
+	}
+	return nil
+}</code></pre>
+    <ul class="notes">
+      <li><strong>r 的型別是 io.Reader</strong>：一開始是 stdin，打開檔案後換成 *os.File，是 .gz 再換成 *gzip.Reader。後面的 Scanner 只認得 io.Reader，不知道也不用知道資料從哪裡來。</li>
+      <li><strong>只關 f</strong>：gzip.Reader 的 Close 不會關掉底下的檔案，真正要關的是 f。gzip 的檢查碼在讀到結尾時驗證，壞掉的 .gz 會讓 Scan 停下來、Err 回傳錯誤。</li>
+      <li><strong>Scanner 加大上限</strong>：預設一行最長 64KB，超過就停下來。日誌偶爾會有很長的一行（例如把整個請求內容記下來），這裡放寬到 1MB；超過的話回報錯誤，而不是無聲無息地少讀（<a href="02-input-output.html#scanner">02 章</a>）。TestLongLine 送了一行 2MB 確認這件事。</li>
+      <li><strong>回呼函式</strong>：readFile 只負責讀，每一行交給 fn 處理。檔名、行號、錯誤處理都留在 run 裡，readFile 不用知道要拿這些行做什麼。</li>
+      <li>TestGzipAndStdin 把同一份 log 壓縮成 .gz、也從 stdin 送進去，三種方式的結果必須一模一樣。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="regexp">
+    <h2 id="regexp">2. 用 regexp 解析 access log</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 172" role="img" aria-label="一行 access log 被正規表示式的具名群組切成幾段：time 是方括號裡的時間，method 是 GET，path 是 /menu，status 是 200，took 是最後的 0.012 秒。IP、兩個減號、HTTP 版本和回應大小用不到，不取出來">
+        <title>具名群組取出需要的欄位</title>
+        <rect class="soft" x="8" y="16" width="90" height="28" rx="4"/><text class="sm mono" x="53" y="35" text-anchor="middle">192.0.2.10</text>
+        <rect class="soft" x="104" y="16" width="36" height="28" rx="4"/><text class="sm mono" x="122" y="35" text-anchor="middle">- -</text>
+        <rect class="acc" x="146" y="16" width="226" height="28" rx="4"/><text class="sm mono" x="259" y="35" text-anchor="middle">21/Nov/2026:09:30:01 +0800</text>
+        <text class="sm mute" x="53" y="62" text-anchor="middle">不用</text>
+        <text class="sm mute" x="122" y="62" text-anchor="middle">不用</text>
+        <text class="sm mono t-acc" x="259" y="62" text-anchor="middle">time</text>
+        <rect class="acc" x="8" y="84" width="36" height="28" rx="4"/><text class="sm mono" x="26" y="103" text-anchor="middle">GET</text>
+        <rect class="acc" x="50" y="84" width="52" height="28" rx="4"/><text class="sm mono" x="76" y="103" text-anchor="middle">/menu</text>
+        <rect class="soft" x="108" y="84" width="76" height="28" rx="4"/><text class="sm mono" x="146" y="103" text-anchor="middle">HTTP/1.1</text>
+        <rect class="acc" x="190" y="84" width="36" height="28" rx="4"/><text class="sm mono" x="208" y="103" text-anchor="middle">200</text>
+        <rect class="soft" x="232" y="84" width="44" height="28" rx="4"/><text class="sm mono" x="254" y="103" text-anchor="middle">1532</text>
+        <rect class="acc" x="282" y="84" width="52" height="28" rx="4"/><text class="sm mono" x="308" y="103" text-anchor="middle">0.012</text>
+        <text class="sm mono t-acc" x="26" y="130" text-anchor="middle">method</text>
+        <text class="sm mono t-acc" x="76" y="130" text-anchor="middle">path</text>
+        <text class="sm mute" x="146" y="130" text-anchor="middle">不用</text>
+        <text class="sm mono t-acc" x="208" y="130" text-anchor="middle">status</text>
+        <text class="sm mute" x="254" y="130" text-anchor="middle">不用</text>
+        <text class="sm mono t-acc" x="308" y="130" text-anchor="middle">took</text>
+        <text class="sm mute" x="8" y="162">方括號、引號只用來定位，不在任何一個群組裡</text>
+      </svg>
+      <figcaption>每個要用的欄位都用一個具名群組包起來，取值時用名字，不用數它是第幾個括號。</figcaption>
+    </figure>
+    <pre class="code" data-src="projects/logstats/parse.go#accessRE,accessLayout,parseAccess"><code>var accessRE = regexp.MustCompile(
+	`^\S+ \S+ \S+ \[(?&lt;time&gt;[^\]]+)\] "(?&lt;method&gt;[A-Z]+) (?&lt;path&gt;\S+) [^"]*" (?&lt;status&gt;\d{3}) (?:\d+|-) (?&lt;took&gt;\d+\.\d+)$`)
+
+const accessLayout = "02/Jan/2006:15:04:05 -0700"
+
+func parseAccess(line string) (Entry, error) {
+	m := accessRE.FindStringSubmatch(line)
+	if m == nil {
+		return Entry{}, errors.New("格式不對")
+	}
+	get := func(name string) string { return m[accessRE.SubexpIndex(name)] }
+
+	t, err := time.Parse(accessLayout, get("time"))
+	if err != nil {
+		return Entry{}, fmt.Errorf("時間不對：%w", err)
+	}
+	status, _ := strconv.Atoi(get("status"))         // regexp 已經保證是三位數字
+	took, _ := time.ParseDuration(get("took") + "s") // 用十進位解析，"1.003s" 不會有浮點誤差
+	return Entry{Time: t, Method: get("method"), Path: get("path"), Status: status, Took: took}, nil
+}</code></pre>
+    <ul class="notes">
+      <li><strong>具名群組</strong>：<code>(?&lt;time&gt;…)</code>，也可以寫成 Python 風格的 <code>(?P&lt;time&gt;…)</code>，兩種寫法相同。SubexpIndex 用名字找出它是第幾個群組。以後在中間多加一個群組，也不會讓後面的編號全部錯開。</li>
+      <li><strong>只編譯一次</strong>：accessRE 是 package 層級的變數，程式啟動時編譯一次。寫在 parseAccess 裡面的話，每讀一行就要重新編譯一次（<a href="24-text.html#pit-compile-loop">24 章</a>）。MustCompile 在格式寫錯時 panic，因為這是程式本身的錯，不是輸入的錯。</li>
+      <li><strong>用 ^ 和 $ 綁住整行</strong>：沒有它們的話，regexp 會在一行的中間找到符合的部分，壞掉的行也可能被當成合法的（<a href="24-text.html#pit-anchor">24 章</a>）。</li>
+      <li><strong>regexp 只檢查形狀</strong>：<code>\d{3}</code> 保證狀態碼是三位數字，所以 Atoi 的錯誤可以忽略；但 31/Nov 也符合 <code>[^\]]+</code>，日期合不合法要交給 time.Parse 判斷。</li>
+      <li><strong>時間的格式用參考時間寫</strong>：<code>02/Jan/2006:15:04:05 -0700</code> 就是把 2006 年 1 月 2 日 15:04:05 這個時間，寫成日誌裡的樣子（<a href="22-time.html#layout">22 章</a>）。</li>
+      <li><strong>ParseDuration 處理秒數</strong>：把 "0.012" 加上 "s" 交給 time.ParseDuration，得到剛好 12ms。如果用 ParseFloat 再乘上 10⁹ 轉成 Duration，小數在二進位裡大多不是精確值，轉換時又會無條件捨去：1.003 會變成 1.002999999s。0.001 到 9.999 之間的 9,999 個值裡，有 271 個會差 1 奈秒。</li>
+      <li><strong>RE2</strong>：Go 的 regexp 保證時間和輸入長度成正比，不會因為特別設計的輸入而卡住；代價是不支援往回參照和環視（<a href="24-text.html#linear">24 章</a>）。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="json">
+    <h2 id="json">3. JSON 日誌和壞掉的行</h2>
+    <p><a href="project-todoapi.html">專題 4</a> 的 API 用 slog.NewJSONHandler 寫日誌，每一行是一個 JSON 物件。同一個工具也要能讀它：</p>
+    <pre class="code" data-src="projects/logstats/parse.go#slogLine,parseJSON"><code>type slogLine struct {
+	Time   time.Time `json:"time"`
+	Msg    string    `json:"msg"`
+	Method string    `json:"method"`
+	Path   string    `json:"path"`
+	Status int       `json:"status"`
+	Took   int64     `json:"took"`
+}
+
+func parseJSON(line string) (Entry, error) {
+	var l slogLine
+	// slog 不會去掉重複的 key（With 和 Info 都寫了 path），json/v2 預設卻把它當成錯誤
+	if err := json.Unmarshal([]byte(line), &amp;l, jsontext.AllowDuplicateNames(true)); err != nil {
+		return Entry{}, fmt.Errorf("JSON 不對：%w", err)
+	}
+	if l.Msg != "request" {
+		return Entry{}, errSkip
+	}
+	return Entry{Time: l.Time, Method: l.Method, Path: l.Path, Status: l.Status, Took: time.Duration(l.Took)}, nil
+}</code></pre>
+    <ul class="notes">
+      <li><strong>只宣告用得到的欄位</strong>：level、addr、err 這些欄位在 struct 裡沒有，解碼時直接略過。這和<a href="project-todoapi.html">專題 4</a> 的 API 相反：那裡用 RejectUnknownMembers 拒絕不認得的欄位，因為客戶端拼錯欄位名稱應該被告知；這裡是讀別人寫的資料，要寬鬆一點。</li>
+      <li><strong>took 用 int64 讀</strong>：slog 把 time.Duration 寫成奈秒的整數。json/v2 在 Go 1.27 對 time.Duration 沒有預設的格式，直接解碼到 Duration 會得到錯誤，所以先用 int64 讀，再自己轉換。</li>
+      <li><strong>同一個 key 出現兩次</strong>：<code>logger.With("path", "/")</code> 之後又在 Info 裡寫一次 path，slog 會照實寫出兩個 "path"。json/v2 預設把重複的 key 當成錯誤，這種行就會被算成壞掉的行，請求也少算一筆。加上 <code>jsontext.AllowDuplicateNames(true)</code> 之後，以最後一個為準。</li>
+      <li><strong>不是請求的紀錄</strong>：「開始服務」「內部錯誤」這些訊息沒有狀態碼，回傳 errSkip 表示「略過，不是錯誤」。</li>
+    </ul>
+    <figure class="fig">
+      <svg viewBox="0 0 480 204" role="img" aria-label="每一行交給 ParseLine：回傳 errSkip 的直接略過；回傳其他錯誤的，Bad 加一，前三行把檔名、行號和原因印到 stderr；解析成功的，再看是不是在 since 和 until 的範圍內，在範圍內才加進統計">
+        <title>每一行的去向</title>
+        <rect class="soft" x="170" y="8" width="140" height="34" rx="6"/>
+        <text class="sm mono" x="240" y="30" text-anchor="middle">ParseLine(line)</text>
+        <path class="wire" d="M240 42 V58 M70 58 H410 M70 58 V76 M240 58 V76 M410 58 V76"/>
+        <rect class="soft" x="8" y="76" width="124" height="48" rx="6"/>
+        <text class="sm mono" x="70" y="96" text-anchor="middle">errSkip</text>
+        <text class="sm" x="70" y="114" text-anchor="middle">略過</text>
+        <rect class="hot" x="160" y="76" width="160" height="48" rx="6"/>
+        <text class="sm" x="240" y="96" text-anchor="middle">其他錯誤：Bad++</text>
+        <text class="sm" x="240" y="114" text-anchor="middle">前 3 行印到 stderr</text>
+        <rect class="acc" x="348" y="76" width="124" height="48" rx="6"/>
+        <text class="sm mono" x="410" y="96" text-anchor="middle">Entry</text>
+        <text class="sm" x="410" y="114" text-anchor="middle">解析成功</text>
+        <path class="wire acc-ln" d="M410 124 V146"/>
+        <rect class="acc" x="300" y="146" width="172" height="48" rx="6"/>
+        <text class="sm" x="386" y="166" text-anchor="middle">在 since、until 之間？</text>
+        <text class="sm mono" x="386" y="184" text-anchor="middle">s.Add(e)</text>
+      </svg>
+      <figcaption>壞掉的行要算數量，但不能讓整個分析停下來；也不要全部印出來，一個格式完全不同的檔案可能有幾萬行錯誤。</figcaption>
+    </figure>
+    <pre class="code" data-src="projects/logstats/parse.go#errSkip,ParseLine"><code>var errSkip = errors.New("不是請求的紀錄")
+
+func ParseLine(line string) (Entry, error) {
+	switch {
+	case strings.TrimSpace(line) == "":
+		return Entry{}, errSkip
+	case strings.HasPrefix(line, "{"):
+		return parseJSON(line)
+	}
+	return parseAccess(line)
+}</code></pre>
+    <ul class="notes">
+      <li><strong>用第一個字元選解析器</strong>：JSON 物件一定以 { 開頭，access log 不會。不用另外加 -input-format 旗標，同一個指令可以同時讀兩種檔案。</li>
+      <li><strong>sentinel error</strong>：errSkip 是一個 package 層級的錯誤值，run 用 errors.Is 判斷（<a href="11-errors.html#sentinel">11 章</a>）。它沒有匯出，因為只在這個 package 裡使用。</li>
+      <li><strong>錯誤訊息要能找到那一行</strong>：「testdata/access.log 第 21 行：時間不對：… day out of range」有檔名、行號和原因，打開檔案就能找到問題。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="route">
+    <h2 id="route">4. 把請求分類</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 170" role="img" aria-label="路徑的正規化：/orders/17 和 /orders/18 都變成 /orders/{id}；/menu?lang=en 去掉參數變成 /menu；/orders/abc 不是全部數字，維持原樣">
+        <title>不同的網址，同一類請求</title>
+        <text class="sm mono" x="8" y="30">GET /orders/17</text>
+        <text class="sm mono" x="8" y="56">GET /orders/18</text>
+        <path class="wire" d="M140 26 C180 26 180 43 220 43 M140 52 C180 52 180 43 220 43"/>
+        <rect class="acc" x="220" y="28" width="168" height="30" rx="4"/>
+        <text class="sm mono" x="230" y="48">GET /orders/{id}</text>
+        <text class="sm mono" x="8" y="100">GET /menu?lang=en</text>
+        <path class="wire" d="M160 96 H220"/>
+        <rect class="acc" x="220" y="81" width="168" height="30" rx="4"/>
+        <text class="sm mono" x="230" y="101">GET /menu</text>
+        <text class="sm mono" x="8" y="148">GET /orders/abc</text>
+        <path class="wire" d="M140 144 H220"/>
+        <rect class="hot" x="220" y="129" width="168" height="30" rx="4"/>
+        <text class="sm mono" x="230" y="149">GET /orders/abc</text>
+        <text class="sm" x="398" y="48">數字段</text>
+        <text class="sm" x="398" y="101">去掉參數</text>
+        <text class="sm" x="398" y="149">維持原樣</text>
+      </svg>
+      <figcaption>如果每個訂單編號都算一類，表格會有幾千列，每一列只有一兩筆，看不出任何趨勢。</figcaption>
+    </figure>
+    <pre class="code" data-src="projects/logstats/stats.go#route"><code>func route(method, path string) string {
+	path, _, _ = strings.Cut(path, "?")
+	segs := strings.Split(path, "/")
+	for i, seg := range segs {
+		if seg != "" &amp;&amp; strings.Trim(seg, "0123456789") == "" {
+			segs[i] = "{id}"
+		}
+	}
+	return method + " " + strings.Join(segs, "/")
+}</code></pre>
+    <ul class="notes">
+      <li><strong>不是什麼都要用 regexp</strong>：「全是數字的路徑段」用 regexp 寫成 <code>/\d+(/|$)</code> 看起來很短，但 ReplaceAllString 的比對不會重疊：/reports/2026/11/21 裡，第一次比對用掉了 11 前面的斜線，結果變成 /reports/{id}/11/{id}。切開、逐段檢查、再接回去，簡單又正確（<a href="24-text.html#pit-regexp-overuse">24 章</a>）。</li>
+      <li><strong>strings.Trim(seg, "0123456789") == ""</strong>：把頭尾的數字都去掉之後什麼都不剩，表示整段都是數字。</li>
+      <li><strong>限制</strong>：/orders/abc 這種錯誤的網址會自成一類；用 UUID 當編號的服務要另外判斷。TestRoute 把這些情況都列出來，包括連續的數字段，以及 /v2/menu 不能被當成編號。</li>
+      <li><strong>方法也是分類的一部分</strong>：GET /orders 和 POST /orders 做的事完全不同，處理時間也不能混在一起看。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="percentile">
+    <h2 id="percentile">5. p50 和 p95</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 196" role="img" aria-label="20 個請求的處理時間由小到大排好。p50 是第 10 個，一半的請求比它快；p95 是第 19 個，95% 的請求不超過它；最後一個是最慢的。平均值會被最慢的幾個拉高，看不出大部分使用者的感受">
+        <title>排好之後數到第幾個</title>
+        <rect class="soft" x="20" y="134" width="18" height="10"/>
+        <rect class="soft" x="42" y="132" width="18" height="12"/>
+        <rect class="soft" x="64" y="130" width="18" height="14"/>
+        <rect class="soft" x="86" y="128" width="18" height="16"/>
+        <rect class="soft" x="108" y="126" width="18" height="18"/>
+        <rect class="soft" x="130" y="124" width="18" height="20"/>
+        <rect class="soft" x="152" y="122" width="18" height="22"/>
+        <rect class="soft" x="174" y="120" width="18" height="24"/>
+        <rect class="soft" x="196" y="118" width="18" height="26"/>
+        <rect class="acc" x="218" y="116" width="18" height="28"/>
+        <rect class="soft" x="240" y="114" width="18" height="30"/>
+        <rect class="soft" x="262" y="112" width="18" height="32"/>
+        <rect class="soft" x="284" y="110" width="18" height="34"/>
+        <rect class="soft" x="306" y="108" width="18" height="36"/>
+        <rect class="soft" x="328" y="104" width="18" height="40"/>
+        <rect class="soft" x="350" y="100" width="18" height="44"/>
+        <rect class="soft" x="372" y="94" width="18" height="50"/>
+        <rect class="soft" x="394" y="84" width="18" height="60"/>
+        <rect class="hot" x="416" y="64" width="18" height="80"/>
+        <rect class="hot" x="438" y="24" width="18" height="120"/>
+        <path class="wire faint" d="M16 144 H462"/>
+        <text class="sm mono t-acc" x="227" y="104" text-anchor="middle">p50</text>
+        <text class="sm mono t-hot" x="425" y="54" text-anchor="middle">p95</text>
+        <text class="sm mono t-hot" x="447" y="16" text-anchor="middle">max</text>
+        <text class="sm" x="227" y="166" text-anchor="middle">第 10 個</text>
+        <text class="sm" x="425" y="166" text-anchor="middle">第 19 個</text>
+        <text class="sm mute" x="20" y="190">由快到慢排好的 20 個請求</text>
+      </svg>
+      <figcaption>p50（中位數）代表一般的請求；p95 代表最慢的那一小群使用者的感受。只看平均值，少數很慢的請求會被大量很快的請求掩蓋。</figcaption>
+    </figure>
+    <pre class="code" data-src="projects/logstats/stats.go#percentile"><code>func percentile(sorted []time.Duration, p int) time.Duration {
+	rank := (p*len(sorted) + 99) / 100 // 整數的無條件進位
+	return sorted[max(rank, 1)-1]
+}</code></pre>
+    <pre class="code" data-src="projects/logstats/stats_test.go#Example_percentile"><code>func Example_percentile() {
+	ms := func(ns ...int) []time.Duration {
+		var d []time.Duration
+		for _, n := range ns {
+			d = append(d, time.Duration(n)*time.Millisecond)
+		}
+		return d
+	}
+	orders := ms(45, 48, 52, 61, 230, 1204) // 已經排序好
+	fmt.Println(percentile(orders, 50), percentile(orders, 95), percentile(orders, 100))
+
+	many := ms(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20)
+	fmt.Println(percentile(many, 50), percentile(many, 95), percentile(many, 100))
+	// Output:
+	// 52ms 1.204s 1.204s
+	// 10ms 19ms 20ms
+}</code></pre>
+    <pre class="out" data-example="projects/logstats#Example_percentile"><code>52ms 1.204s 1.204s
+10ms 19ms 20ms</code></pre>
+    <ul class="notes">
+      <li><strong>nearest-rank</strong>：n 個值裡的第 ⌈p×n/100⌉ 個，結果一定是真的出現過的值，不用內插。<code>(p*n + 99) / 100</code> 是整數的無條件進位，不必轉成浮點數。</li>
+      <li><strong>樣本少的時候</strong>：POST /orders 只有 6 個請求，p95 是第 6 個，也就是最慢的那個。p95 至少要有幾十個樣本才有意義，報表同時列出次數，讀的人才判斷得了。</li>
+      <li><strong>記憶體</strong>：為了排序，每一類請求的每一個處理時間都要留著，記憶體和請求數成正比。幾百萬行還沒問題；再多的話，改用固定大小的直方圖（延伸挑戰 4）。</li>
+      <li>TestPercentile 用 1 到 100 驗證「p 是多少就拿到多少」，也確認只有一個值時任何 p 都不會越界。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="output">
+    <h2 id="output">6. 三種輸出</h2>
+    <p>-format 選擇輸出格式。三個函式的簽名相同，放在一個 map 裡，用旗標的值查：</p>
+    <pre class="code" data-src="projects/logstats/output.go#writers,writeText"><code>var writers = map[string]func(io.Writer, Report) error{
+	"text": writeText,
+	"json": writeJSON,
+	"csv":  writeCSV,
+}
+
+func writeText(w io.Writer, r Report) error {
+	if r.Total == 0 {
+		_, err := fmt.Fprintf(w, "沒有符合條件的請求（%d 行無法解析）\n", r.Bad)
+		return err
+	}
+	const layout = "2006-01-02 15:04:05 -07:00"
+	fmt.Fprintf(w, "期間：%s 到 %s\n", r.From.Format(layout), r.To.Format(layout))
+	fmt.Fprintf(w, "請求：%d 筆，另有 %d 行無法解析\n", r.Total, r.Bad)
+	fmt.Fprintf(w, "狀態：2xx %d、3xx %d、4xx %d、5xx %d（%.1f%%）\n",
+		r.ByClass["2xx"], r.ByClass["3xx"], r.ByClass["4xx"], r.ByClass["5xx"], percent(r.ByClass["5xx"], r.Total))
+	fmt.Fprintf(w, "最忙的一分鐘：%s，%d 筆\n\n", r.BusiestMinute.Format("15:04"), r.BusiestCount)
+
+	// AlignRight：每一欄靠右對齊。最後的 route 後面沒有 \t，不參與對齊。
+	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', tabwriter.AlignRight)
+	fmt.Fprintln(tw, "count\t5xx\tp50\tp95\tmax\t  route")
+	for _, rt := range r.Routes {
+		fmt.Fprintf(tw, "%d\t%d\t%v\t%v\t%v\t  %s\n", rt.Count, rt.Errors, rt.P50, rt.P95, rt.Max, rt.Route)
+	}
+	return tw.Flush()
+}</code></pre>
+    <ul class="notes">
+      <li><strong>text/tabwriter</strong>：把用 \t 分開的欄位對齊。AlignRight 讓數字靠右，位數不同也對得齊。它以字元計算寬度，所以表格的欄位名稱用英文；中文的對齊要依顯示寬度自己補空白（<a href="project-wordcount.html#align">專題 2</a>）。</li>
+      <li><strong>最後要 Flush</strong>：tabwriter 要看完整張表才知道每欄多寬，所有內容先暫存，Flush 時才寫出去。忘了 Flush 就什麼都沒有。</li>
+      <li><strong>時間用數字的時區</strong>：<code>-07:00</code> 而不是 <code>MST</code>。time.Parse 讀到 +0800 時，如果剛好等於本機的時區，會用本機的時區（名稱是 CST）；不然就是沒有名稱的固定時區。在台灣的電腦和 CI 的伺服器上，時區名稱會不一樣，數字則永遠相同（<a href="22-time.html#zones">22 章</a>）。</li>
+    </ul>
+    <pre class="code" data-src="projects/logstats/output.go#jsonRoute,writeJSON"><code>type jsonRoute struct {
+	Route  string  `json:"route"`
+	Count  int     `json:"count"`
+	Errors int     `json:"errors_5xx"`
+	P50    float64 `json:"p50_ms"`
+	P95    float64 `json:"p95_ms"`
+	Max    float64 `json:"max_ms"`
+}
+
+func writeJSON(w io.Writer, r Report) error {
+	out := struct {
+		From    time.Time      `json:"from"`
+		To      time.Time      `json:"to"`
+		Total   int            `json:"total"`
+		Bad     int            `json:"bad_lines"`
+		ByClass map[string]int `json:"by_class"`
+		Routes  []jsonRoute    `json:"routes"`
+	}{From: r.From, To: r.To, Total: r.Total, Bad: r.Bad, ByClass: r.ByClass}
+	for _, rt := range r.Routes {
+		out.Routes = append(out.Routes, jsonRoute{rt.Route, rt.Count, rt.Errors, ms(rt.P50), ms(rt.P95), ms(rt.Max)})
+	}
+	if err := json.MarshalWrite(w, out, json.Deterministic(true), jsontext.WithIndent("  ")); err != nil {
+		return err
+	}
+	_, err := io.WriteString(w, "\n")
+	return err
+}</code></pre>
+    <pre class="shell"><code>go run . -format json testdata/app.jsonl</code></pre>
+    <pre class="out" data-example="projects/logstats#Example_json"><code>{
+  "from": "2026-11-21T09:35:10.12+08:00",
+  "to": "2026-11-21T09:36:00.01+08:00",
+  "total": 5,
+  "bad_lines": 0,
+  "by_class": {
+    "2xx": 3,
+    "4xx": 1,
+    "5xx": 1
+  },
+  "routes": [
+    {
+      "route": "POST /todos",
+      "count": 2,
+      "errors_5xx": 0,
+      "p50_ms": 0.15,
+      "p95_ms": 2.35,
+      "max_ms": 2.35
+    },
+    {
+      "route": "DELETE /todos/{id}",
+      "count": 1,
+      "errors_5xx": 1,
+      "p50_ms": 5.12,
+      "p95_ms": 5.12,
+      "max_ms": 5.12
+    },
+    {
+      "route": "GET /todos",
+      "count": 1,
+      "errors_5xx": 0,
+      "p50_ms": 0.41,
+      "p95_ms": 0.41,
+      "max_ms": 0.41
+    },
+    {
+      "route": "PATCH /todos/{id}",
+      "count": 1,
+      "errors_5xx": 0,
+      "p50_ms": 1.98,
+      "p95_ms": 1.98,
+      "max_ms": 1.98
+    }
+  ]
+}</code></pre>
+    <ul class="notes">
+      <li><strong>輸出的格式是獨立的型別</strong>：JSON 是給其他程式的契約。內部的 Report 為了方便改名或改型別時，不會不小心改到別人依賴的欄位。</li>
+      <li><strong>Deterministic</strong>：by_class 是 map，json/v2 預設不排序，加上這個選項才每次一樣。</li>
+    </ul>
+    <pre class="code" data-src="projects/logstats/output.go#writeCSV"><code>func writeCSV(w io.Writer, r Report) error {
+	cw := csv.NewWriter(w)
+	cw.Write([]string{"route", "count", "errors_5xx", "p50_ms", "p95_ms", "max_ms"})
+	f := func(d time.Duration) string { return strconv.FormatFloat(ms(d), 'f', -1, 64) }
+	for _, rt := range r.Routes {
+		cw.Write([]string{rt.Route, strconv.Itoa(rt.Count), strconv.Itoa(rt.Errors), f(rt.P50), f(rt.P95), f(rt.Max)})
+	}
+	cw.Flush()
+	return cw.Error() // Write 的錯誤會留到這裡一起回報
+}</code></pre>
+    <pre class="out" data-example="projects/logstats#Example_csv"><code>route,count,errors_5xx,p50_ms,p95_ms,max_ms
+GET /menu,6,0,11,14,14
+POST /orders,6,2,52,1204,1204
+GET /orders/{id},3,0,8,9,9</code></pre>
+    <ul class="notes">
+      <li><strong>csv.Writer 會處理引號</strong>：路徑裡如果有逗號或引號，它會自動加上引號並跳脫，不要自己用逗號把字串接起來（<a href="23-json.html#csv">23 章</a>）。</li>
+      <li><strong>錯誤在 Error() 一起回報</strong>：Write 寫進的是緩衝區，真正寫出去是在 Flush；Flush 之後檢查 cw.Error() 才知道有沒有寫成功（<a href="23-json.html#pit-csv-flush">23 章</a>）。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="filter">
+    <h2 id="filter">7. 時間範圍和 exit code</h2>
+    <pre class="code" data-src="projects/logstats/main.go#run"><code>func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("logstats", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	format := fs.String("format", "text", "輸出格式：text、json 或 csv")
+	top := fs.Int("top", 10, "最多列出幾類請求")
+	var since, until time.Time
+	fs.TextVar(&amp;since, "since", time.Time{}, "只算這個時間（含）之後的請求，RFC 3339 格式")
+	fs.TextVar(&amp;until, "until", time.Time{}, "只算這個時間之前的請求，RFC 3339 格式")
+	fail := fs.Float64("fail-5xx", 100, "5xx 的比例超過這個百分比時，以 exit code 1 結束")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	write, ok := writers[*format]
+	if !ok {
+		fmt.Fprintf(stderr, "logstats：-format 要是 text、json 或 csv，收到 %q\n", *format)
+		return 2
+	}
+
+	files := fs.Args()
+	if len(files) == 0 {
+		files = []string{"-"}
+	}
+	s := newStats()
+	for _, name := range files {
+		err := readFile(name, stdin, func(n int, line string) {
+			e, err := ParseLine(line)
+			if errors.Is(err, errSkip) {
+				return
+			}
+			if err != nil {
+				s.Bad++
+				if s.Bad &lt;= maxWarnings {
+					fmt.Fprintf(stderr, "%s 第 %d 行：%v\n", name, n, err)
+				}
+				return
+			}
+			if (since.IsZero() || !e.Time.Before(since)) &amp;&amp; (until.IsZero() || e.Time.Before(until)) {
+				s.Add(e)
+			}
+		})
+		if err != nil {
+			fmt.Fprintf(stderr, "logstats：%v\n", err)
+			return 2
+		}
+	}
+
+	r := s.Report(*top)
+	if err := write(stdout, r); err != nil {
+		fmt.Fprintf(stderr, "logstats：%v\n", err)
+		return 2
+	}
+	if r.Total &gt; 0 &amp;&amp; percent(r.ByClass["5xx"], r.Total) &gt; *fail {
+		return 1
+	}
+	return 0
+}</code></pre>
+    <ul class="notes">
+      <li><strong>time.Time 直接當旗標</strong>：time.Time 實作了 encoding.TextUnmarshaler（RFC 3339 格式），用 fs.TextVar 註冊就好，不用自己解析字串（<a href="project-wordcount.html#flags">專題 2</a>）。格式不對時，flag 套件自己會回報錯誤。</li>
+      <li><strong>since 含、until 不含</strong>：<code>!e.Time.Before(since)</code> 是「大於或等於」。半開區間讓「09:00 到 10:00」和「10:00 到 11:00」兩次查詢不會重複算到 10:00 整的請求。</li>
+      <li><strong>exit code</strong>：0 正常、1 超過 5xx 門檻、2 用法錯誤或讀不到檔案。排程可以每十分鐘執行 <code>logstats -since … -fail-5xx 5</code>，exit code 是 1 就發警報。</li>
+      <li><strong>讀不到檔案就停下來</strong>：和壞掉的行不同，少讀一整個檔案會讓數字完全失真，所以直接以 exit code 2 結束，不輸出半套的報表。</li>
+    </ul>
+    <pre class="shell"><code>go run . -since 2026-11-21T09:32:00+08:00 -top 2 testdata/access.log</code></pre>
+    <pre class="out" data-example="projects/logstats#Example_since"><code>期間：2026-11-21 09:32:30 +08:00 到 2026-11-21 09:34:30 +08:00
+請求：5 筆，另有 3 行無法解析
+狀態：2xx 3、3xx 0、4xx 1、5xx 1（20.0%）
+最忙的一分鐘：09:32，2 筆
+
+  count  5xx   p50    p95    max  route
+      2    1  48ms  230ms  230ms  POST /orders
+      1    0   1ms    1ms    1ms  GET /healthz</code></pre>
+  </section>
+
+  <section aria-labelledby="bench">
+    <h2 id="bench">8. regexp 的成本</h2>
+    <p>regexp 好寫、好讀，但它是不是瓶頸？寫一個只用 strings.Cut 的版本，先確認兩個版本的結果完全相同，再比速度：</p>
+    <pre class="code" data-src="projects/logstats/parse_test.go#parseAccessCut"><code>func parseAccessCut(line string) (Entry, error) {
+	bad := errors.New("格式不對")
+	_, rest, ok1 := strings.Cut(line, " [")
+	ts, rest, ok2 := strings.Cut(rest, `] "`)
+	req, rest, ok3 := strings.Cut(rest, `" `)
+	method, req, ok4 := strings.Cut(req, " ")
+	path, _, ok5 := strings.Cut(req, " ")
+	fields := strings.Fields(rest) // 狀態碼、大小、處理時間
+	if !ok1 || !ok2 || !ok3 || !ok4 || !ok5 || len(fields) != 3 {
+		return Entry{}, bad
+	}
+	t, err := time.Parse(accessLayout, ts)
+	if err != nil {
+		return Entry{}, err
+	}
+	status, err := strconv.Atoi(fields[0])
+	if err != nil {
+		return Entry{}, bad
+	}
+	took, err := time.ParseDuration(fields[2] + "s")
+	if err != nil {
+		return Entry{}, bad
+	}
+	return Entry{Time: t, Method: method, Path: path, Status: status, Took: took}, nil
+}</code></pre>
+    <pre class="shell"><code>go test -run='^$' -bench=Parse -benchmem ./projects/logstats</code></pre>
+    <p class="label">輸出（數字依機器不同）</p>
+    <pre class="out"><code>goos: darwin
+goarch: arm64
+pkg: github.com/xinqilin/GO-Playground/projects/logstats
+cpu: Apple M1 Pro
+BenchmarkParse/regexp-10         	  970408	      1227 ns/op	     200 B/op	       3 allocs/op
+BenchmarkParse/cut-10            	 4443175	       270.1 ns/op	      72 B/op	       3 allocs/op
+BenchmarkParse/json-10           	 2045720	       586.7 ns/op	     240 B/op	       2 allocs/op
+PASS
+ok  	github.com/xinqilin/GO-Playground/projects/logstats	3.876s</code></pre>
+    <ul class="notes">
+      <li><strong>Cut 快了大約 4.5 倍</strong>，但換算成實際的量：regexp 版每行 1.2 微秒，一百萬行是 1.2 秒。每天跑一次的報表，這點時間不值得犧牲可讀性。</li>
+      <li><strong>Cut 版比較脆弱</strong>：它只認得分隔符號，「狀態碼是三位數字」這種檢查要另外寫。regexp 把格式寫在一個地方，壞掉的行比較不會被誤認成合法的。</li>
+      <li><strong>先量再決定</strong>：如果真的要每秒處理幾十萬行，先用 pprof 確認時間花在哪裡，再換掉 regexp（<a href="31-performance.html#pit-guess">31 章</a>）。TestCutAgrees 讓兩個版本對範例檔的每一行都得到相同的結果，換掉時才有保障。</li>
+      <li>-benchmem 多印出每次的配置量（B/op、allocs/op）。b.Loop（Go 1.24 起）讓迴圈裡的呼叫不會被編譯器最佳化掉（<a href="31-performance.html#measure">31 章</a>）。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="challenges">
+    <h2 id="challenges">延伸挑戰</h2>
+    <p>這些題目沒有附測試。先在 testdata 加一個能說明需求的小檔案，再寫測試和程式。</p>
+    <ol class="exercises">
+      <li>
+        <h3><span class="level l1">入門</span>挑戰 1：最慢的請求</h3>
+        <p>報表最後列出最慢的 3 個請求：時間、方法、完整的路徑（含參數）和處理時間。</p>
+        <details><summary>提示</summary><p>Stats 多存一個長度最多 3 的 []Entry，每次 Add 時如果比裡面最快的那個還慢，就換掉它。不需要留下所有的 Entry。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l2">進階</span>挑戰 2：每小時的趨勢</h3>
+        <p>加一個 -by-hour 旗標，列出每個小時的請求數和 5xx 數，看出尖峰在哪個時段。</p>
+        <details><summary>提示</summary><p>小時要用日誌的時區計算：Truncate(time.Hour) 是以 UTC 為準，在 +05:30 這種時區會切在半點（<a href="22-time.html#pit-truncate">22 章</a>）。用 time.Date 取出年月日時，再組回去。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l2">進階</span>挑戰 3：fuzz 兩個解析器</h3>
+        <p>寫一個 FuzzParseAccess：只要 regexp 版解析成功，Cut 版也要成功而且結果相同。fuzz 很可能找出兩者不一致的輸入；決定哪一個是對的，修正另一個。</p>
+        <details><summary>提示</summary><p>種子用 testdata/access.log 的每一行。不一致的輸入會存進 testdata/fuzz，成為以後的回歸測試（<a href="30-testing.html#fuzz">30 章</a>）。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l2">進階</span>挑戰 4：固定記憶體的百分位數</h3>
+        <p>不要留下每一個處理時間，改用固定的區間（例如 1ms、2ms、5ms、10ms……10s）計數，從累計的次數估計 p50 和 p95。</p>
+        <details><summary>提示</summary><p>估計值會落在區間的上界，誤差取決於區間切得多細。用現在的精確版本當標準答案，測試估計值落在正確值所在的區間裡。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l3">挑戰</span>挑戰 5：同時解析多個檔案</h3>
+        <p>給了很多個 .gz 檔時，每個檔案用一個 goroutine 解析，最後合併結果。輸出必須和一個一個讀完全相同，包括 stderr 上的警告順序。</p>
+        <details><summary>提示</summary><p>每個 goroutine 各自有一個 Stats，最後再寫一個 Merge 合併；這樣不需要鎖。警告先存在各自的 slice 裡，全部完成後依檔名順序印出。用 benchmark 確認真的變快了：gzip 解壓縮是 CPU 密集的工作，平行處理的效果比較明顯（<a href="19-concurrency-patterns.html">19 章</a>）。</p></details>
+      </li>
+    </ol>
+  </section>
+
+  <section aria-labelledby="recap">
+    <h2 id="recap">重點回顧</h2>
+    <ul class="recap">
+      <li>每一層都是 io.Reader：多接一層 gzip.Reader 就能讀 .gz，後面的程式不用改。</li>
+      <li>bufio.Scanner 預設一行最長 64KB，用 Buffer 放寬，並且一定要檢查 Err。</li>
+      <li>regexp 用 ^ 和 $ 綁住整行、在 package 層級編譯一次、用具名群組取值；日期合不合法交給 time.Parse。</li>
+      <li>壞掉的行要計數、列出前幾行的位置和原因，但不讓整個分析停下來。</li>
+      <li>百分位數比平均值更能反映使用者的感受；樣本少時要一併列出次數。</li>
+      <li>JSON 輸出用獨立的型別；json/v2 的 map 要 Deterministic，time.Duration 要自己決定單位。</li>
+      <li>exit code 讓工具可以接在排程和 CI 裡；讀不到檔案和超過門檻用不同的值。</li>
+      <li>換掉 regexp 之前先量，並用測試確認新舊版本的結果相同。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="further">
+    <h2 id="further">延伸閱讀</h2>
+    <ul class="notes">
+      <li>套件文件：<a href="https://pkg.go.dev/regexp/syntax">regexp/syntax</a>、<a href="https://pkg.go.dev/regexp#Regexp.SubexpIndex">Regexp.SubexpIndex</a>、<a href="https://pkg.go.dev/compress/gzip">compress/gzip</a>、<a href="https://pkg.go.dev/text/tabwriter">text/tabwriter</a>、<a href="https://pkg.go.dev/encoding/csv">encoding/csv</a>、<a href="https://pkg.go.dev/time#pkg-constants">time 的格式常數</a>。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="run">
+    <h2 id="run">動手跑</h2>
+    <p class="label">在 repo 根目錄</p>
+    <pre class="shell"><code>go run ./projects/logstats projects/logstats/testdata/access.log projects/logstats/testdata/app.jsonl
+go run ./projects/logstats -format csv projects/logstats/testdata/access.log
+go run ./projects/logstats -fail-5xx 5 projects/logstats/testdata/access.log; echo "exit code $?"
+go test ./projects/logstats
+go test -run='^$' -bench=Parse -benchmem ./projects/logstats</code></pre>
+    <p><a href="https://github.com/xinqilin/GO-Playground/tree/main/projects/logstats">在 GitHub 看完整程式碼</a>。</p>
+  </section>
+</main>
+
+<nav class="pager" aria-label="章節導覽">
+  <a class="prev" href="project-todoapi.html">← 專題：待辦事項 API</a>
+  <a class="home" href="index.html">目錄</a>
+  <a class="next" href="project-chat.html">專題：TCP 聊天室 →</a>
+</nav>
+</body>
+</html>

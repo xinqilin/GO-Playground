@@ -1,0 +1,7 @@
+{"time":"2026-11-21T09:35:00.000+08:00","level":"INFO","msg":"開始服務","addr":"localhost:8080","data":"todos.json"}
+{"time":"2026-11-21T09:35:10.120+08:00","level":"INFO","msg":"request","method":"POST","path":"/todos","status":201,"took":2350000}
+{"time":"2026-11-21T09:35:12.300+08:00","level":"INFO","msg":"request","method":"GET","path":"/todos","status":200,"took":410000}
+{"time":"2026-11-21T09:35:20.000+08:00","level":"INFO","msg":"request","method":"PATCH","path":"/todos/1","status":200,"took":1980000}
+{"time":"2026-11-21T09:35:21.000+08:00","level":"INFO","msg":"request","method":"POST","path":"/todos","status":422,"took":150000}
+{"time":"2026-11-21T09:36:00.000+08:00","level":"ERROR","msg":"內部錯誤","path":"/todos/2","err":"存檔：open todos.json: no space left on device"}
+{"time":"2026-11-21T09:36:00.010+08:00","level":"INFO","msg":"request","method":"DELETE","path":"/todos/2","status":500,"took":5120000}

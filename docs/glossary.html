@@ -1,0 +1,276 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>術語表｜Go 圖解手冊</title>
+<meta name="description" content="Go 圖解手冊的術語表：98 個常見的 Go 術語，每個都有一兩句白話的說明，並連到詳細介紹它的章節。">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<header class="site">
+  <a href="index.html">Go 圖解手冊</a>
+  <span class="count">附錄</span>
+</header>
+
+<main class="page long">
+  <header class="hero">
+    <div class="num" aria-hidden="true">詞</div>
+    <p class="eyebrow">附錄 · 98 個術語</p>
+    <h1>術語表</h1>
+    <p class="analogy">讀到一個忘了意思的詞，在這裡查一兩句話的說明，再跟著連結回到詳細介紹它的那一節。術語依主題分組，同一組裡大致照章節的順序排列。</p>
+  </header>
+
+  <nav class="toc-inline" aria-labelledby="toc-title">
+    <p class="label" id="toc-title">分組</p>
+    <ol>
+      <li><a href="#tools">工具與專案</a></li>
+      <li><a href="#data">值與資料</a></li>
+      <li><a href="#types">函式、型別與錯誤</a></li>
+      <li><a href="#concurrency">並行</a></li>
+      <li><a href="#stdlib">標準庫與服務</a></li>
+      <li><a href="#testing">測試與效能</a></li>
+    </ol>
+  </nav>
+
+  <section aria-labelledby="tools">
+    <h2 id="tools">工具與專案</h2>
+    <dl class="glossary">
+      <dt id="g-package">package</dt>
+      <dd>同一個目錄裡、開頭宣告同一個 package 名稱的 .go 檔案，是組織和匯入程式的單位。名稱大寫開頭的識別字才會匯出給其他 package 使用。<span class="see">→ <a href="29-packages-modules.html#package">29 章 package 與 import</a></span></dd>
+      <dt id="g-module">module</dt>
+      <dd>一組一起發佈、一起管理版本的 package，根目錄有一個 go.mod。import 路徑的開頭就是 module 的路徑。<span class="see">→ <a href="00-hello.html#module">00 章 建立第一個 module</a>、<a href="29-packages-modules.html#gomod">29 章 go.mod 與 go.sum</a></span></dd>
+      <dt id="g-gomod">go.mod、go.sum</dt>
+      <dd>go.mod 記錄 module 的路徑、Go 的版本和依賴的版本；go.sum 記錄依賴內容的雜湊，用來確認下載到的程式沒有被改過。兩個檔案都要 commit。<span class="see">→ <a href="29-packages-modules.html#gomod">29 章 go.mod 與 go.sum</a></span></dd>
+      <dt id="g-mvs">最小版本選擇（MVS）</dt>
+      <dd>Go 決定依賴版本的規則：每個 module 取所有 go.mod 要求裡最高的那個版本，而不是自動升到最新版。同樣的 go.mod，任何時候建置都得到同樣的版本。<span class="see">→ <a href="29-packages-modules.html#version">29 章 版本與最小版本選擇</a></span></dd>
+      <dt id="g-internal">internal</dt>
+      <dd>路徑裡有 internal 這一段的 package，只能被 internal 上一層目錄底下的程式匯入，用來放不打算給外面用的程式。<span class="see">→ <a href="29-packages-modules.html#design">29 章 internal 與 package 的設計</a></span></dd>
+      <dt id="g-gowork">go.work</dt>
+      <dd>工作區檔案，讓本機的好幾個 module 一起開發，不用在 go.mod 裡寫 replace。<span class="see">→ <a href="29-packages-modules.html#workspace">29 章 replace 與 go.work</a></span></dd>
+      <dt id="g-init">init 函式</dt>
+      <dd>package 裡名稱是 init、沒有參數也沒有回傳值的函式，在 main 之前自動執行，不能被呼叫。一個 package 可以有好幾個。<span class="see">→ <a href="29-packages-modules.html#init">29 章 初始化的順序</a></span></dd>
+      <dt id="g-gofmt">gofmt</dt>
+      <dd>Go 官方的格式化工具。縮排、空白、對齊都由它決定，所以每個人寫的 Go 程式碼看起來都一樣。<span class="see">→ <a href="00-hello.html#fmt-vet">00 章 gofmt 與 go vet</a></span></dd>
+      <dt id="g-vet">go vet</dt>
+      <dd>檢查「編譯得過，但幾乎一定是錯的」寫法，例如 Printf 的動詞和參數對不上、複製了含有 Mutex 的值。<span class="see">→ <a href="32-toolchain.html#vet">32 章 go vet</a></span></dd>
+      <dt id="g-buildtag">build tag</dt>
+      <dd>檔案開頭的 <code>//go:build</code> 條件，決定這個檔案在哪些平台或標籤下才編譯。檔名結尾是 <code>_windows.go</code> 這種寫法也有同樣的效果。<span class="see">→ <a href="32-toolchain.html#build-tags">32 章 build tag 與檔名</a></span></dd>
+      <dt id="g-cross">交叉編譯</dt>
+      <dd>設定 GOOS、GOARCH 兩個環境變數，在一台電腦上編出其他作業系統或 CPU 的執行檔。<span class="see">→ <a href="32-toolchain.html#cross">32 章 交叉編譯</a></span></dd>
+      <dt id="g-errkinds">編譯錯誤、執行時錯誤、邏輯錯誤</dt>
+      <dd>編譯錯誤讓程式根本跑不起來；執行時錯誤讓程式跑到一半停下來（Go 裡叫 panic）；邏輯錯誤最難找，程式正常結束，只是答案不對。<span class="see">→ <a href="pre-1-running.html#kinds">先修 1 三種錯誤</a></span></dd>
+    </dl>
+  </section>
+
+  <section aria-labelledby="data">
+    <h2 id="data">值與資料</h2>
+    <dl class="glossary">
+      <dt id="g-zero">零值</dt>
+      <dd>宣告了但沒有給值的變數，會是它型別的零值：數字是 0、字串是空字串、bool 是 false，指標、slice、map、channel、函式和 interface 是 nil。<span class="see">→ <a href="01-variables.html#zero">01 章 零值</a></span></dd>
+      <dt id="g-untyped">untyped 常數</dt>
+      <dd>沒有寫型別的常數，例如 <code>const n = 10</code>。用到的地方才決定型別，計算時的精度也比一般的變數高。<span class="see">→ <a href="01-variables.html#const-why">01 章 為什麼常數要分有沒有型別</a></span></dd>
+      <dt id="g-iota">iota</dt>
+      <dd>const 區塊裡的計數器，從 0 開始，每一行加 1，常用來定義一組列舉值。<span class="see">→ <a href="01-variables.html#consts">01 章 常數與 iota</a></span></dd>
+      <dt id="g-shadow">遮蔽（shadowing）</dt>
+      <dd>內層的作用域用 := 宣告了和外層同名的變數，之後改到的是內層那一個，外層的不受影響。<span class="see">→ <a href="01-variables.html#scope">01 章 作用域與遮蔽</a>、<a href="03-control-flow.html#pit-shadow">03 章 常見錯誤</a></span></dd>
+      <dt id="g-slice">slice</dt>
+      <dd>指向一段底層陣列的一扇窗，記著起點、長度和容量。複製 slice 只複製這扇窗，兩個 slice 看到的是同一份資料。<span class="see">→ <a href="06-arrays-slices.html#window">06 章 slice 是一扇窗</a></span></dd>
+      <dt id="g-lencap">len、cap</dt>
+      <dd>len 是 slice 現在有幾個元素；cap 是從起點到底層陣列結尾還有幾格。append 超過 cap 時，才會配置一個新的陣列。<span class="see">→ <a href="06-arrays-slices.html#append">06 章 append</a></span></dd>
+      <dt id="g-nilslice">nil slice</dt>
+      <dd>slice 的零值，len 和 cap 都是 0，可以直接 append 和 range。和空 slice 幾乎可以互換，平常只有和 nil 比較、用 %#v 印出時看得出差別；判斷是不是空的，用 <code>len(s) == 0</code>。<span class="see">→ <a href="06-arrays-slices.html#nil">06 章 nil slice 與空 slice</a></span></dd>
+      <dt id="g-map">map</dt>
+      <dd>key 對應到 value 的雜湊表。讀不存在的 key 會得到零值；走訪的順序每次都可能不同。<span class="see">→ <a href="07-maps.html#basics">07 章 建立與基本操作</a></span></dd>
+      <dt id="g-commaok">comma-ok</dt>
+      <dd>第二個回傳值是 bool 的慣用寫法：<code>v, ok := m[k]</code>。用在 map 讀取、type assertion，以及從可能已經關閉的 channel 收值。<span class="see">→ <a href="07-maps.html#lookup">07 章 讀取：零值與 comma-ok</a></span></dd>
+      <dt id="g-rune">byte、rune、UTF-8</dt>
+      <dd>Go 的字串是一串 byte，內容通常是 UTF-8，常用的中文字一個佔 3 個 byte。rune 是一個 Unicode 碼位（int32 的別名），range 字串時一次拿到一個 rune。<span class="see">→ <a href="08-strings-runes.html#utf8">08 章 UTF-8：byte 與 rune</a></span></dd>
+      <dt id="g-stringer">Stringer</dt>
+      <dd>有 <code>String() string</code> 方法的型別。fmt 印它的時候，會改用這個方法回傳的文字。<span class="see">→ <a href="02-input-output.html#stringer">02 章 Stringer</a></span></dd>
+      <dt id="g-pointer">指標</dt>
+      <dd>存著另一個變數位址的值。<code>*T</code> 是指向 T 的指標型別，<code>&amp;x</code> 取得 x 的位址，<code>*p</code> 讀寫 p 指向的值。<span class="see">→ <a href="05-pointers.html#address">05 章 位址與指標</a></span></dd>
+      <dt id="g-escape">逃逸分析</dt>
+      <dd>編譯器判斷一個值能不能放在 stack 上；函式結束後還會被用到的值，會「逃逸」到 heap，由 GC 回收。用 <code>-gcflags=-m</code> 可以看到它的決定。<span class="see">→ <a href="05-pointers.html#gcflags">05 章 -gcflags=-m</a>、<a href="31-performance.html#escape">31 章 逃逸分析</a></span></dd>
+    </dl>
+  </section>
+
+  <section aria-labelledby="types">
+    <h2 id="types">函式、型別與錯誤</h2>
+    <dl class="glossary">
+      <dt id="g-closure">closure</dt>
+      <dd>用到外層變數的函式值。它捕獲的是變數本身，不是當下的值；外層的變數之後改了，它看到的也會跟著變。<span class="see">→ <a href="04-functions.html#closures">04 章 closure</a></span></dd>
+      <dt id="g-defer">defer</dt>
+      <dd>讓一個呼叫在函式結束時才執行，常用來關檔、解鎖。參數在 defer 那一行就先算好；好幾個 defer 由後往前執行。<span class="see">→ <a href="04-functions.html#defer">04 章 defer</a></span></dd>
+      <dt id="g-panic">panic、recover</dt>
+      <dd>panic 讓目前的 goroutine 停下正常的流程，一路執行 defer 往上退；在 defer 的函式裡呼叫 recover 可以接住它。預期中的錯誤要用 error 回傳，不用 panic。<span class="see">→ <a href="04-functions.html#panic">04 章 panic 與 recover</a>、<a href="11-errors.html#panic">11 章 什麼時候用 panic</a></span></dd>
+      <dt id="g-receiver">receiver</dt>
+      <dd>方法名稱前面的那個參數，決定方法屬於哪個型別。值 receiver 拿到的是複本；要修改欄位就用指標 receiver。<span class="see">→ <a href="09-structs-methods.html#receivers">09 章 方法與 receiver</a></span></dd>
+      <dt id="g-methodset">method set</dt>
+      <dd>一個型別擁有的方法，決定它能不能滿足某個 interface。T 的 method set 只有值 receiver 的方法，*T 則兩種都有。<span class="see">→ <a href="09-structs-methods.html#method-set">09 章 method set</a></span></dd>
+      <dt id="g-embed-type">嵌入</dt>
+      <dd>在 struct 裡只寫型別、不寫欄位名稱，外層就能直接使用它的欄位和方法。這是組合，不是繼承：方法收到的 receiver 仍然是裡面那一個。<span class="see">→ <a href="09-structs-methods.html#embed">09 章 嵌入</a></span></dd>
+      <dt id="g-tag">struct tag</dt>
+      <dd>欄位後面用反引號寫的字串，例如 <code>`json:"name"`</code>，給 encoding/json 這類套件讀取，改變它們處理這個欄位的方式。<span class="see">→ <a href="09-structs-methods.html#tags">09 章 struct tag</a>、<a href="23-json.html#tags">23 章 名稱與省略</a></span></dd>
+      <dt id="g-interface">interface</dt>
+      <dd>一份方法清單。任何型別只要有這些方法，就自動滿足它，不需要宣告「我實作了它」。<span class="see">→ <a href="10-interfaces.html#implicit">10 章 interface 是一份方法清單</a></span></dd>
+      <dt id="g-any">any</dt>
+      <dd><code>interface{}</code> 的別名，可以裝任何值；取出來時要用 type assertion 或 type switch。<span class="see">→ <a href="10-interfaces.html#switch">10 章 type switch 與 any</a></span></dd>
+      <dt id="g-assert">type assertion</dt>
+      <dd>從 interface 值取出具體型別：<code>v, ok := x.(T)</code>。不帶 ok 的寫法，型別不對時會 panic。<span class="see">→ <a href="10-interfaces.html#assert">10 章 type assertion</a></span></dd>
+      <dt id="g-typeswitch">type switch</dt>
+      <dd>依 interface 值的具體型別走不同的分支：<code>switch v := x.(type)</code>。<span class="see">→ <a href="10-interfaces.html#switch">10 章 type switch 與 any</a></span></dd>
+      <dt id="g-typednil">nil interface 陷阱</dt>
+      <dd>interface 值同時記著型別和值；裝著 nil 指標的 interface 有型別，所以不等於 nil。函式沒有錯誤時，要直接回傳 nil。<span class="see">→ <a href="10-interfaces.html#nil">10 章 nil interface 陷阱</a></span></dd>
+      <dt id="g-generics">泛型、型別參數</dt>
+      <dd>函式或型別在名稱後面用方括號宣告型別參數，例如 <code>func Max[T cmp.Ordered](a, b T) T</code>，同一份程式碼可以用在不同的型別上。<span class="see">→ <a href="12-generics.html#params">12 章 型別參數與限制</a></span></dd>
+      <dt id="g-constraint">限制、型別集合</dt>
+      <dd>型別參數的限制本身是一個 interface，描述哪些型別可以用。<code>~int</code> 表示「底層型別是 int 的所有型別」。<span class="see">→ <a href="12-generics.html#typesets">12 章 型別集合與 ~</a></span></dd>
+      <dt id="g-comparable">comparable</dt>
+      <dd>能用 == 和 != 比較的型別都滿足這個限制。map 的 key 必須是 comparable 的型別，slice、map、函式都不是。<span class="see">→ <a href="07-maps.html#keys">07 章 key 的型別</a></span></dd>
+      <dt id="g-iterator">疊代器（iter.Seq）</dt>
+      <dd>形如 <code>func(yield func(V) bool)</code> 的函式，可以直接寫在 for range 後面。yield 回傳 false 表示迴圈提早結束，疊代器就要停下來。<span class="see">→ <a href="13-iterators.html#rangefunc">13 章 range 一個函式</a>、<a href="13-iterators.html#yield">13 章 yield 的約定</a></span></dd>
+      <dt id="g-error">error</dt>
+      <dd>只有 <code>Error() string</code> 一個方法的 interface。Go 用回傳值表示失敗，呼叫的人檢查 <code>err != nil</code>。<span class="see">→ <a href="11-errors.html#values">11 章 錯誤是一個值</a></span></dd>
+      <dt id="g-sentinel">sentinel error</dt>
+      <dd>事先宣告好、用 errors.Is 比對的錯誤值，例如 io.EOF。<span class="see">→ <a href="11-errors.html#sentinel">11 章 sentinel error</a></span></dd>
+      <dt id="g-wrap">錯誤鏈（%w）</dt>
+      <dd>fmt.Errorf 用 %w 包裝錯誤，加上脈絡，同時保留原本的錯誤；errors.Is 和 errors.As 會沿著這條鏈往下找。<span class="see">→ <a href="11-errors.html#wrap">11 章 包裝：%w 與錯誤鏈</a></span></dd>
+      <dt id="g-as">errors.As、errors.AsType</dt>
+      <dd>在錯誤鏈裡找某個型別的錯誤並取出來。AsType（Go 1.26 起）是泛型的版本，不用先宣告一個變數。<span class="see">→ <a href="11-errors.html#types">11 章 自訂錯誤型別</a></span></dd>
+    </dl>
+  </section>
+
+  <section aria-labelledby="concurrency">
+    <h2 id="concurrency">並行</h2>
+    <dl class="glossary">
+      <dt id="g-goroutine">goroutine</dt>
+      <dd>由 Go runtime 管理的輕量執行單位，用 <code>go f()</code> 啟動。stack 從幾 KB 開始、不夠時自動長大，同時開上萬個也沒問題。<span class="see">→ <a href="14-goroutines.html#go">14 章 go 敘述</a>、<a href="14-goroutines.html#cheap">14 章 goroutine 很便宜</a></span></dd>
+      <dt id="g-parallel">並行與平行</dt>
+      <dd>並行（concurrency）是程式的結構：同時處理好幾件事；平行（parallelism）是執行的方式：同一瞬間真的有好幾個 CPU 在跑。並行的程式在單核心上也能執行。<span class="see">→ <a href="14-goroutines.html#scheduler">14 章 排程器：並行與平行</a></span></dd>
+      <dt id="g-gmp">G、M、P</dt>
+      <dd>Go 排程器的三個角色：G 是 goroutine，M 是作業系統的執行緒，P 是執行 Go 程式碼需要的資源；P 的數量就是 GOMAXPROCS。<span class="see">→ <a href="14-goroutines.html#gmp">14 章 G、M、P</a></span></dd>
+      <dt id="g-waitgroup">WaitGroup</dt>
+      <dd>等一群 goroutine 都結束。<code>wg.Go(f)</code>（Go 1.25 起）開一個 goroutine 並計數，<code>wg.Wait()</code> 等到全部做完。<span class="see">→ <a href="14-goroutines.html#waitgroup">14 章 sync.WaitGroup</a></span></dd>
+      <dt id="g-channel">channel</dt>
+      <dd>goroutine 之間傳值的管道。無緩衝的 channel，送和收的兩邊都準備好才會完成；有緩衝的可以先放幾個值。<span class="see">→ <a href="15-channels.html#unbuffered">15 章 無緩衝的 channel</a>、<a href="15-channels.html#buffered">15 章 有緩衝的 channel</a></span></dd>
+      <dt id="g-close">close</dt>
+      <dd>送的一方表示「不會再送了」。收的一方的 range 會在 channel 關閉、值都收完之後結束。只有送的一方該 close，close 兩次會 panic。<span class="see">→ <a href="15-channels.html#close">15 章 close 與 range</a></span></dd>
+      <dt id="g-select">select</dt>
+      <dd>同時等好幾個 channel 的送或收，哪一個先準備好就執行哪一個；好幾個同時準備好時，隨機挑一個。<span class="see">→ <a href="16-select.html#select">16 章 同時等好幾個 channel</a></span></dd>
+      <dt id="g-deadlock">死結</dt>
+      <dd>每個 goroutine 都在等別人，誰都動不了。所有 goroutine 都卡住時，runtime 會印出 all goroutines are asleep - deadlock! 並結束程式。<span class="see">→ <a href="15-channels.html#deadlock">15 章 死結與洩漏</a></span></dd>
+      <dt id="g-leak">goroutine 洩漏</dt>
+      <dd>goroutine 卡在永遠等不到的 channel 或鎖上，一直不會結束，也一直佔著記憶體。<span class="see">→ <a href="15-channels.html#deadlock">15 章 死結與洩漏</a>、<a href="14-goroutines.html#pit-leak">14 章 常見錯誤</a></span></dd>
+      <dt id="g-race">data race</dt>
+      <dd>兩個 goroutine 同時存取同一個變數，至少一個是寫，而且沒有同步。結果無法預測；<code>go test -race</code> 能抓到實際執行時發生的 race。<span class="see">→ <a href="17-sync.html#race">17 章 data race</a></span></dd>
+      <dt id="g-mutex">Mutex、RWMutex</dt>
+      <dd>Mutex 是互斥鎖，Lock 和 Unlock 之間同時只有一個 goroutine 能進去。RWMutex 允許好幾個讀的人同時進去，寫的人則獨佔。<span class="see">→ <a href="17-sync.html#mutex">17 章 Mutex</a>、<a href="17-sync.html#rwmutex">17 章 RWMutex</a></span></dd>
+      <dt id="g-atomic">atomic</dt>
+      <dd>sync/atomic 的型別（例如 atomic.Int64）用不可分割的指令讀寫，適合計數器、旗標這種單一的變數。<span class="see">→ <a href="17-sync.html#atomic">17 章 atomic</a></span></dd>
+      <dt id="g-hb">happens-before</dt>
+      <dd>記憶體模型描述「保證先發生，而且結果看得到」的關係。同一個 goroutine 裡照程式的順序；不同 goroutine 之間，只有 channel 的送收、鎖、WaitGroup 這類同步操作能建立它。<span class="see">→ <a href="17-sync.html#hb">17 章 happens-before</a></span></dd>
+      <dt id="g-context">context</dt>
+      <dd>在函式之間傳遞取消的訊號、期限，以及少量和這個請求有關的資料。習慣上是函式的第一個參數，名稱叫 ctx。<span class="see">→ <a href="18-context.html#why">18 章 為什麼需要 context</a></span></dd>
+      <dt id="g-canceltree">取消樹</dt>
+      <dd>從一個 context 衍生出來的子 context，會跟著它一起被取消；子 context 被取消，則不會影響上層。<span class="see">→ <a href="18-context.html#tree">18 章 取消樹</a></span></dd>
+      <dt id="g-pool">worker pool</dt>
+      <dd>固定數量的 goroutine 從同一個 channel 拿工作，限制同時進行的工作量。<span class="see">→ <a href="19-concurrency-patterns.html#pool">19 章 worker pool</a></span></dd>
+      <dt id="g-semaphore">semaphore</dt>
+      <dd>限制同時進行的數量。常用有緩衝的 channel 實作：送進去算佔用一個名額，收出來算還回去。<span class="see">→ <a href="19-concurrency-patterns.html#semaphore">19 章 semaphore</a></span></dd>
+      <dt id="g-fan">fan-out、fan-in</dt>
+      <dd>fan-out 是把工作分給好幾個 goroutine；fan-in 是把好幾個 channel 的結果合成一個。<span class="see">→ <a href="15-channels.html#fan">15 章 fan-out 與 fan-in</a></span></dd>
+      <dt id="g-pipeline">管線</dt>
+      <dd>一站接一站的 goroutine，用 channel 把上一站的輸出交給下一站。<span class="see">→ <a href="15-channels.html#pipeline">15 章 管線</a>、<a href="19-concurrency-patterns.html#pipeline">19 章 可以取消的管線</a></span></dd>
+      <dt id="g-synctest">synctest</dt>
+      <dd>testing/synctest（Go 1.25 起）讓測試在一個「泡泡」裡執行，泡泡裡的時間是假的：所有 goroutine 都在等的時候，時間直接跳到下一個計時器。<span class="see">→ <a href="30-testing.html#synctest">30 章 時間與並行的測試</a></span></dd>
+    </dl>
+  </section>
+
+  <section aria-labelledby="stdlib">
+    <h2 id="stdlib">標準庫與服務</h2>
+    <dl class="glossary">
+      <dt id="g-readerwriter">io.Reader、io.Writer</dt>
+      <dd>各只有一個方法（Read、Write）的 interface。檔案、網路連線、壓縮、記憶體裡的緩衝區都實作它們，所以可以像水管一樣接在一起。<span class="see">→ <a href="02-input-output.html#rw">02 章 io.Reader 與 io.Writer</a>、<a href="20-files.html#stream">20 章 串流</a></span></dd>
+      <dt id="g-bufio">bufio</dt>
+      <dd>在 Reader、Writer 外面加一層緩衝。Scanner 一行一行讀，結束後要檢查 Err；bufio.Writer 寫完要 Flush。<span class="see">→ <a href="02-input-output.html#scanner">02 章 bufio.Scanner</a></span></dd>
+      <dt id="g-root">os.Root</dt>
+      <dd>（Go 1.24 起）把開檔限制在某個目錄裡，路徑裡的 .. 或符號連結都跑不出去，適合處理使用者給的檔名。<span class="see">→ <a href="20-files.html#paths">20 章 路徑與 os.Root</a></span></dd>
+      <dt id="g-embed">embed</dt>
+      <dd>用 <code>//go:embed</code> 在編譯時把檔案放進執行檔，執行時就不用再帶著那些檔案。<span class="see">→ <a href="20-files.html#fs">20 章 fs.FS 與 embed</a></span></dd>
+      <dt id="g-flag">flag</dt>
+      <dd>解析命令列旗標的套件，例如 <code>-top 10</code>。<span class="see">→ <a href="21-cli.html#flag">21 章 flag 套件</a></span></dd>
+      <dt id="g-exitcode">結束碼（exit code）</dt>
+      <dd>程式結束時交給作業系統的數字：0 表示成功，其他表示失敗。shell 腳本和 CI 靠它判斷結果。<span class="see">→ <a href="21-cli.html#exit">21 章 結束碼與 stderr</a></span></dd>
+      <dt id="g-duration">time.Duration</dt>
+      <dd>兩個時間點之間的長度，內部是奈秒的整數。寫成 <code>5 * time.Second</code> 才清楚，直接寫 5 是 5 奈秒。<span class="see">→ <a href="22-time.html#basics">22 章 Time 與 Duration</a></span></dd>
+      <dt id="g-layout">版面（layout）</dt>
+      <dd>Go 用一個參考時間 2006 年 1 月 2 日 15:04:05 的樣子描述格式，例如 <code>2006-01-02</code>，而不是 YYYY-MM-DD。<span class="see">→ <a href="22-time.html#layout">22 章 格式化與解析</a></span></dd>
+      <dt id="g-monotonic">單調時鐘</dt>
+      <dd>time.Now() 除了日期時間，還帶著一個只會往前走的讀數。兩個 Time 相減或比較時用它，系統時間被調整也不受影響。<span class="see">→ <a href="22-time.html#compare">22 章 比較、單調時鐘與 Unix 時間</a></span></dd>
+      <dt id="g-jsonv2">encoding/json/v2</dt>
+      <dd>這本手冊使用的 JSON 套件。和舊的 encoding/json 比，欄位名稱預設分大小寫比對、nil slice 輸出成 <code>[]</code>，map 的輸出順序也不固定。<span class="see">→ <a href="23-json.html#marshal">23 章 Marshal 與 Unmarshal</a>、<a href="23-json.html#v1">23 章 現有程式碼裡的 encoding/json</a></span></dd>
+      <dt id="g-omitzero">omitzero</dt>
+      <dd>struct tag 的選項：欄位是零值（或它的 IsZero 方法回傳 true）時就不輸出。<span class="see">→ <a href="23-json.html#tags">23 章 名稱與省略</a></span></dd>
+      <dt id="g-re2">RE2</dt>
+      <dd>Go 的 regexp 採用的語法和比對方式，保證比對時間和輸入的長度成正比；代價是不支援往回參照和環視（lookahead）。<span class="see">→ <a href="24-text.html#linear">24 章 為什麼 Go 不支援 lookahead</a></span></dd>
+      <dt id="g-htmltemplate">html/template</dt>
+      <dd>用法和 text/template 一樣，但會依照內容出現在 HTML 的位置自動跳脫，使用者的輸入不會變成網頁上的程式碼（XSS）。<span class="see">→ <a href="24-text.html#html">24 章 html/template</a></span></dd>
+      <dt id="g-slog">slog</dt>
+      <dd>log/slog，結構化的日誌：一則訊息加上 key-value 的屬性，可以輸出成文字或 JSON，方便用欄位查詢。<span class="see">→ <a href="25-logging.html#slog">25 章 slog</a></span></dd>
+      <dt id="g-handler">Handler（HTTP）</dt>
+      <dd>有 <code>ServeHTTP(ResponseWriter, *Request)</code> 方法的 interface，每一個 HTTP 請求都交給一個 Handler 處理。<span class="see">→ <a href="26-http.html#handler">26 章 Handler 與 ResponseWriter</a></span></dd>
+      <dt id="g-servemux">ServeMux</dt>
+      <dd>HTTP 的路由器，依方法和路徑把請求交給對應的 Handler；Go 1.22 起，路徑裡可以有 <code>{id}</code> 這種萬用字元。<span class="see">→ <a href="26-http.html#routing">26 章 ServeMux 的路由</a></span></dd>
+      <dt id="g-middleware">middleware</dt>
+      <dd>包住 Handler 的 Handler，在請求的前後做共同的事，例如記錄 log、接住 panic、檢查身分。<span class="see">→ <a href="26-http.html#middleware">26 章 middleware</a></span></dd>
+      <dt id="g-shutdown">優雅關機</dt>
+      <dd>停止接受新的請求，等進行中的做完再結束。http.Server 用 Shutdown 做這件事。<span class="see">→ <a href="26-http.html#shutdown">26 章 優雅關機</a>、<a href="project-chat.html#shutdown">專題 6 關機</a></span></dd>
+      <dt id="g-roundtripper">RoundTripper</dt>
+      <dd>http.Client 實際送出請求的那一層。換成自己的實作，就能在測試裡不碰網路。<span class="see">→ <a href="27-http-client.html#roundtripper">27 章 RoundTripper</a></span></dd>
+      <dt id="g-connpool">連線池</dt>
+      <dd>重複使用已經建立好的連線。http.Client（實際上是它的 Transport）和 database/sql 的 DB 都有，所以它們都應該建立一次、一直重複使用。<span class="see">→ <a href="27-http-client.html#reuse">27 章 關掉 body 與連線池</a>、<a href="28-database.html#pool">28 章 連線池與 context</a></span></dd>
+      <dt id="g-injection">SQL injection、placeholder</dt>
+      <dd>把使用者的輸入直接拼進 SQL 字串，對方就能改掉整句 SQL。用 <code>?</code> 這種佔位符號把值另外交給資料庫，值就不會被當成 SQL。<span class="see">→ <a href="28-database.html#injection">28 章 參數與 SQL injection</a></span></dd>
+      <dt id="g-tx">交易</dt>
+      <dd>一組要嘛全部生效、要嘛全部不算的資料庫操作：Begin 開始，Commit 確定，Rollback 取消。<span class="see">→ <a href="28-database.html#tx">28 章 交易</a></span></dd>
+    </dl>
+  </section>
+
+  <section aria-labelledby="testing">
+    <h2 id="testing">測試與效能</h2>
+    <dl class="glossary">
+      <dt id="g-table">table-driven test</dt>
+      <dd>把輸入和預期的結果列成一張表，用迴圈逐一測試；每一列通常用 t.Run 跑成一個子測試。<span class="see">→ <a href="30-testing.html#table">30 章 table-driven 與子測試</a></span></dd>
+      <dt id="g-doubles">測試替身</dt>
+      <dd>在測試裡代替真的依賴（網路、資料庫、時間）的東西。fake 是能用的簡化實作，是這本手冊最常用的一種。<span class="see">→ <a href="30-testing.html#doubles">30 章 測試替身</a></span></dd>
+      <dt id="g-golden">golden file</dt>
+      <dd>把預期的完整輸出存成 testdata 裡的檔案，測試時逐字比對；輸出改了就用 -update 重新產生，再檢查差異。<span class="see">→ <a href="30-testing.html#golden">30 章 golden file 與 testdata</a></span></dd>
+      <dt id="g-example">Example 函式</dt>
+      <dd>名稱以 Example 開頭、最後有 <code>// Output:</code> 註解的函式。go test 會比對它的輸出，pkg.go.dev 也會把它當成範例顯示在文件裡。<span class="see">→ <a href="30-testing.html#coverage">30 章 Example、覆蓋率與 benchmark</a></span></dd>
+      <dt id="g-fuzz">fuzz</dt>
+      <dd><code>go test -fuzz</code> 自動產生大量的輸入，找出讓程式出錯的情況；找到的輸入存進 testdata/fuzz，成為之後的回歸測試。<span class="see">→ <a href="30-testing.html#fuzz">30 章 fuzz</a></span></dd>
+      <dt id="g-coverage">覆蓋率</dt>
+      <dd>測試執行到了哪些程式碼，用 <code>go test -cover</code> 查看。執行到不代表測對了。<span class="see">→ <a href="30-testing.html#coverage">30 章 Example、覆蓋率與 benchmark</a></span></dd>
+      <dt id="g-benchmark">benchmark</dt>
+      <dd>名稱以 Benchmark 開頭的函式，用 <code>go test -bench</code> 執行，量出每次操作的時間和配置次數。Go 1.24 起用 <code>b.Loop()</code> 寫迴圈。<span class="see">→ <a href="31-performance.html#measure">31 章 先確認正確，再量測</a></span></dd>
+      <dt id="g-pprof">pprof</dt>
+      <dd>Go 內建的效能分析工具，看 CPU 時間和記憶體配置花在哪些函式上。<span class="see">→ <a href="31-performance.html#profile">31 章 用 pprof 找出瓶頸</a></span></dd>
+      <dt id="g-alloc">配置（allocation）</dt>
+      <dd>在 heap 上要一塊記憶體。配置越多，GC 要做的事越多；<code>-benchmem</code> 會列出每次操作配置了幾次。<span class="see">→ <a href="31-performance.html#allocs">31 章 數配置的次數</a></span></dd>
+      <dt id="g-syncpool">sync.Pool</dt>
+      <dd>暫存可以重複使用的物件，減少配置。放進去的東西隨時可能被 GC 清掉，不能拿來當快取。<span class="see">→ <a href="31-performance.html#pool">31 章 sync.Pool</a></span></dd>
+      <dt id="g-gc">GC</dt>
+      <dd>垃圾回收：自動找出沒有人在用的記憶體並回收。GOGC 和 GOMEMLIMIT 可以調整它多積極。<span class="see">→ <a href="31-performance.html#gc">31 章 GC 與記憶體上限</a></span></dd>
+    </dl>
+  </section>
+
+</main>
+
+<nav class="pager" aria-label="章節導覽">
+  <span></span>
+  <a class="home" href="index.html">目錄</a>
+  <span></span>
+</nav>
+</body>
+</html>

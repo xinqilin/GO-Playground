@@ -1,0 +1,793 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>效能與 profiling｜Go 圖解手冊</title>
+<meta name="description" content="Go 的效能調校：先確認正確再量測、benchmark 的方法、用 pprof 找出瓶頸、數配置的次數、逃逸分析、預先配置與重複使用、sync.Pool、GC 與 GOGC、GOMEMLIMIT，附可執行的練習題。">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<header class="site">
+  <a href="index.html">Go 圖解手冊</a>
+  <span class="count">31 / 33</span>
+</header>
+
+<main class="page long">
+  <header class="hero">
+    <div class="num" aria-hidden="true">31</div>
+    <p class="eyebrow">Part 5 · 工程實務 · 第 31 章</p>
+    <h1>效能與 profiling</h1>
+    <p class="analogy">中午出餐太慢，老闆的直覺是「再請一個人炸排骨」。站在旁邊拿碼表量一下才發現，大部分的時間花在找零錢。效能調校也一樣：先量，找出真正慢的地方，改了再量一次。憑感覺改的程式，常常變得難讀，卻沒有變快。</p>
+  </header>
+
+  <nav class="toc-inline" aria-labelledby="toc-title">
+    <p class="label" id="toc-title">本章內容</p>
+    <ol>
+      <li><a href="#goals">本章你會學到</a></li>
+      <li><a href="#measure">先確認正確，再量測</a></li>
+      <li><a href="#profile">用 pprof 找出瓶頸</a></li>
+      <li><a href="#allocs">數配置的次數</a></li>
+      <li><a href="#escape">逃逸分析</a></li>
+      <li><a href="#prealloc">預先配置與重複使用</a></li>
+      <li><a href="#pool">sync.Pool</a></li>
+      <li><a href="#gc">GC 與記憶體上限</a></li>
+      <li><a href="#pitfalls">常見錯誤</a></li>
+      <li><a href="#java">從 Java 來的你</a></li>
+      <li><a href="#exercises">練習</a></li>
+      <li><a href="#recap">重點回顧</a></li>
+      <li><a href="#further">延伸閱讀</a></li>
+    </ol>
+  </nav>
+
+  <section aria-labelledby="goals">
+    <h2 id="goals">本章你會學到</h2>
+    <ul class="notes">
+      <li>改寫之前先用測試鎖住結果，用 benchmark 量出可以比較的數字。</li>
+      <li>用 pprof 讀 profile：flat 和 cum、top 和 list。</li>
+      <li>用 -benchmem 和 testing.AllocsPerRun 數配置的次數。</li>
+      <li>看懂 -gcflags=-m 的逃逸分析：什麼會被放到 heap。</li>
+      <li>預先配置、重複使用緩衝區、sync.Pool 的時機和陷阱。</li>
+      <li>GC 怎麼運作，GOGC 和 GOMEMLIMIT 調的是什麼。</li>
+    </ul>
+    <p>先備：<a href="30-testing.html#coverage">30 章的 benchmark</a>、<a href="05-pointers.html#escape">05 章的 stack 與 heap</a>、<a href="06-arrays-slices.html#growth">06 章 append 的擴充</a>。</p>
+  </section>
+
+  <section aria-labelledby="measure">
+    <h2 id="measure">1. 先確認正確，再量測</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 200" role="img" aria-label="效能調校的循環：先寫測試確認結果正確，再用 benchmark 量出目前的數字，用 profile 找出最花時間或記憶體的地方，只改那裡，然後跑測試確認結果沒變，再量一次和改之前比較">
+        <title>量測、找出瓶頸、改、再量</title>
+        <rect class="acc" x="16" y="24" width="96" height="48" rx="8"/>
+        <text class="sm" x="64" y="53" text-anchor="middle">測試鎖住結果</text>
+        <path class="wire" d="M112 48 H130"/>
+        <rect class="soft" x="130" y="24" width="96" height="48" rx="8"/>
+        <text class="sm" x="178" y="53" text-anchor="middle">benchmark</text>
+        <path class="wire" d="M226 48 H244"/>
+        <rect class="soft" x="244" y="24" width="96" height="48" rx="8"/>
+        <text class="sm" x="292" y="53" text-anchor="middle">profile</text>
+        <path class="wire" d="M340 48 H358"/>
+        <rect class="hot" x="358" y="24" width="106" height="48" rx="8"/>
+        <text class="sm" x="411" y="53" text-anchor="middle">只改最慢的地方</text>
+        <path class="wire dash" d="M411 72 V110 H178 V72"/>
+        <text class="sm" x="294" y="130" text-anchor="middle">再跑一次測試和 benchmark，和改之前比</text>
+        <text class="sm t-acc" x="240" y="176" text-anchor="middle">沒有量過的「最佳化」，常常只是讓程式變難讀</text>
+      </svg>
+      <figcaption>每一步都有工具：go test、go test -bench、go tool pprof。不用安裝任何東西。</figcaption>
+    </figure>
+    <p>便當店每天有上千筆訂單紀錄，每一行像「10:05,排骨飯,2,90」。我們要算每道菜的營業額。第一版用 regexp 解析每一行，第二版用 strings.Cut。改寫之前，先確認兩個版本的結果完全一樣：</p>
+    <pre class="code" data-src="chapters/31-performance/orders.go#Order,lineRE,parseRegexp,parseCut,digits,revenue"><code>type Order struct {
+	Time  string
+	Dish  string
+	Qty   int
+	Price int
+}
+
+var lineRE = regexp.MustCompile(`^(\d{2}:\d{2}),([^,]+),(\d+),(\d+)$`)
+
+func parseRegexp(line string) (Order, error) {
+	m := lineRE.FindStringSubmatch(line)
+	if m == nil {
+		return Order{}, fmt.Errorf("%w：%q", errBadLine, line)
+	}
+	qty, err1 := strconv.Atoi(m[3]) // \d+ 擋掉了正負號，但擋不住太長、放不進 int 的數字
+	price, err2 := strconv.Atoi(m[4])
+	if err1 != nil || err2 != nil {
+		return Order{}, fmt.Errorf("%w：%q", errBadLine, line)
+	}
+	return Order{Time: m[1], Dish: m[2], Qty: qty, Price: price}, nil
+}
+
+func parseCut(line string) (Order, error) {
+	t, rest, ok1 := strings.Cut(line, ",")
+	dish, rest, ok2 := strings.Cut(rest, ",")
+	q, p, ok3 := strings.Cut(rest, ",")
+	qty, err1 := strconv.Atoi(q)
+	price, err2 := strconv.Atoi(p)
+	clock := len(t) == 5 &amp;&amp; t[2] == ':' &amp;&amp; digits(t[:2]) &amp;&amp; digits(t[3:])
+	if !ok1 || !ok2 || !ok3 || !clock || dish == "" || !digits(q) || !digits(p) || err1 != nil || err2 != nil {
+		return Order{}, fmt.Errorf("%w：%q", errBadLine, line)
+	}
+	return Order{Time: t, Dish: dish, Qty: qty, Price: price}, nil
+}
+
+func digits(s string) bool {
+	for i := range len(s) {
+		if s[i] &lt; '0' || s[i] &gt; '9' {
+			return false
+		}
+	}
+	return s != ""
+}
+
+func revenue(log string, parse func(string) (Order, error)) (map[string]int, error) {
+	totals := make(map[string]int)
+	for line := range strings.Lines(log) {
+		o, err := parse(strings.TrimSuffix(line, "\n"))
+		if err != nil {
+			return nil, err
+		}
+		totals[o.Dish] += o.Qty * o.Price
+	}
+	return totals, nil
+}</code></pre>
+    <pre class="code" data-src="chapters/31-performance/orders.go#revenueDemo"><code>func revenueDemo() {
+	log := sampleLog(1000)
+	slow, err1 := revenue(log, parseRegexp)
+	fast, err2 := revenue(log, parseCut)
+	for _, dish := range slices.Sorted(maps.Keys(fast)) {
+		fmt.Printf("%s %d 元\n", dish, fast[dish])
+	}
+	fmt.Println("兩種結果相同：", maps.Equal(slow, fast), err1, err2)
+	_, err := parseCut("10:05,排骨飯,兩個,90")
+	fmt.Println(err)
+}</code></pre>
+    <pre class="out" data-example="chapters/31-performance#Example_revenueDemo"><code>排骨飯 36000 元
+滷肉飯 19950 元
+素食便當 32080 元
+雞腿飯 40000 元
+魚排飯 37905 元
+兩種結果相同： true &lt;nil&gt; &lt;nil&gt;
+訂單格式不對："10:05,排骨飯,兩個,90"</code></pre>
+    <p>main_test.go 的 TestParsersAgree 用好幾種正確和錯誤的行，逐一比對兩個版本的結果。測試只抓得到它列出來的情況：這一章最早的 parseCut 只檢查時間是 5 個字元，「ab:cd」和「-2」份都會通過，當時的測試沒有這幾種行，所以沒有發現。regexp 版也有一個漏洞：<code>\d+</code> 擋得住正負號，擋不住放不進 int 的長數字，所以它也要檢查 Atoi 的錯誤。錯誤的行要列得和正確的行一樣仔細。接著用 benchmark 量，兩個版本用子 benchmark 放在一起，輸入完全相同：</p>
+    <pre class="code" data-src="chapters/31-performance/main_test.go#BenchmarkRevenue"><code>func BenchmarkRevenue(b *testing.B) {
+	log := sampleLog(1000) // 準備資料不算在時間裡：b.Loop 會在第一次呼叫時重設計時
+	for _, bc := range []struct {
+		name  string
+		parse func(string) (Order, error)
+	}{
+		{"regexp", parseRegexp},
+		{"cut", parseCut},
+	} {
+		b.Run(bc.name, func(b *testing.B) {
+			for b.Loop() {
+				revenue(log, bc.parse)
+			}
+		})
+	}
+}</code></pre>
+    <pre class="shell"><code>go test -run='^$' -bench=Revenue -benchmem ./chapters/31-performance</code></pre>
+    <p class="label">輸出（數字依機器不同）</p>
+    <pre class="out"><code>goos: darwin
+goarch: arm64
+pkg: github.com/xinqilin/GO-Playground/chapters/31-performance
+cpu: Apple M1 Pro
+BenchmarkRevenue/regexp-10         	    4329	    248785 ns/op	  160324 B/op	    2002 allocs/op
+BenchmarkRevenue/cut-10            	   24459	     49128 ns/op	     256 B/op	       2 allocs/op
+PASS
+ok  	github.com/xinqilin/GO-Playground/chapters/31-performance	2.346s</code></pre>
+    <p>1,000 行的紀錄，regexp 版要 0.25 毫秒、每次配置 2,002 次；Cut 版快了 5 倍多，只配置 2 次。這一章接下來會說明這些數字怎麼來、怎麼找出原因。</p>
+    <ul class="notes">
+      <li><strong>只量一次不夠</strong>。用 <code>-count=10</code> 跑好幾次，看數字穩不穩定。同一台機器上其他程式、溫度、省電模式都會讓數字跳動。下面是 cut 跑 5 次，彼此差不到 1%，這種程度的差距才能拿來比較：</li>
+    </ul>
+    <pre class="out"><code>BenchmarkRevenue/cut-10         	   24346	     48887 ns/op
+BenchmarkRevenue/cut-10         	   24688	     48595 ns/op
+BenchmarkRevenue/cut-10         	   24684	     48613 ns/op
+BenchmarkRevenue/cut-10         	   24775	     48623 ns/op
+BenchmarkRevenue/cut-10         	   24709	     48570 ns/op</code></pre>
+    <ul class="notes">
+      <li>改之前、改之後各跑 10 次存成檔案，用官方的 benchstat 工具（<code>golang.org/x/perf/cmd/benchstat</code>，要另外安裝）比較，它會算出中位數、變動範圍，以及差異是不是真的（練習 1 會自己算中位數和變動範圍）。</li>
+      <li>準備資料的時間不算進去：<code>b.Loop()</code> 在第一次被呼叫時才開始計時，迴圈前面的 sampleLog 不會影響結果。b.Loop 也保證迴圈裡的呼叫不會被編譯器當成「結果沒用到」而整個省略。</li>
+      <li>benchmark 量的是你給的輸入。真實資料比較長、比較亂的話，用真實資料的樣本來量。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="profile">
+    <h2 id="profile">2. 用 pprof 找出瓶頸</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 220" role="img" aria-label="呼叫樹：revenue 呼叫 parseRegexp，parseRegexp 呼叫 FindStringSubmatch，FindStringSubmatch 呼叫 doOnePass。flat 是函式自己花的，cum 是自己加上它呼叫的函式。revenue 的 flat 很小但 cum 幾乎是全部，FindStringSubmatch 和 doOnePass 的 flat 各占一半">
+        <title>flat 和 cum</title>
+        <rect class="soft" x="16" y="16" width="200" height="34" rx="6"/>
+        <text class="sm mono" x="28" y="38">revenue</text>
+        <rect class="soft" x="46" y="60" width="200" height="34" rx="6"/>
+        <text class="sm mono" x="58" y="82">parseRegexp</text>
+        <rect class="hot" x="76" y="104" width="200" height="34" rx="6"/>
+        <text class="sm mono" x="88" y="126">FindStringSubmatch</text>
+        <rect class="hot" x="106" y="148" width="200" height="34" rx="6"/>
+        <text class="sm mono" x="118" y="170">doOnePass</text>
+        <text class="sm" x="330" y="38">flat 很小，cum 全部</text>
+        <text class="sm" x="330" y="82">flat 0，cum 全部</text>
+        <text class="sm t-hot" x="330" y="126">flat 一半</text>
+        <text class="sm t-hot" x="330" y="170">flat 一半</text>
+        <text class="sm" x="16" y="210">flat：函式自己花的；cum：自己加上它呼叫的所有函式</text>
+      </svg>
+      <figcaption>從 cum 大的地方往下找，直到 flat 大的那一層：那裡才是真正花掉資源的地方。這張圖的比例來自下面的記憶體 profile。</figcaption>
+    </figure>
+    <p>benchmark 告訴你「多慢」，profile 告訴你「慢在哪裡」。go test 可以在跑 benchmark 的同時記錄 profile：</p>
+    <pre class="shell"><code>go test -run='^$' -bench='Revenue/regexp' -cpuprofile=cpu.out ./chapters/31-performance   <span class="c"># 時間花在哪裡</span>
+go test -run='^$' -bench='Revenue/regexp' -memprofile=mem.out ./chapters/31-performance   <span class="c"># 記憶體配置在哪裡</span>
+go tool pprof -top cpu.out            <span class="c"># 依花費排序的清單</span>
+go tool pprof -list=parseRegexp cpu.out   <span class="c"># 逐行標出花費</span>
+go tool pprof -http=localhost:8080 cpu.out   <span class="c"># 在瀏覽器裡看呼叫圖和 flame graph</span></code></pre>
+    <p>記憶體 profile 的結果：</p>
+    <pre class="shell"><code>go tool pprof -sample_index=alloc_space -top -nodecount=8 mem.out</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out"><code>File: perf.test
+Type: alloc_space
+Time: 2026-11-21 07:30:42 CST
+Showing nodes accounting for 719.05MB, 99.45% of 723.06MB total
+Dropped 27 nodes (cum &lt;= 3.62MB)
+Showing top 8 nodes out of 10
+      flat  flat%   sum%        cum   cum%
+  366.03MB 50.62% 50.62%   720.06MB 99.58%  regexp.(*Regexp).FindStringSubmatch
+  353.03MB 48.82% 99.45%   354.03MB 48.96%  regexp.(*Regexp).doOnePass
+         0     0% 99.45%   720.06MB 99.58%  github.com/xinqilin/GO-Playground/chapters/31-performance.BenchmarkRevenue.func1
+         0     0% 99.45%   720.06MB 99.58%  github.com/xinqilin/GO-Playground/chapters/31-performance.parseRegexp
+         0     0% 99.45%   720.06MB 99.58%  github.com/xinqilin/GO-Playground/chapters/31-performance.revenue
+         0     0% 99.45%   720.06MB 99.58%  github.com/xinqilin/GO-Playground/chapters/31-performance.revenue-range1 (inline)
+         0     0% 99.45%   354.03MB 48.96%  regexp.(*Regexp).find
+         0     0% 99.45%   720.06MB 99.58%  strings.Lines.func1 (inline)</code></pre>
+    <pre class="shell"><code>go tool pprof -sample_index=alloc_space -list=parseRegexp mem.out</code></pre>
+    <p class="label">輸出（前幾行）</p>
+    <pre class="out"><code>Total: 723.06MB
+ROUTINE ======================== github.com/xinqilin/GO-Playground/chapters/31-performance.parseRegexp in …/chapters/31-performance/orders.go
+         0   720.06MB (flat, cum) 99.58% of Total
+         .          .     42:func parseRegexp(line string) (Order, error) {
+         .   720.06MB     43:	m := lineRE.FindStringSubmatch(line)
+         .          .     44:	if m == nil {
+         .          .     45:		return Order{}, fmt.Errorf("%w：%q", errBadLine, line)
+         .          .     46:	}
+         .          .     47:	qty, err1 := strconv.Atoi(m[3]) // \d+ 擋掉了正負號，但擋不住太長、放不進 int 的數字
+         .          .     48:	price, err2 := strconv.Atoi(m[4])</code></pre>
+    <ul class="notes">
+      <li>整個 benchmark 配置的 723 MB，幾乎全部來自第 43 行的 FindStringSubmatch：每一行都要配置一個存放比對結果的 slice，比對本身也要配置工作用的記憶體。Cut 版直接回傳原本字串的子字串，完全不用配置。</li>
+      <li><strong>alloc_space</strong> 是「總共配置過多少」，找出讓 GC 忙碌的地方。<strong>inuse_space</strong>（預設）是「profile 當下還活著多少」，找出記憶體為什麼一直漲。</li>
+      <li>regexp 很方便，但在每秒處理大量資料的熱點上，固定格式的解析用 strings 的函式就夠了（<a href="24-text.html#pit-regexp-overuse">24 章</a>）。</li>
+      <li>不是 benchmark 的程式：一般的程式用 runtime/pprof 的 <code>StartCPUProfile</code>、<code>WriteHeapProfile</code> 寫出 profile；HTTP 服務 import net/http/pprof，就能從 /debug/pprof/ 隨時抓正在執行的服務的 profile（這個端點不要對外公開）。</li>
+    </ul>
+    <p>CPU profile 的讀法完全一樣，只是單位從 MB 換成秒。它是每隔一小段時間記下「現在在執行哪個函式」取樣而來的，程式要跑得夠久（至少一兩秒）才有足夠的樣本；樣本太少時，每個函式的比例只是雜訊。記憶體 profile 則是在配置時記錄，數字比較穩定，這一節就用它示範。</p>
+  </section>
+
+  <section aria-labelledby="allocs">
+    <h2 id="allocs">3. 數配置的次數</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 200" role="img" aria-label="stack 上的變數隨著函式結束一起消失，幾乎沒有成本。heap 上的配置要找空間、之後還要由 GC 掃描和回收。每次配置都會累積 GC 的工作量">
+        <title>stack 與 heap</title>
+        <rect class="soft" x="16" y="20" width="210" height="110" rx="10"/>
+        <text class="sm bold" x="30" y="44">stack</text>
+        <text class="sm" x="30" y="72">函式結束就整塊收回</text>
+        <text class="sm" x="30" y="98">不用 GC 管</text>
+        <text class="sm t-acc" x="30" y="122">幾乎免費</text>
+        <rect class="hot" x="254" y="20" width="210" height="110" rx="10"/>
+        <text class="sm bold" x="268" y="44">heap</text>
+        <text class="sm" x="268" y="72">要找一塊空間</text>
+        <text class="sm" x="268" y="98">之後 GC 要掃描、回收</text>
+        <text class="sm t-hot" x="268" y="122">次數多就變慢</text>
+        <text class="sm" x="240" y="170" text-anchor="middle">-benchmem 的 allocs/op 數的就是 heap 配置</text>
+      </svg>
+      <figcaption>在 Go 裡，少配置幾次常常是最有效的最佳化：省下配置本身，也省下之後 GC 的工作。</figcaption>
+    </figure>
+    <p>同一行收據有好幾種組法。<code>testing.AllocsPerRun</code> 把一個函式跑很多次，回傳平均每次配置幾次：</p>
+    <pre class="code" data-src="chapters/31-performance/allocs.go#allocDemo"><code>func allocDemo() {
+	dish, qty, price := "排骨飯", 2, 180
+	buf := make([]byte, 0, 64) // 重複使用的緩衝區
+
+	ways := []struct {
+		name string
+		f    func()
+	}{
+		{"fmt.Sprintf", func() {
+			sink = fmt.Sprintf("%s x%d %d", dish, qty, price)
+		}},
+		{"字串相加", func() {
+			sink = dish + " x" + strconv.Itoa(qty) + " " + strconv.Itoa(price)
+		}},
+		{"strings.Builder", func() {
+			var b strings.Builder
+			b.Grow(32)
+			b.WriteString(dish)
+			b.WriteString(" x")
+			b.WriteString(strconv.Itoa(qty))
+			b.WriteString(" ")
+			b.WriteString(strconv.Itoa(price))
+			sink = b.String()
+		}},
+		{"append 到舊的 buf", func() {
+			b := append(buf[:0], dish...)
+			b = append(b, " x"...)
+			b = strconv.AppendInt(b, int64(qty), 10)
+			b = append(b, ' ')
+			b = strconv.AppendInt(b, int64(price), 10)
+			sinkBytes = b
+		}},
+	}
+	for _, w := range ways {
+		fmt.Printf("%s：每次配置 %.0f 次\n", w.name, testing.AllocsPerRun(100, w.f))
+	}
+}</code></pre>
+    <pre class="out" data-example="chapters/31-performance#Example_allocDemo"><code>fmt.Sprintf：每次配置 1 次
+字串相加：每次配置 2 次
+strings.Builder：每次配置 2 次
+append 到舊的 buf：每次配置 0 次</code></pre>
+    <ul class="notes">
+      <li>fmt.Sprintf 最方便，配置一次產生結果字串。在熱點以外的地方，用它就好。</li>
+      <li>字串相加和 Builder 版各配置 2 次：結果 1 次，<code>strconv.Itoa(180)</code> 1 次。目前的實作裡，100 以下的數字有現成的字串，Itoa(2) 不用配置。</li>
+      <li>append 到重複使用的 buf 完全不配置：strconv.AppendInt 把數字直接寫進既有的 []byte。練習 2、5 用的就是這個技巧。</li>
+      <li>AllocsPerRun 也很適合寫成測試：「這個函式不能配置記憶體」寫成 <code>if n := testing.AllocsPerRun(…); n != 0 { t.Errorf(…) }</code>，以後有人不小心加了配置，測試就會抓到。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="escape">
+    <h2 id="escape">4. 逃逸分析</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 214" role="img" aria-label="編譯器判斷每個變數在函式結束後還會不會被用到。回傳指標、交給參數型別是 any 的函式、大小在執行時才知道的 make，會放到 heap；回傳值的複本、大小固定又不離開函式的陣列，留在 stack">
+        <title>留在 stack 還是放到 heap</title>
+        <rect class="soft" x="16" y="16" width="214" height="150" rx="10"/>
+        <text class="sm bold t-acc" x="30" y="40">留在 stack</text>
+        <text class="sm" x="30" y="68">回傳值的複本</text>
+        <text class="sm" x="30" y="94">大小固定的陣列</text>
+        <text class="sm" x="30" y="120">不離開函式的 slice</text>
+        <text class="sm" x="30" y="146">只被讀的參數</text>
+        <rect class="hot" x="250" y="16" width="214" height="150" rx="10"/>
+        <text class="sm bold t-hot" x="264" y="40">放到 heap</text>
+        <text class="sm" x="264" y="68">回傳區域變數的指標</text>
+        <text class="sm" x="264" y="94">交給參數是 any 的函式</text>
+        <text class="sm" x="264" y="120">執行時才知道大小的 make</text>
+        <text class="sm" x="264" y="146">被存起來的閉包變數</text>
+        <text class="sm" x="240" y="198" text-anchor="middle">由編譯器決定，go build -gcflags=-m 可以看到它的判斷</text>
+      </svg>
+      <figcaption>Go 沒有 new 一定在 heap、區域變數一定在 stack 這種規則。編譯器分析每個變數在函式結束後還會不會被用到，用不到的才能留在 stack。</figcaption>
+    </figure>
+    <p><a href="05-pointers.html#escape">05 章</a>提過逃逸分析，這裡實際看編譯器的判斷：</p>
+    <pre class="code" data-src="chapters/31-performance/escape.go"><code>package main
+
+import "fmt"
+
+// Ticket 是一張號碼牌。
+type Ticket struct {
+	No   int
+	Note string
+}
+
+// newTicket 回傳指標：t 在函式結束後還要被用到，只能放在 heap。
+func newTicket(no int) *Ticket {
+	t := Ticket{No: no}
+	return &amp;t
+}
+
+// ticketValue 回傳值：複製一份給呼叫的人，t 本身留在 stack。
+func ticketValue(no int) Ticket {
+	t := Ticket{No: no}
+	return t
+}
+
+// announce 把 no 交給 fmt.Println。參數型別是 any，編譯器看不出它會被留多久。
+func announce(no int) {
+	fmt.Println("請", no, "號到櫃台")
+}
+
+// lastFive 的陣列大小固定，而且沒有離開函式，留在 stack。
+func lastFive(nos []int) int {
+	var recent [5]int
+	copy(recent[:], nos[max(len(nos)-5, 0):])
+	sum := 0
+	for _, n := range recent {
+		sum += n
+	}
+	return sum
+}
+
+// queueOf 的大小要到執行時才知道，只能放在 heap。
+func queueOf(n int) []int {
+	return make([]int, n)
+}
+
+// escapeDemo 呼叫上面的函式。哪些變數放在 heap，要用 go build -gcflags=-m 看。
+func escapeDemo() {
+	p := newTicket(7)
+	v := ticketValue(8)
+	announce(p.No + v.No)
+	fmt.Println(lastFive([]int{1, 2, 3, 4, 5, 6}), len(queueOf(3)))
+}</code></pre>
+    <pre class="shell"><code>go build -gcflags=-m -o /dev/null ./chapters/31-performance 2&gt;&amp;1 | grep escape.go | grep -v inlin</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out"><code>chapters/31-performance/escape.go:13:2: moved to heap: t
+chapters/31-performance/escape.go:25:13: ... argument does not escape
+chapters/31-performance/escape.go:25:14: "請" escapes to heap
+chapters/31-performance/escape.go:25:21: no escapes to heap
+chapters/31-performance/escape.go:25:25: "號到櫃台" escapes to heap
+chapters/31-performance/escape.go:29:15: nos does not escape
+chapters/31-performance/escape.go:41:13: make([]int, n) escapes to heap
+chapters/31-performance/escape.go:49:13: ... argument does not escape
+chapters/31-performance/escape.go:49:22: ~r0 escapes to heap
+chapters/31-performance/escape.go:49:28: []int{...} does not escape
+chapters/31-performance/escape.go:49:52: len(~r0) escapes to heap
+chapters/31-performance/escape.go:49:60: make([]int, 3) does not escape</code></pre>
+    <ul class="notes">
+      <li><strong>第 13 行</strong>：newTicket 回傳 &amp;t，t 在函式結束後還要被用到，moved to heap。ticketValue 回傳複本，沒有任何訊息，t 留在 stack。</li>
+      <li><strong>第 25 行</strong>：fmt.Println 的參數是 any，放進 any 的值會被標成 escapes to heap。常數字串和小整數有現成的資料可以指，實際上不一定會配置，但編譯器不能把它們放在 stack 上。</li>
+      <li><strong>第 29 行</strong>：lastFive 只讀 nos，nos does not escape；陣列 recent 大小固定，留在 stack。</li>
+      <li><strong>第 41 行和第 49 行</strong>：queueOf 裡的 <code>make([]int, n)</code> 大小執行時才知道，escapes to heap。但 escapeDemo 呼叫 <code>queueOf(3)</code> 時，queueOf 被內嵌（inline）進來，大小變成常數 3，同一行 make 就 does not escape 了。內嵌讓逃逸分析看到更多資訊，所以小函式很少需要為了效能手動改寫。</li>
+    </ul>
+    <p>不要為了避免逃逸而扭曲 API（例如所有東西都改成傳值、不敢用 interface）。先寫清楚的程式，profile 顯示某個熱點的配置太多，再用 -m 找原因。本章的 escape_test.go 會實際執行上面的指令，確認頁面上的判斷沒有過時。</p>
+  </section>
+
+  <section aria-labelledby="prealloc">
+    <h2 id="prealloc">5. 預先配置與重複使用</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 196" role="img" aria-label="一個一個 append 1000 個元素，slice 的容量依序變成 1、2、4、8、16、32、71、143、303、591、1023，每次容量不夠就配置一塊更大的記憶體並複製全部的元素。預先用 make 指定容量 1000，只配置一次">
+        <title>append 的擴充</title>
+        <text class="sm bold" x="16" y="30">一個一個 append：</text>
+        <rect class="hot" x="16" y="42" width="6" height="22" rx="1"/>
+        <rect class="hot" x="26" y="42" width="8" height="22" rx="1"/>
+        <rect class="hot" x="38" y="42" width="12" height="22" rx="1"/>
+        <rect class="hot" x="54" y="42" width="18" height="22" rx="1"/>
+        <rect class="hot" x="76" y="42" width="26" height="22" rx="1"/>
+        <rect class="hot" x="106" y="42" width="40" height="22" rx="1"/>
+        <rect class="hot" x="150" y="42" width="56" height="22" rx="1"/>
+        <rect class="hot" x="210" y="42" width="72" height="22" rx="1"/>
+        <rect class="hot" x="286" y="42" width="80" height="22" rx="1"/>
+        <rect class="hot" x="370" y="42" width="94" height="22" rx="1"/>
+        <text class="sm" x="16" y="88">容量不夠就換一塊更大的，再把舊的全部複製過去</text>
+        <text class="sm bold" x="16" y="126">make([]string, 0, 1000)：</text>
+        <rect class="acc" x="16" y="138" width="448" height="22" rx="2"/>
+        <text class="sm t-acc" x="16" y="186">一次配置，不用複製</text>
+      </svg>
+      <figcaption>知道最後大概有多少個，就在 make 時給容量。map 也一樣：make(map[K]V, n) 預留 n 個的空間。</figcaption>
+    </figure>
+    <pre class="code" data-src="chapters/31-performance/allocs.go#collectNames,collectNamesPrealloc,preallocDemo"><code>func collectNames(orders []Order) []string {
+	var names []string
+	for _, o := range orders {
+		names = append(names, o.Dish)
+	}
+	return names
+}
+
+func collectNamesPrealloc(orders []Order) []string {
+	names := make([]string, 0, len(orders))
+	for _, o := range orders {
+		names = append(names, o.Dish)
+	}
+	return names
+}
+
+func preallocDemo() {
+	orders := make([]Order, 1000)
+	a, b := collectNames(orders), collectNamesPrealloc(orders)
+	fmt.Printf("沒有預先配置：len %d cap %d\n", len(a), cap(a))
+	fmt.Printf("預先配置：len %d cap %d\n", len(b), cap(b))
+}</code></pre>
+    <pre class="out" data-example="chapters/31-performance#Example_preallocDemo"><code>沒有預先配置：len 1000 cap 1023
+預先配置：len 1000 cap 1000</code></pre>
+    <pre class="shell"><code>go test -run='^$' -bench=CollectNames -benchmem ./chapters/31-performance</code></pre>
+    <p class="label">輸出（數字依機器不同）</p>
+    <pre class="out"><code>goos: darwin
+goarch: arm64
+pkg: github.com/xinqilin/GO-Playground/chapters/31-performance
+cpu: Apple M1 Pro
+BenchmarkCollectNames/append-10         	  264752	      4121 ns/op	   35184 B/op	      11 allocs/op
+BenchmarkCollectNames/prealloc-10       	  631197	      1899 ns/op	   16384 B/op	       1 allocs/op
+PASS
+ok  	github.com/xinqilin/GO-Playground/chapters/31-performance	2.394s</code></pre>
+    <p>沒有預先配置的版本配置了 11 次，總共 35 KB，最後還多留了 23 個用不到的位置；預先配置的版本 1 次、16 KB，快了一倍多。其他常用的手法：</p>
+    <ul class="notes">
+      <li><strong>strings.Builder.Grow(n)</strong>、<strong>bytes.Buffer.Grow(n)</strong>：知道結果大概多長時先預留（<a href="08-strings-runes.html#builder">08 章</a>）。練習 5 先算出精確的長度，整份收據只配置一次。</li>
+      <li><strong>重複使用緩衝區</strong>：<code>buf = buf[:0]</code> 保留容量、清空內容，再 append。迴圈裡每一圈都用同一個 buf。</li>
+      <li><strong>strconv.AppendInt、AppendFloat、AppendQuote</strong>：直接寫進 []byte，不產生中間的字串。</li>
+      <li><strong>避免 []byte 和 string 來回轉換</strong>：每次轉換都會複製。bytes 和 strings 套件的函式幾乎都成對存在，資料是什麼型別就用哪一個。</li>
+      <li><strong>小心子切片留住大陣列</strong>：從 1 MB 的檔案內容切出第一行，整個 1 MB 都不會被回收（<a href="06-arrays-slices.html#retain">06 章</a>）。只要留一小段時用 bytes.Clone 複製出來（練習 6）。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="pool">
+    <h2 id="pool">6. sync.Pool</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 196" role="img" aria-label="每次要用緩衝區時先向 Pool 借，借不到才用 New 建一個新的；用完 Reset 後還回去，下一次就不用再配置。Pool 裡的東西隨時可能在 GC 時被清掉，太大的緩衝區不要還回去">
+        <title>借用、歸還</title>
+        <rect class="acc" x="170" y="20" width="140" height="56" rx="10"/>
+        <text class="sm mono" x="240" y="44" text-anchor="middle">sync.Pool</text>
+        <text class="sm" x="240" y="64" text-anchor="middle">用過的緩衝區</text>
+        <rect class="soft" x="16" y="30" width="110" height="36" rx="8"/>
+        <text class="sm mono" x="71" y="53" text-anchor="middle">Get()</text>
+        <rect class="soft" x="354" y="30" width="110" height="36" rx="8"/>
+        <text class="sm mono" x="409" y="53" text-anchor="middle">Put(b)</text>
+        <path class="wire" d="M170 48 H126"/>
+        <path class="wire" d="M354 48 H310"/>
+        <text class="sm" x="16" y="112">借不到時呼叫 New 建一個新的</text>
+        <text class="sm" x="16" y="136">還之前要 Reset，借到的可能是別人用過的</text>
+        <text class="sm t-hot" x="16" y="160">GC 時 Pool 裡的東西可能被清掉：它不是快取</text>
+        <text class="sm t-hot" x="16" y="184">特別大的緩衝區不要還回去</text>
+      </svg>
+      <figcaption>sync.Pool 適合「很頻繁地建立、用一下就丟」的暫存物件，例如格式化用的緩衝區。<a href="17-sync.html#map-pool">17 章</a>介紹過它的 API。</figcaption>
+    </figure>
+    <pre class="code" data-src="chapters/31-performance/pool.go#bufPool,maxPooled,receipt,receiptPooled"><code>var bufPool = sync.Pool{
+	New: func() any { return new(bytes.Buffer) },
+}
+
+const maxPooled = 4 &lt;&lt; 10
+
+func receipt(orders []Order) string {
+	var b bytes.Buffer
+	writeReceipt(&amp;b, orders)
+	return b.String()
+}
+
+func receiptPooled(orders []Order) string {
+	b := bufPool.Get().(*bytes.Buffer)
+	b.Reset() // 上一個人留下的內容要清掉
+	writeReceipt(b, orders)
+	s := b.String() // 先複製出字串，緩衝區還回去之後就可能被別人改掉
+	if b.Cap() &lt;= maxPooled {
+		bufPool.Put(b)
+	}
+	return s
+}</code></pre>
+    <pre class="out" data-example="chapters/31-performance#Example_poolDemo"><code>12:01 排骨飯 x2
+12:03 滷肉飯 x1
+合計 230
+相同： true</code></pre>
+    <pre class="shell"><code>go test -run='^$' -bench=Receipt -benchmem ./chapters/31-performance</code></pre>
+    <p class="label">輸出（數字依機器不同）</p>
+    <pre class="out"><code>goos: darwin
+goarch: arm64
+pkg: github.com/xinqilin/GO-Playground/chapters/31-performance
+cpu: Apple M1 Pro
+BenchmarkReceipt/new-10         	 1862025	       641.7 ns/op	    1380 B/op	       6 allocs/op
+BenchmarkReceipt/pool-10        	 2726557	       444.1 ns/op	     420 B/op	       2 allocs/op
+PASS
+ok  	github.com/xinqilin/GO-Playground/chapters/31-performance	2.504s</code></pre>
+    <ul class="notes">
+      <li>每次都用新的 bytes.Buffer，要隨著內容變長擴充好幾次；從 pool 借來的緩衝區已經夠大，只剩 String() 複製結果和 Itoa 那 2 次。</li>
+      <li><strong>Reset</strong>：借到的緩衝區可能還留著上一個人的內容。</li>
+      <li><strong>先複製再還</strong>：b.String() 會複製一份；如果回傳的是 b.Bytes()，還回去之後別人寫進來，你手上的結果就變了。</li>
+      <li><strong>大的不要還</strong>：偶爾一張特別長的收據把緩衝區撐大到幾 MB，還回去之後會一直佔著那塊記憶體。練習 4 會實作這個規則。</li>
+      <li>pool 會增加程式的複雜度。只有 profile 顯示某個暫存物件的配置真的很多時才用，不要預設就用。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="gc">
+    <h2 id="gc">7. GC 與記憶體上限</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 214" role="img" aria-label="heap 的大小隨著配置慢慢上升，到達目標時 GC 開始，標記還活著的物件、回收其他的，heap 降回存活的大小。下一次的目標預設是存活大小的兩倍，也就是 GOGC 等於 100。GOGC 越大，GC 越少，但記憶體用得越多">
+        <title>GC 的節奏</title>
+        <path class="wire faint" d="M30 180 H460"/>
+        <path class="wire faint" d="M30 180 V20"/>
+        <path class="wire acc-ln" d="M30 160 L130 80 L130 160 L230 80 L230 160 L330 80 L330 160 L430 80 L430 160"/>
+        <path class="wire dash" d="M30 80 H460"/>
+        <text class="sm" x="40" y="72">目標：存活的大小 × (1 + GOGC/100)</text>
+        <text class="sm" x="40" y="174">存活的大小</text>
+        <text class="sm t-hot" x="136" y="100">GC</text>
+        <text class="sm t-hot" x="236" y="100">GC</text>
+        <text class="sm t-hot" x="336" y="100">GC</text>
+        <text class="sm" x="240" y="204" text-anchor="middle">配置得越少、越慢，GC 就越少發生</text>
+      </svg>
+      <figcaption>Go 的 GC 和程式同時執行，大部分的工作不會讓程式停下來。它花多少時間，主要取決於配置的速度和存活的物件有多少。</figcaption>
+    </figure>
+    <p>GC 什麼時候開始，由 <strong>GOGC</strong> 決定。預設是 100：上一次 GC 後存活 4 MB，heap 長到 8 MB 時就再做一次。設定 <code>GODEBUG=gctrace=1</code>，每次 GC 都會印出一行：</p>
+    <pre class="shell"><code>GODEBUG=gctrace=1 go test -run='^$' -bench='Revenue/regexp' -benchtime=300x ./chapters/31-performance 2&gt;&amp;1 | grep '^gc ' | tail -2</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out"><code>gc 15 @0.076s 0%: 0.018+0.19+0.012 ms clock, 0.18+0.034/0.10/0.003+0.12 ms cpu, 3-&gt;3-&gt;0 MB, 4 MB goal, 0 MB stacks, 0 MB globals, 10 P
+gc 16 @0.082s 0%: 0.045+0.14+0.009 ms clock, 0.45+0.007/0.086/0.041+0.098 ms cpu, 3-&gt;3-&gt;0 MB, 4 MB goal, 0 MB stacks, 0 MB globals, 10 P</code></pre>
+    <ul class="notes">
+      <li><code>gc 16 @0.082s 0%</code>：第 16 次 GC，程式開始後 0.082 秒，GC 到目前為止用掉的 CPU 比例。</li>
+      <li><code>3-&gt;3-&gt;0 MB, 4 MB goal</code>：GC 開始時 heap 3 MB，結束時 3 MB，其中還活著的只有不到 1 MB，下一次的目標是 4 MB（4 MB 是最小的目標）。</li>
+      <li>regexp 版每一行都配置，heap 很快就到目標，0.082 秒就做了 16 次 GC。把 GOGC 調大，GC 次數就變少：</li>
+    </ul>
+    <pre class="shell"><code>GODEBUG=gctrace=1 go test -run='^$' -bench='Revenue/regexp' -benchtime=300x ./chapters/31-performance 2&gt;&amp;1 | grep -c '^gc '
+GOGC=400 GODEBUG=gctrace=1 go test -run='^$' -bench='Revenue/regexp' -benchtime=300x ./chapters/31-performance 2&gt;&amp;1 | grep -c '^gc '</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out"><code>39
+9</code></pre>
+    <ul class="notes">
+      <li><strong>GOGC</strong>：越大，GC 越少、記憶體用得越多。<code>GOGC=off</code> 完全關掉，只適合很短的批次程式。</li>
+      <li><strong>GOMEMLIMIT</strong>（Go 1.19 起，也可以用 runtime/debug.SetMemoryLimit）：給整個程式一個記憶體上限，快到上限時 GC 會更積極。在容器裡跑時，設成容器限制的九成左右，可以避免被系統強制終止，又不必把 GOGC 調得很小。</li>
+      <li>Go 1.26 起預設使用新的 GC 實作（Green Tea），對大量小物件的程式更有效率。這是執行環境的改進，程式碼不需要改。</li>
+      <li>調 GC 參數是最後的手段。減少配置（第 3、5、6 節）同時減少配置本身和 GC 的工作，效果通常比調參數好得多。</li>
+    </ul>
+    <section class="deep" aria-labelledby="gc-deep">
+      <p class="tag">深入：第一次讀可以先跳過</p>
+      <h3 id="gc-deep">PGO 與 goroutine 洩漏的 profile</h3>
+      <p><strong>PGO</strong>（profile-guided optimization，Go 1.21 起）：把正式環境收集到的 CPU profile 存成 main package 目錄下的 <code>default.pgo</code>，go build 就會自動用它，針對真正的熱點做更積極的內嵌等最佳化。官方說明一般能有幾個百分點的改善，而且完全不用改程式碼。profile 要來自有代表性的正式環境負載，benchmark 的 profile 不一定代表真實情況。</p>
+      <p><strong>goroutine 洩漏的 profile</strong>（Go 1.27 起正式提供）：runtime/pprof 新增 <code>goroutineleak</code> 這種 profile，net/http/pprof 也有對應的 /debug/pprof/goroutineleak。它利用 GC 找出「卡在一個沒有任何其他 goroutine 能碰到的 channel 或鎖上」的 goroutine，這種 goroutine 永遠不會醒來。測試裡抓洩漏，仍然建議用 <a href="15-channels.html#deadlock">15 章</a>的 synctest。</p>
+    </section>
+  </section>
+
+  <section aria-labelledby="pitfalls">
+    <h2 id="pitfalls">常見錯誤</h2>
+    <h3 id="pit-guess">1. 沒量就改</h3>
+    <p>憑直覺改的地方，常常不是真正慢的地方。先 benchmark、再 profile，只改 profile 指出來的熱點（第 1、2 節）。</p>
+
+    <h3 id="pit-no-test">2. 改快了，結果也改錯了</h3>
+    <p>最佳化之前先寫測試鎖住結果，像 TestParsersAgree 那樣逐一比對新舊版本（第 1 節）。</p>
+
+    <h3 id="pit-once">3. 只跑一次就下結論</h3>
+    <p>一次的數字可能只是雜訊。用 -count 跑好幾次，差距比變動範圍大才算數（第 1 節）。</p>
+
+    <h3 id="pit-micro">4. 最佳化不重要的地方</h3>
+    <p>把只佔 1% 的函式加快一倍，整體只快 0.5%。從 cum 最大的地方往下找（第 2 節）。</p>
+
+    <h3 id="pit-regexp-loop">5. 熱點上用 regexp、fmt 解析固定格式</h3>
+    <p>方便但每次都配置。固定格式用 strings.Cut、strconv（第 2、3 節）。</p>
+
+    <h3 id="pit-pool-misuse">6. sync.Pool 用錯</h3>
+    <p>沒有 Reset、還回去之後還在用、把特別大的緩衝區還回去，或把它當成快取（第 6 節）。</p>
+
+    <h3 id="pit-retain">7. 子切片留住整個大陣列</h3>
+    <p>只想留一小段，卻讓整個檔案都不能回收。需要長期保留的一小段，複製出來（第 5 節）。</p>
+
+    <h3 id="pit-gc-tuning">8. 先調 GOGC</h3>
+    <p>調參數治標，減少配置才治本。真的要調，GOMEMLIMIT 通常比把 GOGC 調小更合適（第 7 節）。</p>
+  </section>
+
+  <section aria-labelledby="java">
+    <h2 id="java">從 Java 來的你</h2>
+    <div class="table-wrap">
+      <table class="vs">
+        <thead><tr><th scope="col">主題</th><th scope="col">Java</th><th scope="col">Go</th></tr></thead>
+        <tbody>
+          <tr><th scope="row">microbenchmark</th><td class="java">JMH，另外的專案和註解</td><td>測試檔裡的 Benchmark 函式</td></tr>
+          <tr><th scope="row">profiler</th><td class="java">JFR、async-profiler、VisualVM</td><td>pprof，go test 和 net/http/pprof 內建</td></tr>
+          <tr><th scope="row">暖機</th><td class="java">JIT 需要暖機，JMH 處理</td><td>事先編譯好，沒有暖機的問題</td></tr>
+          <tr><th scope="row">stack 或 heap</th><td class="java">物件都在 heap，JIT 的逃逸分析可能把物件拆成區域變數</td><td>編譯時決定，-gcflags=-m 看得到</td></tr>
+          <tr><th scope="row">值型別</th><td class="java">基本型別以外都是參考</td><td>struct、陣列都是值，可以整塊放在 stack 或 slice 裡</td></tr>
+          <tr><th scope="row">GC 調校</th><td class="java">好幾種 GC、大量 -XX 參數</td><td>一種 GC，兩個旋鈕：GOGC、GOMEMLIMIT</td></tr>
+          <tr><th scope="row">記憶體上限</th><td class="java"><code>-Xmx</code></td><td>GOMEMLIMIT（軟上限）</td></tr>
+          <tr><th scope="row">物件池</th><td class="java">自己寫或用函式庫</td><td>標準庫的 sync.Pool</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>Java 的效能調校很大一部分是在挑 GC 和調 JVM 參數；Go 把這些旋鈕減到只剩兩個，把重點放在程式本身：少配置、用值型別、讓資料連續排在記憶體裡。另一個差別是 Go 沒有 JIT，benchmark 不用暖機，跑出來的數字比較直接反映程式碼本身。</p>
+  </section>
+
+  <section aria-labelledby="exercises">
+    <h2 id="exercises">練習</h2>
+    <p>題目在 <code>exercises/31-performance/exercises.go</code>：午餐尖峰時段，便當店的程式要又快又省。有幾題的測試會用 testing.AllocsPerRun 檢查配置的次數。</p>
+    <pre class="shell"><code>go test ./exercises/31-performance/                    <span class="c"># 跑全部練習</span>
+go test ./exercises/31-performance/ -run TestReceipt   <span class="c"># 只跑一題</span>
+go test -tags solution ./exercises/31-performance/     <span class="c"># 跑參考解答</span></code></pre>
+    <p>共用的型別在 doc.go：</p>
+    <pre class="code" data-src="exercises/31-performance/doc.go#ErrBadLine,Order,Item,BufferPool"><code>var ErrBadLine = errors.New("訂單格式不對")
+
+type Order struct {
+	Time  string
+	Dish  string
+	Qty   int
+	Price int
+}
+
+type Item struct {
+	Dish  string
+	Qty   int
+	Price int // 單價
+}
+
+type BufferPool struct {
+	MaxCap int // Cap() 超過 MaxCap 的緩衝區不放回去；0 表示不限制
+
+	pool sync.Pool
+}</code></pre>
+    <ol class="exercises">
+      <li>
+        <h3><span class="level l1">入門</span>練習 1：整理 benchmark 的結果</h3>
+        <p>同一個 benchmark 跑好幾次，用中位數和變動範圍判斷數字可不可靠。</p>
+        <pre class="code" data-src="exercises/31-performance/exercises.go#Summarize"><code>func Summarize(samples []float64) (median, spread float64) {
+	// TODO: 實作
+	return 0, 0
+}</code></pre>
+        <p>測試：<code>TestSummarize</code>。</p>
+        <details><summary>提示</summary><p><code>slices.Sorted(slices.Values(samples))</code> 會回傳排序好的新 slice，不會動到原本的。變動範圍用 <code>math.Abs(x-median)/median*100</code> 取最大值；中位數是 0 時不能除，要先處理。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l1">入門</span>練習 2：不配置的一行收據</h3>
+        <p>第 3 節「append 到舊的 buf」的寫法。</p>
+        <pre class="code" data-src="exercises/31-performance/exercises.go#AppendLine"><code>func AppendLine(dst []byte, dish string, qty, price int) []byte {
+	// TODO: 實作
+	return dst
+}</code></pre>
+        <p>測試：<code>TestAppendLine</code>，用 AllocsPerRun 檢查是 0 次。</p>
+        <details><summary>提示</summary><p><code>append(dst, dish...)</code> 可以直接把字串接到 []byte 後面；數字用 <code>strconv.AppendInt(dst, int64(n), 10)</code>。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l2">進階</span>練習 3：不配置的解析</h3>
+        <p>比本章的 parseCut 更嚴格，而且解析正確的一行時完全不配置。</p>
+        <pre class="code" data-src="exercises/31-performance/exercises.go#ParseOrder"><code>func ParseOrder(line string) (Order, error) {
+	// TODO: 實作
+	return Order{}, nil
+}</code></pre>
+        <p>測試：<code>TestParseOrder</code>。</p>
+        <details><summary>提示</summary><p>strings.Cut 切三次。錯誤時直接回傳 ErrBadLine，不要用 fmt.Errorf 包裝（那會配置，雖然只在錯誤時）。時間逐一檢查 5 個 byte。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l2">進階</span>練習 4：有上限的緩衝區 pool</h3>
+        <p>第 6 節的三條規則：借到的是空的、太大的不要還、可以同時使用。</p>
+        <pre class="code" data-src="exercises/31-performance/exercises.go#BufferPool.Get,BufferPool.Put"><code>func (p *BufferPool) Get() *bytes.Buffer {
+	// TODO: 實作
+	return nil
+}
+
+func (p *BufferPool) Put(b *bytes.Buffer) {
+	// TODO: 實作
+}</code></pre>
+        <p>測試：<code>TestBufferPool</code>，用 -race 跑。</p>
+        <details><summary>提示</summary><p><code>b, _ := p.pool.Get().(*bytes.Buffer)</code>，pool 是空的時候 b 是 nil，這時 new 一個。sync.Pool 本身可以同時使用，不用另外加鎖。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l3">挑戰</span>練習 5：只配置一次的收據</h3>
+        <p>先算出總長度，一次配置好，再寫進去。</p>
+        <pre class="code" data-src="exercises/31-performance/exercises.go#Receipt"><code>func Receipt(items []Item) string {
+	// TODO: 實作
+	return ""
+}</code></pre>
+        <p>測試：<code>TestReceipt</code>，用 AllocsPerRun 檢查最多 1 次。</p>
+        <details><summary>提示</summary><p>宣告一個 <code>var scratch [64]byte</code>，用 <code>AppendLine(scratch[:0], …)</code> 量出每一行的長度（它不會逃逸，留在 stack），加總之後 <code>b.Grow(size)</code>，再把每一行 Write 進 strings.Builder。String() 不會再複製。</p></details>
+      </li>
+      <li>
+        <h3><span class="level fix">找錯</span>練習 6：留住整個檔案的第一行</h3>
+        <p>只想留下第一行，結果整個 1 MB 都留在記憶體裡，而且 data 被重複使用後，第一行也跟著變了。</p>
+        <pre class="code" data-src="exercises/31-performance/exercises.go#FirstLine"><code>func FirstLine(data []byte) []byte {
+	if before, _, ok := bytes.Cut(data, []byte{'\n'}); ok {
+		return before
+	}
+	return data
+}</code></pre>
+        <p>測試：<code>TestFirstLine</code>。</p>
+        <details><summary>提示</summary><p>回傳的是 data 的子切片，和 data 共用同一塊記憶體。用 <code>bytes.Clone</code> 複製出來。</p></details>
+      </li>
+    </ol>
+    <p><a href="https://github.com/xinqilin/GO-Playground/blob/main/exercises/31-performance/solution.go">參考解答</a>：先自己寫完再看。測試通過的寫法都是對的。</p>
+  </section>
+
+  <section aria-labelledby="recap">
+    <h2 id="recap">重點回顧</h2>
+    <ul class="recap">
+      <li>先用測試鎖住結果，再量；只改 profile 指出的熱點，改完再量一次。</li>
+      <li>benchmark 用 b.Loop、-benchmem，跑好幾次看變動範圍；比較用 benchstat。</li>
+      <li>pprof：從 cum 大的地方往下找到 flat 大的那一層；alloc_space 看總配置量。</li>
+      <li>少配置是 Go 最有效的最佳化：AllocsPerRun 數次數，也能寫成測試。</li>
+      <li>逃逸分析由編譯器決定，-gcflags=-m 看得到；不要為了它扭曲 API。</li>
+      <li>預先配置容量、重複使用緩衝區、strconv.Append 系列、需要時複製子切片。</li>
+      <li>sync.Pool 給頻繁建立的暫存物件：Reset、先複製再還、大的不還。</li>
+      <li>GOGC 決定 GC 的頻率，GOMEMLIMIT 給記憶體上限；減少配置比調參數有效。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="further">
+    <h2 id="further">延伸閱讀</h2>
+    <ul class="notes">
+      <li>官方文件：<a href="https://go.dev/doc/diagnostics">Diagnostics</a>、<a href="https://go.dev/doc/gc-guide">A Guide to the Go Garbage Collector</a>（特別是 <a href="https://go.dev/doc/gc-guide#Eliminating_heap_allocations">Eliminating heap allocations</a>、<a href="https://go.dev/doc/gc-guide#Memory_limit">Memory limit</a>）、<a href="https://go.dev/doc/pgo">Profile-guided optimization</a>。</li>
+      <li>套件文件：<a href="https://pkg.go.dev/runtime/pprof">runtime/pprof</a>、<a href="https://pkg.go.dev/testing#hdr-Benchmarks">testing：Benchmarks</a>、<a href="https://pkg.go.dev/sync#Pool">sync.Pool</a>。</li>
+      <li>go 指令：<a href="https://pkg.go.dev/cmd/go#hdr-Testing_flags">Testing flags</a>（-bench、-benchmem、-cpuprofile、-memprofile）。</li>
+      <li>Go 官方部落格：<a href="https://go.dev/blog/pprof">Profiling Go Programs</a>、<a href="https://go.dev/blog/pgo">Profile-guided optimization in Go 1.21</a>。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="run">
+    <h2 id="run">動手跑</h2>
+    <p class="label">在 repo 根目錄</p>
+    <pre class="shell"><code>go run ./chapters/31-performance                                    <span class="c"># 看所有示範</span>
+go test ./chapters/31-performance                                   <span class="c"># 正確性和逃逸分析的測試</span>
+go test -run='^$' -bench=. -benchmem ./chapters/31-performance      <span class="c"># 全部的 benchmark</span>
+go test -run='^$' -bench=Revenue -memprofile=mem.out ./chapters/31-performance
+go tool pprof -sample_index=alloc_space -top mem.out
+go test ./exercises/31-performance/                                 <span class="c"># 做練習</span></code></pre>
+    <p>加上 -cpuprofile 或 -memprofile 時，go test 會把測試執行檔（31-performance.test）留在目前目錄，看完 profile 可以刪掉。<a href="https://github.com/xinqilin/GO-Playground/tree/main/chapters/31-performance">在 GitHub 看本章完整程式碼</a>，或看<a href="https://github.com/xinqilin/GO-Playground/tree/main/exercises/31-performance">練習題</a>。</p>
+  </section>
+</main>
+
+<nav class="pager" aria-label="章節導覽">
+  <a class="prev" href="30-testing.html">← 30 測試</a>
+  <a class="home" href="index.html">目錄</a>
+  <a class="next" href="32-toolchain.html">32 工具鏈 →</a>
+</nav>
+</body>
+</html>

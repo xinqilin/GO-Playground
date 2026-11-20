@@ -1,173 +1,188 @@
 package main
 
 import (
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
+	"io"
 	"log/slog"
+	"mime"
 	"net/http"
 	"strconv"
-	"strings"
-	"time"
-	"unicode/utf8"
 )
 
-// maxTitleLen 是標題最多幾個字（以 rune 計算，中文一個字算一個）。
-const maxTitleLen = 100
-
-// api 把 HTTP 層需要的依賴放在一起，handler 都是它的方法。
+// api 是 HTTP 這一層：把請求轉成 service 的呼叫，再把結果和錯誤轉成 HTTP 回應。
 type api struct {
-	store  *Store
+	svc    *service
 	logger *slog.Logger
 }
 
-// routes 組出完整的 handler：最外層接住 panic，再記錄每個請求，最後交給路由。
 func (a *api) routes() http.Handler {
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /todos", a.list)
-	mux.HandleFunc("POST /todos", a.create)
-	mux.HandleFunc("GET /todos/{id}", a.get)
-	mux.HandleFunc("PATCH /todos/{id}", a.update)
-	mux.HandleFunc("DELETE /todos/{id}", a.delete)
-	return a.recoverPanic(a.logRequests(mux))
+	mux.HandleFunc("GET /todos", a.handle(a.list))
+	mux.HandleFunc("POST /todos", a.handle(a.create))
+	mux.HandleFunc("GET /todos/{id}", a.handle(a.get))
+	mux.HandleFunc("PATCH /todos/{id}", a.handle(a.update))
+	mux.HandleFunc("DELETE /todos/{id}", a.handle(a.delete))
+	// logRequests 在最外層，才記得到 recoverPanic 把 panic 改成的 500。
+	return logRequests(a.logger, recoverPanic(a.logger, mux))
 }
 
-func (a *api) list(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, a.store.List())
+// apiFunc 是會回傳 error 的 handler。錯誤怎麼變成回應，集中在 handle 決定。
+type apiFunc func(w http.ResponseWriter, r *http.Request) error
+
+func (a *api) handle(f apiFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		err := f(w, r)
+		if err == nil {
+			return
+		}
+		status, body := errorResponse(err)
+		if status == http.StatusInternalServerError {
+			// 內部錯誤的細節只記在 log，不告訴客戶端。
+			a.logger.ErrorContext(r.Context(), "內部錯誤", "path", r.URL.Path, "err", err)
+		}
+		writeJSON(w, status, body)
+	}
 }
 
-func (a *api) create(w http.ResponseWriter, r *http.Request) {
-	var in struct {
-		Title string `json:"title"`
-	}
-	if err := decodeJSON(w, r, &in); err != nil {
-		writeError(w, http.StatusBadRequest, `body 必須是 {"title": "..."}`)
-		return
-	}
-	title := strings.TrimSpace(in.Title)
-	if n := utf8.RuneCountInString(title); n == 0 || n > maxTitleLen {
-		writeError(w, http.StatusUnprocessableEntity, "title 必須是 1 到 100 個字")
-		return
-	}
-	writeJSON(w, http.StatusCreated, a.store.Create(title))
+// httpError 是可以原樣告訴客戶端的錯誤，例如網址裡的 id 不是數字。
+type httpError struct {
+	status int
+	msg    string
 }
 
-func (a *api) get(w http.ResponseWriter, r *http.Request) {
-	id, ok := pathID(w, r)
-	if !ok {
-		return
-	}
-	t, err := a.store.Get(id)
-	if err != nil {
-		a.writeStoreError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, t)
+func (e *httpError) Error() string { return e.msg }
+
+// errorBody 是所有錯誤回應共同的格式；fields 只在輸入不合法時出現。
+type errorBody struct {
+	Error  string            `json:"error"`
+	Fields map[string]string `json:"fields,omitzero"`
 }
 
-func (a *api) update(w http.ResponseWriter, r *http.Request) {
-	id, ok := pathID(w, r)
-	if !ok {
-		return
+// errorResponse 決定錯誤對應的狀態碼和回應內容。
+func errorResponse(err error) (int, errorBody) {
+	if he, ok := errors.AsType[*httpError](err); ok {
+		return he.status, errorBody{Error: he.msg}
 	}
-	var in struct {
-		Done *bool `json:"done"` // 用指標才分得出「沒傳」和「傳 false」
+	if ve, ok := errors.AsType[ValidationError](err); ok {
+		return http.StatusUnprocessableEntity, errorBody{Error: "輸入不合法", Fields: ve}
 	}
-	if err := decodeJSON(w, r, &in); err != nil || in.Done == nil {
-		writeError(w, http.StatusBadRequest, `body 必須是 {"done": true 或 false}`)
-		return
-	}
-	t, err := a.store.SetDone(id, *in.Done)
-	if err != nil {
-		a.writeStoreError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, t)
-}
-
-func (a *api) delete(w http.ResponseWriter, r *http.Request) {
-	id, ok := pathID(w, r)
-	if !ok {
-		return
-	}
-	if err := a.store.Delete(id); err != nil {
-		a.writeStoreError(w, err)
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
-}
-
-// writeStoreError 把 Store 的錯誤轉成 HTTP 狀態碼；不認得的錯誤記 log 並回 500。
-func (a *api) writeStoreError(w http.ResponseWriter, err error) {
 	if errors.Is(err, ErrNotFound) {
-		writeError(w, http.StatusNotFound, "找不到這筆待辦")
-		return
+		return http.StatusNotFound, errorBody{Error: err.Error()}
 	}
-	a.logger.Error("store", "err", err)
-	writeError(w, http.StatusInternalServerError, "伺服器內部錯誤")
+	return http.StatusInternalServerError, errorBody{Error: "伺服器發生錯誤"}
 }
 
-// pathID 取出路徑裡的 {id}；不合法時直接寫出 400，回傳 false。
-func pathID(w http.ResponseWriter, r *http.Request) (int, bool) {
-	id, err := strconv.Atoi(r.PathValue("id"))
-	if err != nil || id <= 0 {
-		writeError(w, http.StatusBadRequest, "id 必須是正整數")
-		return 0, false
+// writeJSON 先編碼，成功了才寫狀態碼。Deterministic 讓 map 的 key 依序輸出（json/v2 預設不排序）。
+func writeJSON(w http.ResponseWriter, status int, v any) error {
+	b, err := json.Marshal(v, json.Deterministic(true))
+	if err != nil {
+		return err
 	}
-	return id, true
-}
-
-// decodeJSON 限制 body 大小、拒絕不認得的欄位，避免使用者傳錯欄位名卻沒發現。
-func decodeJSON(w http.ResponseWriter, r *http.Request, v any) error {
-	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
-	dec := json.NewDecoder(r.Body)
-	dec.DisallowUnknownFields()
-	return dec.Decode(v)
-}
-
-func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	if err := json.NewEncoder(w).Encode(v); err != nil {
-		slog.Error("write json", "err", err)
+	w.Write(b)
+	return nil
+}
+
+const maxBody = 1 << 20
+
+// decodeJSON 檢查 Content-Type、限制大小、拒絕不認得的欄位，並把失敗轉成給客戶端看的訊息（26 章）。
+func decodeJSON(w http.ResponseWriter, r *http.Request, v any) error {
+	if mt, _, _ := mime.ParseMediaType(r.Header.Get("Content-Type")); mt != "application/json" {
+		return &httpError{http.StatusUnsupportedMediaType, "Content-Type 要是 application/json"}
 	}
+	r.Body = http.MaxBytesReader(w, r.Body, maxBody)
+	err := json.UnmarshalRead(r.Body, v, json.RejectUnknownMembers(true))
+	if err == nil {
+		return nil
+	}
+	if _, ok := errors.AsType[*http.MaxBytesError](err); ok {
+		return &httpError{http.StatusRequestEntityTooLarge, "內容太大"}
+	}
+	if se, ok := errors.AsType[*json.SemanticError](err); ok && se.JSONPointer != "" {
+		if errors.Is(err, json.ErrUnknownName) {
+			return &httpError{http.StatusBadRequest, "不認得的欄位 " + string(se.JSONPointer)}
+		}
+		return &httpError{http.StatusBadRequest, "欄位 " + string(se.JSONPointer) + " 的型別不對"}
+	}
+	if _, ok := errors.AsType[*jsontext.SyntacticError](err); ok || errors.Is(err, io.ErrUnexpectedEOF) {
+		return &httpError{http.StatusBadRequest, "JSON 格式不對"}
+	}
+	return err
 }
 
-func writeError(w http.ResponseWriter, status int, msg string) {
-	writeJSON(w, status, map[string]string{"error": msg})
+// pathID 取出網址裡的 {id}。
+func pathID(r *http.Request) (int, error) {
+	id, err := strconv.Atoi(r.PathValue("id"))
+	if err != nil || id <= 0 {
+		return 0, &httpError{http.StatusBadRequest, "id 要是正整數"}
+	}
+	return id, nil
 }
 
-// statusRecorder 記下 handler 寫出的狀態碼，給 log 用。
-type statusRecorder struct {
-	http.ResponseWriter
-	status int
+func (a *api) list(w http.ResponseWriter, r *http.Request) error {
+	var done *bool
+	if v := r.URL.Query().Get("done"); v != "" {
+		b, err := strconv.ParseBool(v)
+		if err != nil {
+			return &httpError{http.StatusBadRequest, "done 要是 true 或 false"}
+		}
+		done = &b
+	}
+	return writeJSON(w, http.StatusOK, a.svc.List(done))
 }
 
-func (s *statusRecorder) WriteHeader(code int) {
-	s.status = code
-	s.ResponseWriter.WriteHeader(code)
+func (a *api) create(w http.ResponseWriter, r *http.Request) error {
+	var in NewTodo
+	if err := decodeJSON(w, r, &in); err != nil {
+		return err
+	}
+	t, err := a.svc.Create(in)
+	if err != nil {
+		return err
+	}
+	w.Header().Set("Location", "/todos/"+strconv.Itoa(t.ID))
+	return writeJSON(w, http.StatusCreated, t)
 }
 
-// logRequests 記錄每個請求的方法、路徑、狀態碼和花費時間。
-func (a *api) logRequests(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		start := time.Now()
-		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
-		next.ServeHTTP(rec, r)
-		a.logger.Info("request",
-			"method", r.Method, "path", r.URL.Path,
-			"status", rec.status, "took", time.Since(start))
-	})
+func (a *api) get(w http.ResponseWriter, r *http.Request) error {
+	id, err := pathID(r)
+	if err != nil {
+		return err
+	}
+	t, err := a.svc.Get(id)
+	if err != nil {
+		return err
+	}
+	return writeJSON(w, http.StatusOK, t)
 }
 
-// recoverPanic 在最外層接住 handler 的 panic，回 500 而不是讓連線直接斷掉（第 11 章）。
-func (a *api) recoverPanic(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		defer func() {
-			if v := recover(); v != nil {
-				a.logger.Error("panic", "value", v, "path", r.URL.Path)
-				writeError(w, http.StatusInternalServerError, "伺服器內部錯誤")
-			}
-		}()
-		next.ServeHTTP(w, r)
-	})
+func (a *api) update(w http.ResponseWriter, r *http.Request) error {
+	id, err := pathID(r)
+	if err != nil {
+		return err
+	}
+	var p Patch
+	if err := decodeJSON(w, r, &p); err != nil {
+		return err
+	}
+	t, err := a.svc.Update(id, p)
+	if err != nil {
+		return err
+	}
+	return writeJSON(w, http.StatusOK, t)
+}
+
+func (a *api) delete(w http.ResponseWriter, r *http.Request) error {
+	id, err := pathID(r)
+	if err != nil {
+		return err
+	}
+	if err := a.svc.Delete(id); err != nil {
+		return err
+	}
+	w.WriteHeader(http.StatusNoContent)
+	return nil
 }

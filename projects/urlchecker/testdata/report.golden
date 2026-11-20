@@ -1,0 +1,6 @@
+OK   200  120ms  https://ok.test
+FAIL 404   80ms  https://missing.test
+OK   200  750ms  https://flaky.test（試了 3 次）
+FAIL ---   2.1s  https://slow.test（逾時，試了 3 次）
+FAIL ---     0s  ftp://files.test（只檢查 http 和 https 網址）
+共 5 個網址：2 個正常，3 個失敗，花了 2.22s

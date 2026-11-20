@@ -15,7 +15,7 @@
 
 <main class="page long">
   <header class="hero">
-    <div class="num" aria-hidden="true">P4</div>
+    <div class="num" aria-hidden="true">先4</div>
     <p class="eyebrow">先修 · 第 4 章</p>
     <h1>拆解問題：函式與清單</h1>
     <p class="analogy">大問題沒辦法一口氣解決，但可以切成幾個小問題，每個小問題寫成一個有名字的函式。很多小問題其實長得一樣：加總、數數、找最大、找東西。</p>
@@ -82,7 +82,7 @@
       </svg>
       <figcaption>函式像一台小機器：從參數拿到材料，照著大括號裡的步驟做，用 return 把結果交回去。</figcaption>
     </figure>
-    <p>先修 3 已經用過帶參數的函式（<code>passFail(72)</code>），這一章正式學怎麼寫。<strong>函式</strong>（function）是一段有名字的程式，像一份食譜：<strong>參數</strong>（parameter）是食材，大括號裡是步驟，<strong>回傳值</strong>（return value）是做好的菜。</p>
+    <p><a href="pre-3-decisions.html">先修 3</a> 已經用過帶參數的函式（<code>passFail(72)</code>），這一章正式學怎麼寫。<strong>函式</strong>（function）是一段有名字的程式，像一份食譜：<strong>參數</strong>（parameter）是食材，大括號裡是步驟，<strong>回傳值</strong>（return value）是做好的菜。</p>
     <pre class="code" data-src="chapters/pre-4-problems/funcs.go#greet,greetDemo"><code>func greet(name string) {
 	fmt.Println("早安，" + name)
 }
@@ -142,7 +142,7 @@ func hoursMinutesDemo() {
 }</code></pre>
     <p class="label">輸出</p>
     <pre class="out" data-example="chapters/pre-4-problems#Example_hoursMinutesDemo"><code>2 小時 15 分</code></pre>
-    <p>回傳值的型別寫成 <code>(int, int)</code>，return 後面用逗號列出兩個值，呼叫時用兩個變數接住：<code>h, m := hoursMinutes(135)</code>。先修 2 的練習已經用過這種寫法。</p>
+    <p>回傳值的型別寫成 <code>(int, int)</code>，return 後面用逗號列出兩個值，呼叫時用兩個變數接住：<code>h, m := hoursMinutes(135)</code>。<a href="pre-2-values.html">先修 2</a> 的練習已經用過這種寫法。</p>
 
     <h3>參數是一份複本</h3>
     <pre class="code" data-src="chapters/pre-4-problems/funcs.go#addOne,copyDemo"><code>func addOne(n int) {
@@ -248,7 +248,7 @@ goroutine 1 [running]:
 main.main()
 	…/chapters/pre-4-problems/outofrange/main.go:12 +0xd8
 exit status 2</code></pre>
-    <p>前三圈正常，第四圈 i 是 3，訊息說得很清楚：索引 3 超出範圍，這份清單的長度是 3。原因是條件寫成 <code>i &lt;= len(menu)</code>，多跑了一圈；正確的是 <code>i &lt; len(menu)</code>。這是先修 1 說的執行時錯誤，也是先修 3 的「邊界差一」。</p>
+    <p>前三圈正常，第四圈 i 是 3，訊息說得很清楚：索引 3 超出範圍，這份清單的長度是 3。原因是條件寫成 <code>i &lt;= len(menu)</code>，多跑了一圈；正確的是 <code>i &lt; len(menu)</code>。這是<a href="pre-1-running.html">先修 1</a> 說的執行時錯誤，也是<a href="pre-3-decisions.html">先修 3</a> 的「邊界差一」。</p>
   </section>
 
   <section aria-labelledby="walk">
@@ -278,7 +278,7 @@ exit status 2</code></pre>
       </svg>
       <figcaption><code>for i, p := range prices</code> 每一圈拿到一格：i 是索引，p 是那一格的值。</figcaption>
     </figure>
-    <p>清單幾乎都是搭配迴圈使用的。第一種寫法用先修 3 學過的 for，讓 i 從 0 走到 <code>len-1</code>：</p>
+    <p>清單幾乎都是搭配迴圈使用的。第一種寫法用<a href="pre-3-decisions.html">先修 3</a> 學過的 for，讓 i 從 0 走到 <code>len-1</code>：</p>
     <pre class="code" data-src="chapters/pre-4-problems/list.go#loopIndex"><code>func loopIndex() {
 	menu := []string{"排骨飯", "雞腿飯", "素食餐"}
 	for i := 0; i &lt; len(menu); i++ {
@@ -311,7 +311,7 @@ exit status 2</code></pre>
 
   <section aria-labelledby="algorithms">
     <h2 id="algorithms">4. 四個基本演算法</h2>
-    <p><strong>演算法</strong>（algorithm）聽起來很難，其實就是「解決某一類問題的固定步驟」。處理清單時，有四個演算法出現的次數遠遠超過其他的。它們都是先修 3 的計數器和累加器的延伸：</p>
+    <p><strong>演算法</strong>（algorithm）聽起來很難，其實就是「解決某一類問題的固定步驟」。處理清單時，有四個演算法出現的次數遠遠超過其他的。它們都是<a href="pre-3-decisions.html">先修 3</a> 的計數器和累加器的延伸：</p>
     <h3>加總</h3>
     <pre class="code" data-src="chapters/pre-4-problems/algo.go#sum,sumDemo"><code>func sum(nums []int) int {
 	total := 0
@@ -507,7 +507,7 @@ func weeklyReport() {
     <ul class="notes">
       <li>sum 和 countAtLeast 直接用第 4 節寫好的函式，不用重寫。</li>
       <li>indexOfMax 和 maxOf 幾乎一樣，差別是它記住的是「最大的那一格的索引」best，比較時用 <code>nums[best]</code> 拿出那一格的值。知道索引，就能從另一份清單 days 拿到星期幾。</li>
-      <li>平均是 31100 / 7 = 4442.857…，整數除法丟掉了小數，得到 4442。要保留小數，就照先修 2 的做法先轉成 float64。</li>
+      <li>平均是 31100 / 7 = 4442.857…，整數除法丟掉了小數，得到 4442。要保留小數，就照<a href="pre-2-values.html">先修 2</a> 的做法先轉成 float64。</li>
     </ul>
     <p>weeklyReport 本身讀起來就像報表的大綱，每一行都很短。這是拆成函式最大的好處：每一層只需要看懂一件事。</p>
   </section>

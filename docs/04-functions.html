@@ -86,7 +86,7 @@ func passByValue() {
     <p class="label">輸出</p>
     <pre class="out" data-example="chapters/04-functions#Example_passByValue"><code>函式裡： 11
 呼叫端： 10</code></pre>
-    <p>呼叫函式時，每個參數都會<strong>複製</strong>一份給函式。<code>addOne</code> 改的是自己那一份，呼叫端的 <code>stock</code> 不受影響。想讓函式改到呼叫端的變數，要傳指標（第 <a href="05-pointers.html">05 章</a>）。要注意的是，slice 和 map 被複製的只是一個「指向底層資料的小結構」，所以函式透過它們改內容，呼叫端是看得到的，第 06、07 章會細講。</p>
+    <p>呼叫函式時，每個參數都會<strong>複製</strong>一份給函式。<code>addOne</code> 改的是自己那一份，呼叫端的 <code>stock</code> 不受影響。想讓函式改到呼叫端的變數，要傳指標（第 <a href="05-pointers.html">05 章</a>）。要注意的是，slice 和 map 被複製的只是一個「指向底層資料的小結構」，所以函式透過它們改內容，呼叫端是看得到的，第 <a href="06-arrays-slices.html">06</a>、<a href="07-maps.html">07</a> 章會細講。</p>
 
     <h3>沒有預設參數，也沒有多載</h3>
     <p>Go 刻意不支援這兩個功能。寫成 Java 或 Python 的樣子會直接編譯失敗：</p>
@@ -588,7 +588,7 @@ fatal error: stack overflow</code></pre>
 關店</code></pre>
     <p>多個 defer 依照「後進先出」的順序執行，跟登記的順序相反。這個順序很合理：越晚取得的資源，通常依賴越早取得的資源，所以應該越早釋放。最常見的用法是「取得資源後馬上 defer 釋放」，例如：</p>
     <ul class="notes">
-      <li>打開檔案後 <code>defer f.Close()</code>（之後的「檔案與 I/O」那一章）。</li>
+      <li>打開檔案後 <code>defer f.Close()</code>（<a href="20-files.html">20 章「檔案與 I/O」</a>）。</li>
       <li>鎖上 mutex 後 <code>defer mu.Unlock()</code>（第 <a href="17-sync.html">17 章</a>）。</li>
       <li>建立有逾時的 context 後 <code>defer cancel()</code>（第 <a href="18-context.html">18 章</a>）。</li>
     </ul>
@@ -682,7 +682,7 @@ fatal error: stack overflow</code></pre>
       </svg>
       <figcaption>panic 會中斷目前的函式，沿著呼叫的路徑一層層往上，每一層的 defer 都會執行；遇到 recover 才停下來。</figcaption>
     </figure>
-    <p><code>panic</code> 代表「程式遇到了不該發生的狀況，沒辦法繼續」。發生 panic 時，目前的函式立刻停止，開始一層層往上退出，途中執行每一層登記的 defer；退到最上層都沒有人處理，程式就印出錯誤和呼叫路徑，然後結束。第 01 章的整數除以 0、之後會看到的索引超出範圍、對 nil map 寫入，都是執行時自動產生的 panic；你也可以自己呼叫 <code>panic(值)</code>。</p>
+    <p><code>panic</code> 代表「程式遇到了不該發生的狀況，沒辦法繼續」。發生 panic 時，目前的函式立刻停止，開始一層層往上退出，途中執行每一層登記的 defer；退到最上層都沒有人處理，程式就印出錯誤和呼叫路徑，然後結束。<a href="01-variables.html">第 01 章</a>的整數除以 0、之後會看到的索引超出範圍、對 nil map 寫入，都是執行時自動產生的 panic；你也可以自己呼叫 <code>panic(值)</code>。</p>
     <p>下面這支程式（<code>chapters/04-functions/crash</code>）第二次拿貨時拿太多，<code>take</code> 主動 panic：</p>
     <pre class="code" data-src="chapters/04-functions/crash/main.go#take,main"><code>func take(stock, n int) int {
 	if n &gt; stock {
@@ -822,7 +822,7 @@ go test -tags solution ./exercises/04-functions/     <span class="c"># 跑參考
 	return 0, 0, false
 }</code></pre>
         <p>例如 <code>MinMax(85, 90, 15)</code> 是 <code>15, 90, true</code>。測試：<code>TestMinMax</code>。</p>
-        <details><summary>提示</summary><p>先處理 <code>len(nums) == 0</code>。接著把 lo、hi 都設成第一個數字，再走過其他數字。Go 1.21 起有內建的 <code>min</code>、<code>max</code> 函式。回傳值故意取名 lo、hi 而不是 min、max，因為那樣會遮蔽內建函式（第 01 章常見錯誤 7）。</p></details>
+        <details><summary>提示</summary><p>先處理 <code>len(nums) == 0</code>。接著把 lo、hi 都設成第一個數字，再走過其他數字。Go 1.21 起有內建的 <code>min</code>、<code>max</code> 函式。回傳值故意取名 lo、hi 而不是 min、max，因為那樣會遮蔽內建函式（<a href="01-variables.html#pitfalls">第 01 章常見錯誤 7</a>）。</p></details>
       </li>
       <li>
         <h3><span class="level l1">入門</span>練習 2：數一數符合條件的</h3>

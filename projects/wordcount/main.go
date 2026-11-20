@@ -1,92 +1,115 @@
 // 專題 2：字詞統計。
 //
-// 從標準輸入讀文字，算出行數、字數、字元數，以及出現最多次的字詞。
-// 用到：bufio.Scanner（第 02 章）、map（第 07 章）、rune（第 08 章）、排序。
+// 讀一個或多個檔案（沒有給檔名時讀標準輸入），算出行數、字詞數、字元數和 byte 數，
+// 再列出出現最多次的字詞。英文以空白和標點分開，中文依 -han 切成單字或雙字。
 //
-// 執行：go run ./projects/wordcount -top 3 < README.md
+// 執行：go run ./projects/wordcount projects/wordcount/testdata/*.txt
+//
+//	go run ./projects/wordcount -han bigram -top 3 projects/wordcount/testdata/notice.txt
+//	echo "Go 很好玩，Go 很快" | go run ./projects/wordcount
 package main
 
 import (
-	"bufio"
-	"cmp"
 	"flag"
 	"fmt"
 	"io"
 	"os"
-	"slices"
 	"strings"
 	"unicode"
-	"unicode/utf8"
 )
 
-// Stats 是統計結果。
-type Stats struct {
-	Lines  int
-	Words  int
-	Runes  int // 不含換行
-	Counts map[string]int
+// run 是整支程式：args 不含程式名稱，回傳 exit code。
+// 某個檔案讀不到時，在 stderr 回報、繼續處理其他檔案，最後回傳 1。
+func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("wordcount", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	top := fs.Int("top", 5, "列出出現最多次的前幾個字詞")
+	mode := HanChar
+	fs.TextVar(&mode, "han", HanChar, "中文的切法：char（單字）或 bigram（雙字）")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+
+	files := fs.Args()
+	if len(files) == 0 {
+		files = []string{"-"}
+	}
+	var total Stats
+	status := 0
+	for _, name := range files {
+		s, err := countFile(name, stdin, mode)
+		if err != nil {
+			fmt.Fprintf(stderr, "wordcount：%v\n", err)
+			status = 1
+			continue
+		}
+		printStats(stdout, name, s)
+		total.Add(s)
+	}
+	if len(files) > 1 {
+		printStats(stdout, "合計", total)
+	}
+	printTop(stdout, Top(total.Counts, *top))
+	return status
 }
 
-// WordCount 是一個字詞和它出現的次數。
-type WordCount struct {
-	Word  string
-	Count int
+// countFile 統計一個檔案；name 是 "-" 時讀 stdin。
+func countFile(name string, stdin io.Reader, mode HanMode) (Stats, error) {
+	if name == "-" {
+		return Count(stdin, mode)
+	}
+	f, err := os.Open(name)
+	if err != nil {
+		return Stats{}, err
+	}
+	defer f.Close()
+	s, err := Count(f, mode)
+	if err != nil {
+		return s, fmt.Errorf("%s：%w", name, err)
+	}
+	return s, nil
 }
 
-// Count 一行一行讀 r，用空白切出字詞，轉小寫並去掉前後的標點後再計數。
-// 注意：中文句子之間通常沒有空白，所以一整串中文會被當成一個字詞。
-func Count(r io.Reader) (Stats, error) {
-	s := Stats{Counts: make(map[string]int)}
-	sc := bufio.NewScanner(r)
-	for sc.Scan() {
-		line := sc.Text()
-		s.Lines++
-		s.Runes += utf8.RuneCountInString(line)
-		for _, w := range strings.Fields(line) {
-			w = strings.ToLower(strings.TrimFunc(w, unicode.IsPunct))
-			if w == "" {
-				continue
-			}
-			s.Words++
-			s.Counts[w]++
+func printStats(w io.Writer, name string, s Stats) {
+	if name == "-" {
+		name = "標準輸入"
+	}
+	fmt.Fprintf(w, "%s：%d 行，%d 個字詞，%d 個字元，%d bytes\n", name, s.Lines, s.Words, s.Runes, s.Bytes)
+}
+
+// printTop 印出排行榜，字詞欄依顯示寬度對齊。
+func printTop(w io.Writer, top []WordCount) {
+	if len(top) == 0 {
+		return
+	}
+	col := 0
+	for _, wc := range top {
+		col = max(col, displayWidth(wc.Word))
+	}
+	fmt.Fprintln(w, "出現最多的字詞：")
+	for _, wc := range top {
+		fmt.Fprintf(w, "  %s  %d\n", padRight(wc.Word, col), wc.Count)
+	}
+}
+
+// displayWidth 回傳 s 在等寬字型的終端機上大約佔幾格：中日韓文字和全形符號佔 2 格。
+func displayWidth(s string) int {
+	w := 0
+	for _, r := range s {
+		w++
+		if unicode.In(r, unicode.Han, unicode.Hiragana, unicode.Katakana, unicode.Hangul) ||
+			r >= 0x3000 && r <= 0x303F || r >= 0xFF01 && r <= 0xFF60 {
+			w++
 		}
 	}
-	return s, sc.Err()
+	return w
 }
 
-// Top 回傳出現次數最多的 n 個字詞；次數相同時依字母順序，讓結果固定。
-func Top(counts map[string]int, n int) []WordCount {
-	all := make([]WordCount, 0, len(counts))
-	for w, c := range counts {
-		all = append(all, WordCount{w, c})
-	}
-	slices.SortFunc(all, func(a, b WordCount) int {
-		return cmp.Or(
-			cmp.Compare(b.Count, a.Count), // 次數多的在前
-			cmp.Compare(a.Word, b.Word),   // 次數一樣就照字母
-		)
-	})
-	return all[:min(n, len(all))]
-}
-
-// run 讀 in、寫結果到 out；top 是要列出幾個字詞。
-func run(in io.Reader, out io.Writer, top int) error {
-	s, err := Count(in)
-	if err != nil {
-		return err
-	}
-	fmt.Fprintf(out, "行數 %d，字數 %d，字元數 %d\n", s.Lines, s.Words, s.Runes)
-	for _, wc := range Top(s.Counts, top) {
-		fmt.Fprintf(out, "%-8s %d\n", wc.Word, wc.Count)
-	}
-	return nil
+// padRight 在 s 後面補空白，讓它佔 width 格。
+func padRight(s string, width int) string {
+	return s + strings.Repeat(" ", max(width-displayWidth(s), 0))
 }
 
 func main() {
-	top := flag.Int("top", 5, "列出出現最多次的前幾個字詞")
-	flag.Parse()
-	if err := run(os.Stdin, os.Stdout, *top); err != nil {
-		fmt.Fprintln(os.Stderr, "錯誤：", err)
-		os.Exit(1)
-	}
+	os.Exit(run(os.Args[1:], os.Stdin, os.Stdout, os.Stderr))
 }

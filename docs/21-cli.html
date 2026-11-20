@@ -642,7 +642,7 @@ stderr｜tally total：環境變數 TALLY_TAX="十" 不是整數
         <text class="sm mono" x="410" y="140" text-anchor="middle">Ctrl-C</text>
         <text class="sm" x="410" y="160" text-anchor="middle">直接結束</text>
       </svg>
-      <figcaption>訊號變成 ctx 的取消，程式就能用第 18 章的方法收尾。第一次之後恢復預設行為，卡住時再按一次還是能結束。</figcaption>
+      <figcaption>訊號變成 ctx 的取消，程式就能用<a href="18-context.html">第 18 章</a>的方法收尾。第一次之後恢復預設行為，卡住時再按一次還是能結束。</figcaption>
     </figure>
     <p>按下 Ctrl-C，作業系統送給程式一個 SIGINT 訊號。Go 程式預設收到它就立刻結束，defer 不會執行，暫存檔留在那裡、寫到一半的檔案停在一半。<code>signal.NotifyContext</code>（Go 1.16 起）把訊號換成 <a href="18-context.html">ctx 的取消</a>，程式就能自己決定怎麼收尾。第 5 節的 main 已經這樣做了：</p>
     <ul class="notes">
@@ -727,7 +727,7 @@ stderr｜tally total：interrupt signal received
         </tbody>
       </table>
     </div>
-    <p>Go 很適合寫命令列工具的原因主要是最後一列：go build 出來的是單一執行檔，啟動不用暖機，搭配交叉編譯（「工具鏈」那一章）可以一次做出各個作業系統的版本。</p>
+    <p>Go 很適合寫命令列工具的原因主要是最後一列：go build 出來的是單一執行檔，啟動不用暖機，搭配交叉編譯（<a href="32-toolchain.html#cross">工具鏈</a>那一章）可以一次做出各個作業系統的版本。</p>
   </section>
 
   <section aria-labelledby="exercises">

@@ -1,0 +1,728 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>TCP 聊天室｜Go 圖解手冊</title>
+<meta name="description" content="用 net 套件寫一個多人聊天室：每個連線一個讀、一個寫的 goroutine，一把鎖保護線上名單，廣播不等待，跟不上的人請他離開；用 deadline 處理閒置，用 context 優雅關機，再用 net.Pipe 和 synctest 寫出不開 port、不用真的等待的測試。">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<header class="site">
+  <a href="index.html">Go 圖解手冊</a>
+  <span class="count">專題 6 / 7</span>
+</header>
+
+<main class="page long">
+  <header class="hero">
+    <div class="num" aria-hidden="true">P6</div>
+    <p class="eyebrow">專題 6 · net、goroutine、Mutex、deadline、context、synctest</p>
+    <h1>TCP 聊天室</h1>
+    <p class="analogy">十一點半，辦公室的人開始討論中午訂哪一家。這個專題寫那個聊天室的伺服器：任何人用 nc 連進來，取一個暱稱就能說話。難的不是收發訊息，而是那些「萬一」：有人連上就不說話、有人的網路很慢、有人送來一大串亂碼、伺服器要重開時大家怎麼辦。</p>
+  </header>
+
+  <nav class="toc-inline" aria-labelledby="toc-title">
+    <p class="label" id="toc-title">本專題內容</p>
+    <ol>
+      <li><a href="#goal">這個專題做什麼</a></li>
+      <li><a href="#listen">監聽與接受連線</a></li>
+      <li><a href="#deadline">一行一行讀，加上期限</a></li>
+      <li><a href="#join">暱稱與輸入檢查</a></li>
+      <li><a href="#room">聊天室：一把鎖保護名單</a></li>
+      <li><a href="#slow">跟不上的人</a></li>
+      <li><a href="#commands">指令</a></li>
+      <li><a href="#shutdown">一個連線的一生與關機</a></li>
+      <li><a href="#testing">不開 port 的測試</a></li>
+      <li><a href="#challenges">延伸挑戰</a></li>
+      <li><a href="#recap">重點回顧</a></li>
+      <li><a href="#further">延伸閱讀</a></li>
+    </ol>
+  </nav>
+
+  <section aria-labelledby="goal">
+    <h2 id="goal">這個專題做什麼</h2>
+    <p>啟動伺服器，再開幾個終端機用 nc 連進來：</p>
+    <pre class="shell"><code>go run ./projects/chat
+nc localhost 9000</code></pre>
+    <p>下面是 A、B、C 三個人的一段對話。真的開三個終端機時，輸入和輸出會混在一起，所以這份逐字稿是由測試 TestSession 產生的：「送出」是那個人打的字，「收到」是伺服器傳給他的內容。</p>
+    <pre class="out" data-src="projects/chat/testdata/session.golden"><code>A 連線
+A 收到：歡迎來到午餐聊天室！請輸入暱稱：
+A 送出：小美
+A 收到：* 歡迎，小美！目前在線上：小美（1 人）。輸入 /help 看指令。
+B 連線
+B 收到：歡迎來到午餐聊天室！請輸入暱稱：
+B 送出：小美
+B 收到：* 這個暱稱有人用了，請再輸入一次：
+B 送出：阿 明
+B 收到：* 暱稱只能用文字和數字，不能有 ' '，請再輸入一次：
+B 送出：阿明
+A 收到：* 阿明 進來了
+B 收到：* 歡迎，阿明！目前在線上：小美、阿明（2 人）。輸入 /help 看指令。
+A 送出：今天中午吃什麼？
+B 收到：小美：今天中午吃什麼？
+B 送出：排骨飯，誰要一起訂？
+A 收到：阿明：排骨飯，誰要一起訂？
+B 送出：/who
+B 收到：* 在線上：小美、阿明（2 人）
+B 送出：/nick 明哥
+A 收到：* 阿明 改名為 明哥
+B 收到：* 阿明 改名為 明哥
+A 送出：/order 排骨飯
+A 收到：* 沒有 /order 這個指令，輸入 /help 看指令
+C 連線
+C 收到：歡迎來到午餐聊天室！請輸入暱稱：
+A 送出：/quit
+A 收到：（連線結束）
+B 收到：* 小美 離開了
+伺服器關閉
+B 收到：* 伺服器要關了，再見。
+B 收到：（連線結束）
+C 收到：（連線結束）</code></pre>
+    <ul class="notes">
+      <li><strong>暱稱</strong>：重複的、有空白的都會被擋下來，請他再輸入一次。</li>
+      <li><strong>廣播</strong>：一個人說的話，其他人都會收到，自己不會再收到一次（nc 的畫面上已經有自己打的字）。</li>
+      <li><strong>指令</strong>：/who、/nick、/quit、/help；不認得的指令只告訴打錯的那個人。</li>
+      <li><strong>關機</strong>：伺服器關閉時，已經進來的人會收到道別訊息；還在輸入暱稱的 C 直接斷線。</li>
+    </ul>
+    <p>程式分成三個檔案：main.go（旗標和監聽）、server.go（每個連線的讀寫）、room.go（線上名單和廣播）。測試在 listener_test.go 和 chat_test.go。先備：<a href="14-goroutines.html">14 章 goroutine</a>、<a href="15-channels.html">15 章 channel</a>、<a href="17-sync.html#mutex">17 章 Mutex</a>、<a href="18-context.html">18 章 context</a>、<a href="30-testing.html#synctest">30 章 synctest</a>。</p>
+  </section>
+
+  <section aria-labelledby="listen">
+    <h2 id="listen">1. 監聽與接受連線</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 214" role="img" aria-label="Serve 的迴圈不斷呼叫 Accept，每接到一個連線就開一個 handle goroutine 負責讀；進了聊天室之後，再開一個 writeLoop goroutine 負責寫。所有人共用一個 Room">
+        <title>每個連線兩個 goroutine</title>
+        <rect class="soft" x="8" y="20" width="120" height="50" rx="8"/>
+        <text class="sm mono" x="68" y="42" text-anchor="middle">net.Listener</text>
+        <text class="sm" x="68" y="60" text-anchor="middle">localhost:9000</text>
+        <path class="wire" d="M128 45 H148"/>
+        <rect class="acc" x="148" y="20" width="140" height="50" rx="8"/>
+        <text class="sm mono" x="218" y="42" text-anchor="middle">Serve</text>
+        <text class="sm" x="218" y="60" text-anchor="middle">for { Accept() }</text>
+        <path class="wire" d="M218 70 V90 M98 90 H338 M98 90 V104 M338 90 V104"/>
+        <rect class="soft" x="20" y="104" width="156" height="58" rx="8"/>
+        <text class="sm" x="98" y="124" text-anchor="middle">小美的連線</text>
+        <text class="sm mono" x="98" y="142" text-anchor="middle">handle　讀</text>
+        <text class="sm mono" x="98" y="156" text-anchor="middle">writeLoop　寫</text>
+        <rect class="soft" x="260" y="104" width="156" height="58" rx="8"/>
+        <text class="sm" x="338" y="124" text-anchor="middle">阿明的連線</text>
+        <text class="sm mono" x="338" y="142" text-anchor="middle">handle　讀</text>
+        <text class="sm mono" x="338" y="156" text-anchor="middle">writeLoop　寫</text>
+        <path class="wire acc-ln" d="M98 162 V182 H338 V162"/>
+        <rect class="acc" x="178" y="172" width="80" height="34" rx="6"/>
+        <text class="sm mono" x="218" y="194" text-anchor="middle">Room</text>
+        <text class="sm mute" x="440" y="134" text-anchor="middle">……</text>
+      </svg>
+      <figcaption>goroutine 很便宜，一個連線用兩個沒有問題（<a href="14-goroutines.html#cheap">14 章</a>）。讀和寫分開，一個人網路很慢、寫不出去的時候，伺服器還是讀得到他說的話。</figcaption>
+    </figure>
+    <pre class="code" data-src="projects/chat/main.go#run"><code>func run(ctx context.Context, addr string, logger *slog.Logger) error {
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		return err
+	}
+	logger.Info("聊天室開張", "addr", ln.Addr().String())
+	return NewServer(logger).Serve(ctx, ln)
+}</code></pre>
+    <pre class="code" data-src="projects/chat/server.go#Server.Serve"><code>func (s *Server) Serve(ctx context.Context, ln net.Listener) error {
+	stop := context.AfterFunc(ctx, func() { ln.Close() }) // 讓卡在 Accept 的迴圈醒來
+	defer stop()
+	var wg sync.WaitGroup
+	defer wg.Wait()
+	for {
+		conn, err := ln.Accept()
+		if err != nil {
+			s.room.Close("* 伺服器要關了，再見。")
+			if ctx.Err() != nil {
+				return nil
+			}
+			return err
+		}
+		wg.Go(func() { s.handle(ctx, conn) })
+	}
+}</code></pre>
+    <ul class="notes">
+      <li><strong>localhost:9000 和 :9000</strong>：寫 <code>:9000</code> 會監聽所有網路介面，同一個網路裡的其他電腦也連得進來；<code>localhost:9000</code> 只接受本機的連線。預設用比較保守的那個，要開放時用 -addr 改。</li>
+      <li><strong>Accept 不收 context</strong>：它會一直等到有人連進來。要讓它醒來，只能關掉 Listener，所以用 context.AfterFunc 在 ctx 取消時呼叫 ln.Close()（<a href="18-context.html">18 章</a>）。關掉之後 Accept 回傳錯誤，迴圈就結束了。</li>
+      <li><strong>wg.Go 和 defer wg.Wait()</strong>：Serve 回傳之前，一定等所有連線都處理完。呼叫 Serve 的人可以放心地認為「回傳了就全部結束了」，測試也靠這一點確認沒有 goroutine 漏掉。</li>
+      <li><strong>Accept 的其他錯誤</strong>：例如檔案描述元用完了，這種錯誤過一下可能就好了。net/http 的伺服器會從 5ms 開始等，每次加倍，最多等 1 秒再試；這裡直接結束，留給延伸挑戰。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="deadline">
+    <h2 id="deadline">2. 一行一行讀，加上期限</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 170" role="img" aria-label="時間軸：每讀到一行，就把讀取期限重新設為現在加 5 分鐘。小美一直有說話，期限一直往後延；阿明 09:00 之後沒再說話，09:05 期限到了，Read 回傳逾時的錯誤，他被請出去">
+        <title>每讀一行就把期限往後延</title>
+        <path class="wire faint" d="M20 60 H460 M20 130 H460"/>
+        <text class="sm" x="20" y="30">小美</text>
+        <circle class="acc" cx="60" cy="60" r="6"/>
+        <circle class="acc" cx="160" cy="60" r="6"/>
+        <circle class="acc" cx="270" cy="60" r="6"/>
+        <path class="wire acc-ln dash" d="M60 74 H160 M160 82 H270 M270 90 H460"/>
+        <text class="sm mute" x="300" y="106">期限一直往後延</text>
+        <text class="sm" x="20" y="120">阿明</text>
+        <circle class="acc" cx="60" cy="130" r="6"/>
+        <path class="wire hot-ln" d="M60 144 H360"/>
+        <rect class="hot" x="352" y="118" width="16" height="24" rx="3"/>
+        <text class="sm mono" x="60" y="164" text-anchor="middle">09:00</text>
+        <text class="sm mono" x="360" y="164" text-anchor="middle">09:05</text>
+        <text class="sm t-hot" x="380" y="134">逾時，斷線</text>
+      </svg>
+      <figcaption>deadline 是一個時間點，不是一段時間。每次讀之前重新設定一次，「5 分鐘」才會從最後一次說話開始算。</figcaption>
+    </figure>
+    <pre class="code" data-src="projects/chat/server.go#readLine,writeLine"><code>func readLine(conn net.Conn, sc *bufio.Scanner) (string, error) {
+	conn.SetReadDeadline(time.Now().Add(idleTimeout))
+	if sc.Scan() {
+		return sc.Text(), nil
+	}
+	return "", cmp.Or(sc.Err(), io.EOF) // Err 在讀到結尾時是 nil
+}
+
+func writeLine(conn net.Conn, line string) error {
+	conn.SetWriteDeadline(time.Now().Add(writeTimeout))
+	_, err := io.WriteString(conn, line+"\n")
+	return err
+}</code></pre>
+    <ul class="notes">
+      <li><strong>SetReadDeadline</strong>：時間到了還沒讀到東西，Read 回傳的錯誤包著 os.ErrDeadlineExceeded，用 errors.Is 判斷。不設期限的話，連上就不說話的人會永遠佔著一個連線和兩個 goroutine。</li>
+      <li><strong>寫也要有期限</strong>：對方不讀的時候，Write 會一直等下去。writeTimeout 是 10 秒，超過就當作他跟不上（第 5 節）。</li>
+      <li><strong>Scanner 的上限</strong>：<code>sc.Buffer(…, maxLine)</code> 讓一行連同換行最多 512 bytes，大約 170 個中文字。超過時 Scan 回傳 false、Err 是 bufio.ErrTooLong。預設的上限是 64KB，聊天用不到那麼長；設小一點，有人送來一大串不換行的資料時，很快就會被擋下來（<a href="02-input-output.html#scanner">02 章</a>）。TestLineLimit 確認 511 bytes 可以送、512 bytes 會被請出去。</li>
+      <li><strong>Scanner 停了就不能再用</strong>：Scan 回傳 false 之後，不管是哪一種錯誤，都不會再讀。所以逾時、太長都直接結束這個連線，不試著「跳過這一行」。</li>
+      <li><strong>\r\n</strong>：telnet 和 Windows 的工具送 \r\n，ScanLines 會把行尾的 \r 一起拿掉，不用自己處理。</li>
+      <li><strong>cmp.Or(sc.Err(), io.EOF)</strong>：讀到結尾時 Err 是 nil，這時回傳 io.EOF，呼叫的人就不用分兩種情況。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="join">
+    <h2 id="join">3. 暱稱與輸入檢查</h2>
+    <p>連進來的第一件事是問暱稱。這時還沒有 writeLoop，所以直接寫給對方：</p>
+    <pre class="code" data-src="projects/chat/server.go#Server.join"><code>func (s *Server) join(conn net.Conn, sc *bufio.Scanner) (*member, error) {
+	prompt := "歡迎來到午餐聊天室！請輸入暱稱："
+	for range maxTries {
+		if err := writeLine(conn, prompt); err != nil {
+			return nil, err
+		}
+		line, err := readLine(conn, sc)
+		if err != nil {
+			return nil, err
+		}
+		m, err := s.room.Join(strings.TrimSpace(line))
+		if err == nil || errors.Is(err, errClosed) {
+			return m, err
+		}
+		prompt = "* " + err.Error() + "，請再輸入一次："
+	}
+	writeLine(conn, "* 試太多次了，再見。")
+	return nil, errors.New("暱稱試太多次")
+}</code></pre>
+    <pre class="code" data-src="projects/chat/room.go#checkNick"><code>func checkNick(nick string) error {
+	switch n := utf8.RuneCountInString(nick); {
+	case n == 0:
+		return errors.New("暱稱不能是空的")
+	case n &gt; maxNick:
+		return fmt.Errorf("暱稱最多 %d 個字", maxNick)
+	}
+	for _, c := range nick {
+		if !unicode.IsLetter(c) &amp;&amp; !unicode.IsDigit(c) {
+			return fmt.Errorf("暱稱只能用文字和數字，不能有 %q", c)
+		}
+	}
+	return nil
+}</code></pre>
+    <ul class="notes">
+      <li><strong>檢查放在 Room 裡</strong>：Join 和 Rename 都呼叫 checkNick。規則只寫在一個地方，不管從哪裡改名都擋得住。</li>
+      <li><strong>最多試 3 次</strong>：不然有人可以一直送錯的暱稱，佔著連線不走。</li>
+      <li><strong>用字數，不用 byte 數</strong>：utf8.RuneCountInString 算出的才是「12 個字」；len 的話一個中文字算 3（<a href="08-strings-runes.html#utf8">08 章</a>）。</li>
+      <li><strong>%q 顯示看不見的字元</strong>：錯誤訊息裡的空白顯示成 <code>' '</code>，控制字元顯示成 <code>'\x1b'</code>，使用者才知道哪裡不對。</li>
+    </ul>
+    <p>聊天的內容也要清理。終端機看到 ESC 開頭的字元會當成控制碼，而不是文字：</p>
+    <pre class="code" data-src="projects/chat/server.go#clean"><code>func clean(s string) string {
+	return strings.Map(func(c rune) rune {
+		if unicode.IsControl(c) {
+			return -1
+		}
+		return c
+	}, strings.ToValidUTF8(s, "�"))
+}</code></pre>
+    <pre class="code" data-src="projects/chat/chat_test.go#Example_clean"><code>func Example_clean() {
+	for _, s := range []string{
+		"\x1b[2J\x1b[31m大家好\x1b[0m", // 清掉畫面、改成紅字
+		"便當\a\a\a到了",                // 響鈴
+		"排骨\xff飯",                   // 不合法的 UTF-8
+	} {
+		fmt.Printf("%q\n", clean(s))
+	}
+	// Output:
+	// "[2J[31m大家好[0m"
+	// "便當到了"
+	// "排骨�飯"
+}</code></pre>
+    <pre class="out" data-example="projects/chat#Example_clean"><code>"[2J[31m大家好[0m"
+"便當到了"
+"排骨�飯"</code></pre>
+    <ul class="notes">
+      <li><strong>不要相信輸入</strong>：伺服器把一個人送來的 byte 原封不動轉給其他人，等於讓任何人都能控制其他人的終端機。拿掉控制字元之後，剩下的 <code>[2J</code> 只是普通的文字。</li>
+      <li><strong>ToValidUTF8</strong>：不合法的 UTF-8 換成 U+FFFD（顯示成 �）。轉給其他人的一定是合法的 UTF-8，他們的終端機不用猜那些 byte 要怎麼顯示。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="room">
+    <h2 id="room">4. 聊天室：一把鎖保護名單</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 200" role="img" aria-label="Room 裡有一把鎖和線上名單。廣播時，持有鎖，把訊息放進每個人的待送區 out，不等待；每個人的 writeLoop 不持有鎖，從自己的待送區拿出訊息，寫到網路上">
+        <title>廣播只放進待送區</title>
+        <rect class="acc" x="8" y="20" width="176" height="160" rx="8"/>
+        <text class="sm mono" x="96" y="42" text-anchor="middle">Room（持有 mu）</text>
+        <text class="sm" x="96" y="66" text-anchor="middle">members</text>
+        <text class="sm" x="24" y="100">小美</text>
+        <text class="sm" x="24" y="150">阿明</text>
+        <rect class="soft" x="102" y="86" width="16" height="20"/><rect class="soft" x="120" y="86" width="16" height="20"/><rect class="soft" x="138" y="86" width="16" height="20"/>
+        <rect class="hot" x="84" y="136" width="16" height="20"/><rect class="soft" x="102" y="136" width="16" height="20"/><rect class="soft" x="120" y="136" width="16" height="20"/><rect class="soft" x="138" y="136" width="16" height="20"/>
+        <rect class="hot" x="84" y="86" width="16" height="20"/>
+        <text class="sm mute" x="120" y="124" text-anchor="middle">out（待送區）</text>
+        <path class="wire" d="M184 96 H240 M184 146 H240"/>
+        <rect class="soft" x="240" y="78" width="104" height="36" rx="6"/>
+        <text class="sm mono" x="292" y="101" text-anchor="middle">writeLoop</text>
+        <rect class="soft" x="240" y="128" width="104" height="36" rx="6"/>
+        <text class="sm mono" x="292" y="151" text-anchor="middle">writeLoop</text>
+        <path class="wire" d="M344 96 H380 M344 146 H380"/>
+        <text class="sm" x="386" y="100">小美的 nc</text>
+        <text class="sm" x="386" y="150">阿明的 nc</text>
+        <text class="sm mute" x="292" y="188" text-anchor="middle">不持有鎖，慢慢寫</text>
+      </svg>
+      <figcaption>持有鎖的時候只做記憶體裡的事：查名單、把字串放進 channel。真正慢的網路寫入，由每個人自己的 writeLoop 在鎖外面做。</figcaption>
+    </figure>
+    <pre class="code" data-src="projects/chat/room.go#Room,member,Room.Say,Room.broadcastLocked,offer"><code>type Room struct {
+	mu      sync.Mutex
+	members map[string]*member // 暱稱 → 成員
+	closed  bool               // 伺服器要關了，不再讓人進來
+}
+
+type member struct {
+	nick string
+	out  chan string
+}
+
+func (r *Room) Say(m *member, text string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.hasLocked(m) {
+		r.broadcastLocked(m, m.nick+"："+text)
+	}
+}
+
+func (r *Room) broadcastLocked(from *member, line string) {
+	var slow []*member
+	for _, m := range r.members {
+		if m != from &amp;&amp; !offer(m, line) {
+			slow = append(slow, m)
+		}
+	}
+	// map 的順序是隨機的；排序之後，好幾個人同時跟不上時，公告的順序也固定。
+	slices.SortFunc(slow, func(a, b *member) int { return strings.Compare(a.nick, b.nick) })
+	for _, m := range slow {
+		r.leaveLocked(m, "跟不上，斷線了")
+	}
+}
+
+func offer(m *member, line string) bool {
+	select {
+	case m.out &lt;- line:
+		return true
+	default:
+		return false
+	}
+}</code></pre>
+    <ul class="notes">
+      <li><strong>持有鎖時不做 I/O</strong>：如果 broadcast 直接寫到每個人的連線，一個人卡住 10 秒，所有想說話、想進來的人都要跟著等 10 秒。這是聊天室最容易犯的錯（<a href="17-sync.html#pit-slow">17 章</a>）。</li>
+      <li><strong>buffered channel 當待送區</strong>：容量是 outboxSize（16）。offer 用 select 加 default，放不下就馬上回傳 false，絕不等待（<a href="15-channels.html#buffered">15 章</a>）。</li>
+      <li><strong>Locked 結尾的方法</strong>：表示呼叫的人必須已經持有 mu。公開的 Say、Tell 負責加鎖，再呼叫這些方法；Locked 方法互相呼叫時不能再加鎖，因為 Go 的 Mutex 不能重複鎖（<a href="17-sync.html#pit-reentrant">17 章</a>）。</li>
+      <li><strong>誰關閉 out</strong>：只有 Room，而且在持有鎖的時候。所有送進 out 的動作也都在鎖裡面，所以不會送進已經關閉的 channel（那會 panic），也不會關兩次（<a href="15-channels.html#pit-close-wrong">15 章</a>）。</li>
+      <li><strong>hasLocked</strong>：一個人被請出去之後，他的 handler 可能還沒發現，還在呼叫 Tell。先確認他還在名單上，才碰他的 out。</li>
+      <li><strong>另一種寫法</strong>：讓一個 goroutine 擁有名單，其他人用 channel 送請求給它，就不需要鎖。這兩種都是常見的寫法；這裡選鎖，是因為 Join、Rename 要回傳錯誤，用 channel 的話每個請求都要附一個回覆用的 channel，程式比較長。延伸挑戰 5 讓你寫寫看另一種。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="slow">
+    <h2 id="slow">5. 跟不上的人</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 178" role="img" aria-label="阿明的程式不讀資料。他的 writeLoop 卡在寫第 1 行；待送區放了第 2 到第 17 行，滿了；第 18 行放不下，Room 就請他離開，並告訴其他人。另一條路是寫入期限：writeLoop 等了 10 秒還寫不出去，也會請他離開">
+        <title>兩種跟不上</title>
+        <rect class="hot" x="8" y="30" width="96" height="40" rx="6"/>
+        <text class="sm mono" x="56" y="48" text-anchor="middle">writeLoop</text>
+        <text class="sm" x="56" y="63" text-anchor="middle">卡在第 1 行</text>
+        <rect class="soft" x="120" y="36" width="16" height="28"/><rect class="soft" x="138" y="36" width="16" height="28"/><rect class="soft" x="156" y="36" width="16" height="28"/><rect class="soft" x="174" y="36" width="16" height="28"/>
+        <text class="sm mute" x="204" y="55">……</text>
+        <rect class="soft" x="230" y="36" width="16" height="28"/><rect class="soft" x="248" y="36" width="16" height="28"/>
+        <text class="sm" x="192" y="90" text-anchor="middle">第 2 到 17 行，16 格都滿了</text>
+        <rect class="hot" x="300" y="36" width="16" height="28"/>
+        <text class="sm t-hot" x="330" y="55">第 18 行放不下</text>
+        <text class="sm t-hot" x="330" y="73">→ 請他離開</text>
+        <path class="wire faint" d="M8 112 H472"/>
+        <text class="sm" x="8" y="140">另一條路：一行都寫不出去</text>
+        <text class="sm" x="8" y="162">writeLoop 等滿 writeTimeout（10 秒）→ 也請他離開</text>
+      </svg>
+      <figcaption>短時間湧進很多訊息，待送區先滿；訊息不多、但對方完全不讀，就等寫入期限。兩條路最後都是同一句「跟不上，斷線了」。</figcaption>
+    </figure>
+    <pre class="code" data-src="projects/chat/server.go#Server.writeLoop"><code>func (s *Server) writeLoop(m *member, conn net.Conn) {
+	defer conn.Close()
+	for line := range m.out {
+		if err := writeLine(conn, line); err != nil {
+			why := "離開了"
+			if errors.Is(err, os.ErrDeadlineExceeded) {
+				why = "跟不上，斷線了"
+			}
+			s.room.Leave(m, why)
+			return
+		}
+	}
+}</code></pre>
+    <pre class="code" data-src="projects/chat/room.go#Room.leaveLocked"><code>func (r *Room) leaveLocked(m *member, why string) {
+	if !r.hasLocked(m) {
+		return
+	}
+	delete(r.members, m.nick)
+	close(m.out) // 他的 writeLoop 會把剩下的寫完，再關掉連線
+	if why != "" {
+		r.broadcastLocked(nil, "* "+m.nick+" "+why)
+	}
+}</code></pre>
+    <ul class="notes">
+      <li><strong>為什麼請他離開，而不是丟掉訊息</strong>：丟掉的話，他會漏看幾句話卻不知道，聊天的上下文就斷了。斷線至少是明確的，他重新連進來就好。也有系統選擇丟掉最舊的訊息，例如即時的股價，只有最新的值有意義。</li>
+      <li><strong>不能讓一個人拖累所有人</strong>：如果 broadcast 用阻塞的 <code>m.out &lt;- line</code>，阿明的待送區一滿，持有鎖的 broadcast 就會停住，整個聊天室跟著停住。</li>
+      <li><strong>先寫完再關</strong>：leaveLocked 只關閉 out。writeLoop 的 range 會先把 channel 裡剩下的訊息拿完才結束，所以「太久沒說話，先斷線了。」這種最後一句話送得到。</li>
+      <li><strong>真的 TCP 比較寬容</strong>：作業系統在兩端都有緩衝區，對方不讀時，Write 要等緩衝區滿了才會卡住，所以真的被請出去的時間比測試晚。測試用的 net.Pipe 沒有緩衝，每次 Write 都要等對方讀，TestSlowUser 才能精確地在第 18 行看到他被請出去。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="commands">
+    <h2 id="commands">6. 指令</h2>
+    <pre class="code" data-src="projects/chat/server.go#Server.chat"><code>func (s *Server) chat(m *member, conn net.Conn, sc *bufio.Scanner) error {
+	for {
+		line, err := readLine(conn, sc)
+		if err != nil {
+			return err
+		}
+		line = strings.TrimSpace(clean(line))
+		if line == "" {
+			continue
+		}
+		if !strings.HasPrefix(line, "/") {
+			s.room.Say(m, line)
+			continue
+		}
+		cmd, arg, _ := strings.Cut(line, " ")
+		switch cmd {
+		case "/quit":
+			return nil
+		case "/who":
+			s.room.Who(m)
+		case "/nick":
+			if err := s.room.Rename(m, strings.TrimSpace(arg)); err != nil {
+				s.room.Tell(m, "* "+err.Error())
+			}
+		case "/help":
+			s.room.Tell(m, "* 指令：/who 看誰在線上、/nick 新暱稱 改名、/quit 離開")
+		default:
+			s.room.Tell(m, "* 沒有 "+cmd+" 這個指令，輸入 /help 看指令")
+		}
+	}
+}</code></pre>
+    <ul class="notes">
+      <li><strong>strings.Cut</strong>：把「/nick 明哥」切成指令和參數。沒有空白時，arg 是空字串，交給 Rename 的 checkNick 回報「暱稱不能是空的」。</li>
+      <li><strong>先 clean 再判斷</strong>：控制字元先拿掉，指令和一般的話都用清理過的內容。</li>
+      <li><strong>錯誤只告訴一個人</strong>：打錯指令、改名失敗都用 Tell，不會吵到其他人。</li>
+      <li><strong>/quit 回傳 nil</strong>：和對方直接關掉 nc（讀到 io.EOF）一樣，都算「離開了」；只有逾時和太長兩種錯誤會換成其他說法。</li>
+    </ul>
+    <pre class="code" data-src="projects/chat/room.go#Room.Rename"><code>func (r *Room) Rename(m *member, nick string) error {
+	if err := checkNick(nick); err != nil {
+		return err
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if !r.hasLocked(m) {
+		return nil
+	}
+	switch r.members[nick] {
+	case nil:
+	case m: // 改成自己現在的名字
+		return nil
+	default:
+		return errNickTaken
+	}
+	old := m.nick
+	delete(r.members, old)
+	m.nick = nick
+	r.members[nick] = m
+	r.broadcastLocked(nil, "* "+old+" 改名為 "+nick)
+	return nil
+}</code></pre>
+    <ul class="notes">
+      <li><strong>改名要在一把鎖裡完成</strong>：檢查新名字有沒有人用、刪掉舊的 key、加上新的 key，三步之間不能讓別人插進來，不然兩個人可能同時改成同一個名字。</li>
+      <li><strong>m.nick 只在鎖裡改</strong>：其他 goroutine 在廣播時會讀到它，也都在鎖裡面。<code>go test -race</code> 會檢查這件事。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="shutdown">
+    <h2 id="shutdown">7. 一個連線的一生與關機</h2>
+    <pre class="code" data-src="projects/chat/server.go#Server.handle"><code>func (s *Server) handle(ctx context.Context, conn net.Conn) {
+	addr := conn.RemoteAddr().String()
+	s.log.Info("連線", "addr", addr)
+	sc := bufio.NewScanner(conn)
+	sc.Buffer(make([]byte, 0, maxLine), maxLine)
+
+	// 還在輸入暱稱時伺服器要關了：直接斷線。進了聊天室之後改由 Room.Close 道別。
+	stop := context.AfterFunc(ctx, func() { conn.Close() })
+	m, err := s.join(conn, sc)
+	stop()
+	if err != nil {
+		conn.Close()
+		s.log.Info("離線", "addr", addr, "err", err)
+		return
+	}
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		s.writeLoop(m, conn)
+	}()
+
+	err = s.chat(m, conn, sc)
+	why := "離開了"
+	switch {
+	case errors.Is(err, os.ErrDeadlineExceeded):
+		s.room.Tell(m, "* 太久沒說話，先斷線了。")
+		why = "太久沒說話，斷線了"
+	case errors.Is(err, bufio.ErrTooLong):
+		s.room.Tell(m, "* 一行太長了，先斷線了。")
+		why = "送了太長的訊息，斷線了"
+	}
+	s.room.Leave(m, why) // 已經被請出去的話什麼都不做
+	&lt;-done               // writeLoop 寫完剩下的訊息、關掉連線之後才算結束
+	s.log.Info("離線", "addr", addr, "err", err)
+}</code></pre>
+    <ul class="notes">
+      <li><strong>兩個階段</strong>：還在輸入暱稱時，伺服器要關了就直接關掉連線（AfterFunc）；進了聊天室之後，改由 Room.Close 道別。stop() 取消前一個階段的 AfterFunc。</li>
+      <li><strong>&lt;-done</strong>：handle 等 writeLoop 結束才回傳。Serve 的 wg 只追蹤 handle，這樣也就間接等到了 writeLoop，不會留下還在寫的 goroutine。</li>
+      <li><strong>Leave 可以重複呼叫</strong>：被請出去的人、伺服器關閉時的每一個人，handler 最後都還會呼叫一次 Leave；已經不在名單上就什麼都不做。</li>
+    </ul>
+    <figure class="fig">
+      <svg viewBox="0 0 480 236" role="img" aria-label="關機的順序：一、按下 Ctrl-C，ctx 取消；二、AfterFunc 關掉 Listener，Accept 回傳錯誤；三、Room.Close 送出道別訊息，關閉每個人的待送區；四、每個 writeLoop 寫完剩下的訊息後關掉連線；五、handler 的 Scan 失敗，等 writeLoop 結束後回傳；六、wg.Wait 結束，Serve 回傳 nil">
+        <title>關機的順序</title>
+        <rect class="soft" x="8" y="8" width="464" height="30" rx="6"/>
+        <text class="sm" x="20" y="28">1　Ctrl-C：signal.NotifyContext 取消 ctx</text>
+        <rect class="soft" x="8" y="46" width="464" height="30" rx="6"/>
+        <text class="sm" x="20" y="66">2　AfterFunc 關掉 Listener → Accept 回傳錯誤</text>
+        <rect class="acc" x="8" y="84" width="464" height="30" rx="6"/>
+        <text class="sm" x="20" y="104">3　Room.Close：送出道別、關閉每個人的 out、不再讓人進來</text>
+        <rect class="soft" x="8" y="122" width="464" height="30" rx="6"/>
+        <text class="sm" x="20" y="142">4　writeLoop 寫完剩下的訊息（包括道別）→ 關掉連線</text>
+        <rect class="soft" x="8" y="160" width="464" height="30" rx="6"/>
+        <text class="sm" x="20" y="180">5　handler 的 Scan 失敗 → Leave（已經不在）→ 等 writeLoop</text>
+        <rect class="acc" x="8" y="198" width="464" height="30" rx="6"/>
+        <text class="sm" x="20" y="218">6　wg.Wait 結束 → Serve 回傳 nil → main 結束</text>
+      </svg>
+      <figcaption>關機的重點是順序：先道別再關連線，最後才回傳。直接關掉所有連線比較快，但道別訊息可能還在待送區裡，大家只會看到連線突然斷了。</figcaption>
+    </figure>
+    <pre class="code" data-src="projects/chat/room.go#Room.Close"><code>func (r *Room) Close(notice string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.closed = true
+	r.broadcastLocked(nil, notice)
+	for _, m := range r.members {
+		r.leaveLocked(m, "")
+	}
+}</code></pre>
+    <pre class="code" data-src="projects/chat/main.go#main"><code>func main() {
+	addr := flag.String("addr", "localhost:9000", "監聽的位址")
+	flag.Parse()
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	context.AfterFunc(ctx, stop) // 第一次 Ctrl-C 之後恢復預設行為：道別卡住時，再按一次就直接結束
+	err := run(ctx, *addr, logger)
+	stop()
+	if err != nil {
+		logger.Error("聊天室停止", "err", err)
+		os.Exit(1)
+	}
+}</code></pre>
+    <ul class="notes">
+      <li><strong>closed</strong>：關機的時候剛好有人輸入完暱稱，Join 會回傳 errClosed，而不是讓他進來之後馬上又被關掉。</li>
+      <li><strong>最久等多久</strong>：一個完全不讀的人，writeLoop 要等 writeTimeout 才放棄。所以按下 Ctrl-C 之後最多大約 10 秒，程式一定會結束。</li>
+      <li><strong>Ctrl-C 按第二次</strong>：NotifyContext 在 stop() 之前會一直攔下訊號，第二次 Ctrl-C 等於沒按。context.AfterFunc(ctx, stop) 在第一次訊號、ctx 取消時就呼叫 stop()，恢復預設行為，不想等的人再按一次就能直接結束（<a href="21-cli.html#signal">21 章</a>）。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="testing">
+    <h2 id="testing">8. 不開 port 的測試</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 196" role="img" aria-label="synctest 的泡泡裡有測試、假的 Listener 和伺服器。測試用 dial 建立 net.Pipe，一頭自己拿著，一頭從 Accept 交給伺服器。泡泡裡的時間是假的，所有 goroutine 都停下來時，時間直接跳到下一個計時器">
+        <title>全部在記憶體裡</title>
+        <rect class="soft dash" x="8" y="8" width="464" height="180" rx="10"/>
+        <text class="sm mute" x="20" y="28">synctest 的泡泡：時間是假的</text>
+        <rect class="acc" x="24" y="50" width="120" height="56" rx="8"/>
+        <text class="sm" x="84" y="72" text-anchor="middle">測試</text>
+        <text class="sm mono" x="84" y="92" text-anchor="middle">A、B、C</text>
+        <path class="wire acc-ln" d="M144 78 H196"/>
+        <rect class="soft" x="196" y="50" width="104" height="56" rx="8"/>
+        <text class="sm mono" x="248" y="72" text-anchor="middle">net.Pipe</text>
+        <text class="sm" x="248" y="92" text-anchor="middle">記憶體裡的線</text>
+        <path class="wire acc-ln" d="M300 78 H340"/>
+        <rect class="acc" x="340" y="50" width="120" height="56" rx="8"/>
+        <text class="sm mono" x="400" y="72" text-anchor="middle">Server</text>
+        <text class="sm" x="400" y="92" text-anchor="middle">程式完全沒改</text>
+        <text class="sm" x="24" y="140">time.Sleep(5 * time.Minute)：所有 goroutine 都停下來時，</text>
+        <text class="sm" x="24" y="162">時間直接跳到下一個期限，測試在一瞬間跑完</text>
+      </svg>
+      <figcaption>Serve 只認得 net.Listener 這個 interface。測試給它一個假的 Listener，伺服器的程式一行都不用改。</figcaption>
+    </figure>
+    <pre class="code" data-src="projects/chat/listener_test.go#pipeListener,pipeListener.Accept,pipeListener.Close,pipeListener.dial"><code>type pipeListener struct {
+	conns chan net.Conn
+	done  chan struct{}
+	once  sync.Once
+}
+
+func (l *pipeListener) Accept() (net.Conn, error) {
+	select {
+	case c := &lt;-l.conns:
+		return c, nil
+	case &lt;-l.done:
+		return nil, net.ErrClosed
+	}
+}
+
+func (l *pipeListener) Close() error {
+	l.once.Do(func() { close(l.done) })
+	return nil
+}
+
+func (l *pipeListener) dial() net.Conn {
+	server, client := net.Pipe()
+	l.conns &lt;- server
+	return client
+}</code></pre>
+    <ul class="notes">
+      <li><strong>為什麼不用真的 TCP</strong>：真的網路要開 port，可能和別的程式衝突；更重要的是，卡在網路 I/O 上的 goroutine，synctest 不認為它「durably blocked」，假時間就不會前進。net.Pipe 是用 channel 做的，在泡泡裡建立就沒有這個問題。</li>
+      <li><strong>Accept 的語意</strong>：關閉之後回傳 net.ErrClosed，和真的 Listener 一樣，Serve 才會走到「ctx 取消了，正常結束」那一條路。sync.Once 讓 Close 可以呼叫很多次。</li>
+    </ul>
+    <pre class="code" data-src="projects/chat/listener_test.go#chatTest.settle"><code>func (ct *chatTest) settle() {
+	synctest.Wait()
+	for _, u := range ct.users {
+		for _, line := range u.take() {
+			ct.note(u.name + " 收到：" + line)
+		}
+	}
+}</code></pre>
+    <ul class="notes">
+      <li><strong>synctest.Wait</strong>：等泡泡裡的每個 goroutine 都停下來，也就是訊息都送到了、每個人都在等下一行。這時再收集每個人讀到的東西，逐字稿每次都一樣，不需要 time.Sleep 碰運氣（<a href="30-testing.html#pit-sleep">30 章</a>）。</li>
+    </ul>
+    <pre class="code" data-src="projects/chat/chat_test.go#TestIdle"><code>func TestIdle(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ct := start()
+		a := ct.connect("A", 0)
+		ct.send(a, "小美")
+		b := ct.connect("B", 0)
+		ct.send(b, "阿明")
+		ct.log.Reset()
+
+		time.Sleep(idleTimeout - time.Second)
+		ct.send(a, "還有人在嗎？")    // 小美重新計時，阿明沒有
+		time.Sleep(time.Second) // 阿明剛好滿 5 分鐘
+		ct.settle()
+		time.Sleep(idleTimeout - time.Second) // 小美也滿 5 分鐘
+		ct.settle()
+		ct.shutdown(t)
+
+		want := `A 送出：還有人在嗎？
+B 收到：小美：還有人在嗎？
+A 收到：* 阿明 太久沒說話，斷線了
+B 收到：* 太久沒說話，先斷線了。
+B 收到：（連線結束）
+A 收到：* 太久沒說話，先斷線了。
+A 收到：（連線結束）
+伺服器關閉
+`
+		if got := ct.log.String(); got != want {
+			t.Errorf("逐字稿：\n%s\n想要：\n%s", got, want)
+		}
+	})
+}</code></pre>
+    <ul class="notes">
+      <li><strong>5 分鐘一瞬間跑完</strong>：泡泡裡的 time.Sleep 不會真的等。小美在第 4 分 59 秒說了話，所以阿明先被請出去，小美再過 4 分 59 秒才輪到。</li>
+      <li><strong>邊界都測到</strong>：TestWriteTimeout 確認 writeLoop 在 10 秒前一奈秒還沒放棄、剛好 10 秒時放棄；TestSlowUser 確認第 17 行還放得下、第 18 行放不下。</li>
+      <li><strong>並行的測試</strong>：TestConcurrentSay 讓五個人同時各說三句，檢查每個人都收到其他人的 12 句，而且同一個人說的話順序不變。用 <code>go test -race</code> 跑，鎖漏了任何一個地方都會被抓到。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="challenges">
+    <h2 id="challenges">延伸挑戰</h2>
+    <p>這些題目沒有附測試。先用 chatTest 寫一段描述需求的逐字稿，再改程式。</p>
+    <ol class="exercises">
+      <li>
+        <h3><span class="level l1">入門</span>挑戰 1：私訊</h3>
+        <p>加一個指令 <code>/msg 暱稱 內容</code>，只有那個人收到「（私訊）小美：內容」。對方不在時，告訴送出的人。</p>
+        <details><summary>提示</summary><p>在 Room 加一個 Whisper 方法，在鎖裡找到對方，用 tellLocked 送出。內容要用 strings.Cut 再切一次。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l1">入門</span>挑戰 2：最近的 10 句話</h3>
+        <p>新進來的人在歡迎訊息之後，先看到最近的 10 句話，才不會不知道大家在聊什麼。</p>
+        <details><summary>提示</summary><p>Room 多一個長度最多 10 的 []string，Say 時加到最後、超過就去掉最前面的。注意 10 句加上歡迎訊息不能超過待送區的容量。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l2">進階</span>挑戰 3：團購統計</h3>
+        <p>加上 <code>/order 排骨飯</code> 登記自己要的便當（再登記一次會覆蓋），<code>/orders</code> 列出每一種的數量和誰訂的。改名之後，訂單要跟著新名字。</p>
+        <details><summary>提示</summary><p>訂單是 map[*member]string，用 member 當 key，改名就不用搬資料；列出時再依暱稱排序。想想有人離開之後，他的訂單要不要留著。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l2">進階</span>挑戰 4：限制發言速度</h3>
+        <p>每個人每 10 秒最多說 5 句，超過的話告訴他「說太快了」，那一句不送出。用 synctest 測試第 6 句被擋下、等 10 秒之後又可以說。</p>
+        <details><summary>提示</summary><p>每個人記住最近 5 句的時間，第 6 句的時間和第 1 句相差不到 10 秒就擋下。這個狀態只有他自己的 handler 會用，放在 chat 函式的區域變數裡就好，不需要鎖。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l3">挑戰</span>挑戰 5：沒有鎖的聊天室</h3>
+        <p>改寫 Room：由一個 goroutine 擁有名單，Join、Say、Leave 都改成送請求到 channel。所有現有的測試都要通過，再比較兩個版本的程式碼量，以及哪一個比較容易看出正確性。</p>
+        <details><summary>提示</summary><p>需要回傳結果的請求（Join、Rename）附一個 reply channel。關機時這個 goroutine 也要結束，不然 synctest 會發現它還卡在那裡（<a href="19-concurrency-patterns.html">19 章</a>）。</p></details>
+      </li>
+    </ol>
+  </section>
+
+  <section aria-labelledby="recap">
+    <h2 id="recap">重點回顧</h2>
+    <ul class="recap">
+      <li>net.Listen、Accept 的迴圈、每個連線一個 goroutine；Accept 不收 context，取消時關掉 Listener 讓它醒來。</li>
+      <li>讀和寫用兩個 goroutine，一個人寫不出去，不會影響讀他說的話。</li>
+      <li>deadline 是時間點，每次讀寫之前重新設定；逾時的錯誤用 errors.Is(err, os.ErrDeadlineExceeded) 判斷。</li>
+      <li>Scanner 一定要設上限；使用者送來的內容要拿掉控制字元、修正不合法的 UTF-8。</li>
+      <li>持有鎖的時候不做 I/O。廣播只把訊息放進待送區，放不下就請他離開，不讓一個人拖累所有人。</li>
+      <li>channel 由送的那一方關閉；所有送和關都在同一把鎖裡，就不會送進已經關閉的 channel。</li>
+      <li>關機要照順序：停止接受、道別、寫完、關連線、等所有 goroutine 結束才回傳。</li>
+      <li>伺服器只依賴 net.Listener 這個 interface，測試就能用 net.Pipe 和 synctest，不開 port、不真的等待。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="further">
+    <h2 id="further">延伸閱讀</h2>
+    <ul class="notes">
+      <li>套件文件：<a href="https://pkg.go.dev/net#Listener">net.Listener</a>、<a href="https://pkg.go.dev/net#Conn">net.Conn</a>（SetDeadline 的說明）、<a href="https://pkg.go.dev/net#Pipe">net.Pipe</a>、<a href="https://pkg.go.dev/bufio#Scanner.Buffer">Scanner.Buffer</a>、<a href="https://pkg.go.dev/context#AfterFunc">context.AfterFunc</a>、<a href="https://pkg.go.dev/testing/synctest">testing/synctest</a>。</li>
+      <li>Go 部落格：<a href="https://go.dev/blog/synctest">Testing concurrent code with testing/synctest</a>。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="run">
+    <h2 id="run">動手跑</h2>
+    <p class="label">在 repo 根目錄</p>
+    <pre class="shell"><code>go run ./projects/chat                # 另開幾個終端機：nc localhost 9000
+go test -race ./projects/chat
+go test ./projects/chat -run TestSession -update   # 改了訊息之後更新逐字稿</code></pre>
+    <p>Windows 沒有內建 nc，可以在「Windows 功能」裡啟用 Telnet 用戶端，或另外安裝 ncat。<a href="https://github.com/xinqilin/GO-Playground/tree/main/projects/chat">在 GitHub 看完整程式碼</a>。</p>
+  </section>
+</main>
+
+<nav class="pager" aria-label="章節導覽">
+  <a class="prev" href="project-logstats.html">← 專題：日誌分析</a>
+  <a class="home" href="index.html">目錄</a>
+  <a class="next" href="project-cache.html">專題：TTL＋LRU 快取 →</a>
+</nav>
+</body>
+</html>
