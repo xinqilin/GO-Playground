@@ -2,7 +2,7 @@
 
 [![ci](https://github.com/xinqilin/GO-Playground/actions/workflows/ci.yml/badge.svg)](https://github.com/xinqilin/GO-Playground/actions/workflows/ci.yml)
 
-繁體中文的 Go 手冊：先修 4 章給從來沒寫過程式的人，正文 34 章從基礎、型別、並行、標準庫一路到工程實務，最後是 7 個專題。每一章先用圖把觀念講懂，再一步一步看可以執行、有測試的程式碼，附上常見錯誤、Java 對照，以及有自動測試的練習（全書 243 題）。
+繁體中文的 Go 手冊：先修 4 章給從來沒寫過程式的人，正文 34 章從基礎、型別、並行、標準庫一路到工程實務，最後是 7 個專題。每一章先用圖把觀念講懂，再一步一步看可以執行、有測試的程式碼，附上常見錯誤、Java 對照，以及練習（全書 245 題，其中 241 題有自動測試）。
 
 **線上閱讀：<https://bill-lin.dev/GO-Playground/>**
 

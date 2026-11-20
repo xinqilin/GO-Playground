@@ -77,7 +77,7 @@
 
   <section aria-labelledby="practice">
     <h2 id="practice">練習怎麼做</h2>
-    <p>每一章都有 5 到 7 題練習，全書共 243 題，題目在 <code>exercises/章節目錄/exercises.go</code>（28 章是獨立的 module，在 <code>chapters/28-database/exercises/</code>）。函式的名字和參數已經寫好；每一題都有測試，一開始全部失敗，寫對一題就通過一題。</p>
+    <p>每一章都有 5 到 7 題練習，全書共 245 題，題目在 <code>exercises/章節目錄/exercises.go</code>（28 章是獨立的 module，在 <code>chapters/28-database/exercises/</code>）。函式的名字和參數已經寫好；除了 00 章和先修 1 的 4 題「動手做」要在自己的電腦上操作，其餘 241 題都有測試，一開始全部失敗，寫對一題就通過一題。</p>
     <pre class="shell"><code>go test ./exercises/03-control-flow/                       <span class="c"># 跑這一章的全部練習</span>
 go test ./exercises/03-control-flow/ -run TestTicketPrice  <span class="c"># 只跑一題</span>
 go test -tags solution ./exercises/03-control-flow/        <span class="c"># 跑參考解答</span></code></pre>
