@@ -55,7 +55,7 @@
     <p>先備：<a href="11-errors.html">11 章的錯誤處理</a>、<a href="18-context.html">18 章的 context</a>、<a href="20-files.html#fs">20 章的 embed</a>。SQL 本身（SELECT、INSERT、UPDATE、JOIN）只會用到基本的語法，這一章的重點是 Go 這一側。</p>
     <p>這一章用 SQLite：整個資料庫就是一個檔案，不用另外安裝伺服器。driver 用 <code>modernc.org/sqlite</code>，它是純 Go 寫的，不需要 C 編譯器，Windows 也能直接用。因為它是第三方套件，這一章是一個獨立的 module，有自己的 go.mod（<a href="29-packages-modules.html">package 與 module</a> 那一章會解釋），所以指令要在它的目錄裡跑：</p>
     <pre class="shell"><code>go -C chapters/28-database run .          <span class="c"># -C 先切換到那個目錄再執行</span>
-cd chapters/28-database &amp;&amp; go test ./...  <span class="c"># 或是先 cd 進去</span></code></pre>
+cd chapters/28-database &amp;&amp; go test .      <span class="c"># 或是先 cd 進去</span></code></pre>
   </section>
 
   <section aria-labelledby="open">
