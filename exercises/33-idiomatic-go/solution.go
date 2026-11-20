@@ -55,7 +55,7 @@ func (t *Tally) Top(n int) []string {
 	dishes := slices.SortedFunc(maps.Keys(t.counts), func(a, b string) int {
 		return cmp.Or(cmp.Compare(t.counts[b], t.counts[a]), strings.Compare(a, b))
 	})
-	return dishes[:min(n, len(dishes))]
+	return dishes[:min(max(n, 0), len(dishes))]
 }
 
 // WithPrefix 設定號碼的前綴。

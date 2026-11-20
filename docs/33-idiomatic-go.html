@@ -720,7 +720,7 @@ func (t *Tally) Top(n int) []string {
 	return nil
 }</code></pre>
         <p>測試：<code>TestTally</code>。</p>
-        <details><summary>提示</summary><p>Add 裡 <code>if t.counts == nil { t.counts = make(…) }</code>；Count 不用檢查，nil map 可以讀。Top 用 <code>slices.SortedFunc(maps.Keys(t.counts), …)</code>，比較函式用 <code>cmp.Or</code> 先比份數、再比菜名，最後用 min 決定要切幾個。</p></details>
+        <details><summary>提示</summary><p>Add 裡 <code>if t.counts == nil { t.counts = make(…) }</code>；Count 不用檢查，nil map 可以讀。Top 用 <code>slices.SortedFunc(maps.Keys(t.counts), …)</code>，比較函式用 <code>cmp.Or</code> 先比份數、再比菜名，最後用 min 和 max 決定要切幾個（n 可能是負數）。</p></details>
       </li>
       <li>
         <h3><span class="level l2">進階</span>練習 4：functional options</h3>

@@ -20,6 +20,9 @@ func Summarize(samples []float64) (median, spread float64) {
 	if n%2 == 0 {
 		median = (s[n/2-1] + s[n/2]) / 2
 	}
+	if median == 0 {
+		return 0, 0
+	}
 	for _, x := range s {
 		spread = max(spread, math.Abs(x-median)/median*100)
 	}

@@ -685,7 +685,7 @@ type BufferPool struct {
 	return 0, 0
 }</code></pre>
         <p>測試：<code>TestSummarize</code>。</p>
-        <details><summary>提示</summary><p><code>slices.Sorted(slices.Values(samples))</code> 會回傳排序好的新 slice，不會動到原本的。變動範圍用 <code>math.Abs(x-median)/median*100</code> 取最大值。</p></details>
+        <details><summary>提示</summary><p><code>slices.Sorted(slices.Values(samples))</code> 會回傳排序好的新 slice，不會動到原本的。變動範圍用 <code>math.Abs(x-median)/median*100</code> 取最大值；中位數是 0 時不能除，要先處理。</p></details>
       </li>
       <li>
         <h3><span class="level l1">入門</span>練習 2：不配置的一行收據</h3>

@@ -8,7 +8,8 @@ import "bytes"
 // median 是中位數（個數是偶數時取中間兩個的平均），
 // spread 是離中位數最遠的那一個差了中位數的百分之幾。
 // 例如 {100, 104, 98} 的中位數是 100，spread 是 4。
-// samples 是空的時候兩個都回傳 0。不能改動 samples 本身的順序。
+// samples 是空的時候兩個都回傳 0；中位數是 0 時算不出百分比，spread 回傳 0。
+// 不能改動 samples 本身的順序。
 func Summarize(samples []float64) (median, spread float64) {
 	// TODO: 實作
 	return 0, 0

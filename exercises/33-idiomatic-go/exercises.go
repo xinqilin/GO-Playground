@@ -35,7 +35,7 @@ func (t *Tally) Count(dish string) int {
 }
 
 // Top 回傳賣最多的 n 道菜：份數多的在前，份數相同時依菜名排序。
-// n 比菜的種類多時全部回傳。
+// n 比菜的種類多時全部回傳；n 是 0 或負數時回傳空的。
 func (t *Tally) Top(n int) []string {
 	// TODO: 實作
 	return nil

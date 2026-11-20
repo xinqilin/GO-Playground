@@ -21,12 +21,14 @@ func TestSummarize(t *testing.T) {
 		{"都一樣", []float64{50, 50, 50}, 50, 0},
 		{"一個", []float64{80}, 80, 0},
 		{"沒有", nil, 0, 0},
+		{"中位數是 0", []float64{0, 0, 5}, 0, 0},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			before := slices.Clone(tt.samples)
 			median, spread := Summarize(tt.samples)
-			if math.Abs(median-tt.median) > 1e-9 || math.Abs(spread-tt.spread) > 1e-9 {
+			near := func(a, b float64) bool { return math.Abs(a-b) <= 1e-9 } // NaN 和任何數都不接近
+			if !near(median, tt.median) || !near(spread, tt.spread) {
 				t.Errorf("Summarize(%v) = %v, %v；want %v, %v", tt.samples, median, spread, tt.median, tt.spread)
 			}
 			if !slices.Equal(tt.samples, before) {

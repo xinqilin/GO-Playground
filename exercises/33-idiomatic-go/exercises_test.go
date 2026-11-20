@@ -74,6 +74,7 @@ func TestTally(t *testing.T) {
 		{3, []string{"排骨飯", "滷肉飯", "魚排飯"}},
 		{10, []string{"排骨飯", "滷肉飯", "魚排飯", "雞腿飯"}},
 		{0, []string{}},
+		{-1, []string{}},
 	}
 	for _, tt := range tests {
 		if got := tally.Top(tt.n); !slices.Equal(got, tt.want) {
