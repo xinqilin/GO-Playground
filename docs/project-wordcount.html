@@ -4,129 +4,559 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>字詞統計｜Go 圖解手冊</title>
-<meta name="description" content="用 bufio.Scanner、map 和排序做一個字詞統計工具，並用 cmp.Or 讓排序結果固定。">
+<meta name="description" content="寫一個像 wc 的字詞統計工具：讀多個檔案或標準輸入、用 bufio.Reader 一行一行讀、用 unicode 把英文和中文切成字詞、合計與排行、依顯示寬度對齊，以及用 flag.TextVar 定義自己的旗標型別。">
 <link rel="stylesheet" href="assets/style.css">
 </head>
 <body>
 <header class="site">
   <a href="index.html">Go 圖解手冊</a>
-  <span class="count">專題 2 / 4</span>
+  <span class="count">專題 2 / 7</span>
 </header>
 
-<main class="page">
+<main class="page long">
   <header class="hero">
     <div class="num" aria-hidden="true">P2</div>
-    <p class="eyebrow">專題 · Scanner、map、排序</p>
+    <p class="eyebrow">專題 2 · 檔案、bufio、unicode、疊代器、map、排序、flag</p>
     <h1>字詞統計</h1>
-    <p class="analogy">把一段文字倒進去，數出哪些字最常出現。</p>
+    <p class="analogy">便當店貼了一整年的公告，老闆想知道最常出現的是哪幾個字。英文用空白就切得開，中文卻一個空白都沒有。這個專題寫一個命令列工具：讀好幾個檔案、算出行數和字數、把中英文切成字詞，最後排出前幾名。</p>
   </header>
 
-  <section aria-labelledby="look">
-    <h2 id="look">看圖</h2>
-    <div class="figs">
-      <figure class="fig">
-        <svg viewBox="0 0 480 170" role="img" aria-label="資料流：Scanner 切成行，Fields 切成字，正規化轉小寫去標點，map 計數，最後排序取前幾名">
-          <title>字詞統計的資料流</title>
-          <rect class="soft" x="10" y="40" width="84" height="60" rx="8"/>
-          <rect class="soft" x="104" y="40" width="84" height="60" rx="8"/>
-          <rect class="soft" x="198" y="40" width="84" height="60" rx="8"/>
-          <rect class="soft" x="292" y="40" width="84" height="60" rx="8"/>
-          <rect class="acc" x="386" y="40" width="84" height="60" rx="8"/>
-          <text class="small mono bold" x="52" y="66" text-anchor="middle">Scanner</text>
-          <text class="sm" x="52" y="88" text-anchor="middle">切成行</text>
-          <text class="small mono bold" x="146" y="66" text-anchor="middle">Fields</text>
-          <text class="sm" x="146" y="88" text-anchor="middle">切成字</text>
-          <text class="small bold" x="240" y="66" text-anchor="middle">正規化</text>
-          <text class="sm" x="240" y="88" text-anchor="middle">小寫、去標點</text>
-          <text class="small mono bold" x="334" y="66" text-anchor="middle">map</text>
-          <text class="sm" x="334" y="88" text-anchor="middle">計數</text>
-          <text class="small bold" x="428" y="66" text-anchor="middle">排序</text>
-          <text class="sm" x="428" y="88" text-anchor="middle">取前 N 名</text>
-          <path class="wire" d="M94 70 H98 M188 70 H192 M282 70 H286 M376 70 H380"/>
-          <path class="tip" d="M104 70 L96 65 L96 75 Z"/>
-          <path class="tip" d="M198 70 L190 65 L190 75 Z"/>
-          <path class="tip" d="M292 70 L284 65 L284 75 Z"/>
-          <path class="tip" d="M386 70 L378 65 L378 75 Z"/>
-          <text class="sm mono" x="52" y="130" text-anchor="middle">一行一行</text>
-          <text class="sm mono" x="146" y="130" text-anchor="middle">"GO."</text>
-          <text class="sm mono" x="240" y="130" text-anchor="middle">"go"</text>
-          <text class="sm mono" x="334" y="130" text-anchor="middle">go: 5</text>
-          <text class="sm mono t-acc" x="428" y="130" text-anchor="middle">go 5</text>
-        </svg>
-        <figcaption>資料一路往右流：切行、切字、正規化、計數，最後排序取前幾名。每一站都是前面章節學過的工具。</figcaption>
-      </figure>
+  <nav class="toc-inline" aria-labelledby="toc-title">
+    <p class="label" id="toc-title">本專題內容</p>
+    <ol>
+      <li><a href="#goal">這個專題做什麼</a></li>
+      <li><a href="#files">檔案或標準輸入</a></li>
+      <li><a href="#lines">一行一行讀</a></li>
+      <li><a href="#tokens">切成字詞</a></li>
+      <li><a href="#han">中文：單字還是雙字</a></li>
+      <li><a href="#total">合計與排行</a></li>
+      <li><a href="#align">中文的對齊</a></li>
+      <li><a href="#flags">自己的旗標型別</a></li>
+      <li><a href="#challenges">延伸挑戰</a></li>
+      <li><a href="#recap">重點回顧</a></li>
+      <li><a href="#further">延伸閱讀</a></li>
+    </ol>
+  </nav>
 
-      <figure class="fig">
-        <svg viewBox="0 0 480 200" role="img" aria-label="排序前是 fun 1、go 5、fast 1、is 2；排序後先比次數再比字母，得到 go 5、is 2、fast 1、fun 1">
-          <title>兩個排序條件</title>
-          <rect class="soft" x="30" y="24" width="120" height="34" rx="6"/>
-          <rect class="soft" x="30" y="64" width="120" height="34" rx="6"/>
-          <rect class="soft" x="30" y="104" width="120" height="34" rx="6"/>
-          <rect class="soft" x="30" y="144" width="120" height="34" rx="6"/>
-          <text class="small mono" x="90" y="46" text-anchor="middle">fun 1</text>
-          <text class="small mono" x="90" y="86" text-anchor="middle">go 5</text>
-          <text class="small mono" x="90" y="126" text-anchor="middle">fast 1</text>
-          <text class="small mono" x="90" y="166" text-anchor="middle">is 2</text>
-          <path class="wire" d="M160 101 H300"/>
-          <path class="tip" d="M312 101 L300 95 L300 107 Z"/>
-          <text class="sm mono" x="236" y="90" text-anchor="middle">cmp.Or(次數, 字母)</text>
-          <rect class="acc" x="320" y="24" width="120" height="34" rx="6"/>
-          <rect class="acc" x="320" y="64" width="120" height="34" rx="6"/>
-          <rect class="hot" x="320" y="104" width="120" height="34" rx="6"/>
-          <rect class="hot" x="320" y="144" width="120" height="34" rx="6"/>
-          <text class="small mono" x="380" y="46" text-anchor="middle">go 5</text>
-          <text class="small mono" x="380" y="86" text-anchor="middle">is 2</text>
-          <text class="small mono" x="380" y="126" text-anchor="middle">fast 1</text>
-          <text class="small mono" x="380" y="166" text-anchor="middle">fun 1</text>
-          <text class="sm t-hot" x="236" y="150" text-anchor="middle">次數一樣，照字母排</text>
-        </svg>
-        <figcaption>排序有兩個條件：先比次數（多的在前），一樣多再比字母。用 <code>cmp.Or</code> 把條件串起來，結果每次都一樣。</figcaption>
-      </figure>
-    </div>
+  <section aria-labelledby="goal">
+    <h2 id="goal">這個專題做什麼</h2>
+    <p>專題的 testdata 目錄有兩個檔案：一張中文的公告 notice.txt，和一份中英混合的菜單 menu.txt。給它們兩個檔名：</p>
+    <p class="label">在 projects/wordcount 目錄</p>
+    <pre class="shell"><code>go run . testdata/notice.txt testdata/menu.txt</code></pre>
+    <pre class="out" data-example="projects/wordcount#Example_run"><code>testdata/notice.txt：3 行，25 個字詞，29 個字元，90 bytes
+testdata/menu.txt：3 行，27 個字詞，87 個字元，123 bytes
+合計：6 行，52 個字詞，116 個字元，213 bytes
+出現最多的字詞：
+  飯    6
+  rice  3
+  排    3
+  骨    3
+  chop  2</code></pre>
+    <p>沒有給檔名時讀標準輸入，可以接在管線後面：</p>
+    <pre class="shell"><code>echo "Go 很好玩，Go 很快" | go run .</code></pre>
+    <pre class="out" data-example="projects/wordcount#Example_runStdin"><code>標準輸入：1 行，7 個字詞，12 個字元，25 bytes
+出現最多的字詞：
+  go  2
+  很  2
+  好  1
+  快  1
+  玩  1</code></pre>
+    <ul class="notes">
+      <li><strong>main.go</strong>：命令列介面，處理旗標、逐一讀檔、輸出。</li>
+      <li><strong>count.go</strong>：一份輸入的統計（Count）、合計（Stats.Add）、排行（Top）。</li>
+      <li><strong>tokens.go</strong>：把一行文字切成字詞的疊代器，以及 -han 旗標的型別。</li>
+      <li><strong>main_test.go</strong>：表格測試、fuzz 測試、每一段輸出的 Example。</li>
+    </ul>
+    <p>先備：<a href="02-input-output.html#scanner">02 章的 bufio.Scanner</a>、<a href="07-maps.html">07 章 map</a>、<a href="08-strings-runes.html">08 章字串與 rune</a>、<a href="13-iterators.html">13 章疊代器</a>、<a href="20-files.html">20 章檔案</a>、<a href="21-cli.html">21 章命令列工具</a>。</p>
   </section>
 
-  <section aria-labelledby="code">
-    <h2 id="code">核心程式</h2>
-    <pre class="code"><code>func Top(counts map[string]int, n int) []WordCount {
+  <section aria-labelledby="files">
+    <h2 id="files">1. 檔案或標準輸入</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 214" role="img" aria-label="每一個檔名依序處理：檔名是減號時讀標準輸入，否則用 os.Open 開檔。讀成功就印出這個檔案的統計並加進合計；讀失敗就把錯誤印到 stderr，記下 exit code 1，繼續處理下一個檔案。全部處理完再印合計和排行">
+        <title>逐一處理每個檔名</title>
+        <rect class="soft" x="8" y="14" width="128" height="40" rx="8"/>
+        <text class="sm" x="72" y="39" text-anchor="middle">下一個檔名</text>
+        <path class="wire" d="M136 34 H168"/>
+        <rect class="soft" x="168" y="14" width="140" height="40" rx="8"/>
+        <text class="sm mono" x="238" y="39" text-anchor="middle">"-" 或 os.Open</text>
+        <path class="wire" d="M308 34 H340"/>
+        <rect class="acc" x="340" y="14" width="132" height="40" rx="8"/>
+        <text class="sm mono" x="406" y="39" text-anchor="middle">Count</text>
+        <path class="wire acc-ln" d="M406 54 V86"/>
+        <rect class="acc" x="300" y="86" width="172" height="40" rx="8"/>
+        <text class="sm" x="386" y="111" text-anchor="middle">印出、加進合計</text>
+        <path class="wire hot-ln" d="M238 54 V86"/>
+        <rect class="hot" x="120" y="86" width="164" height="40" rx="8"/>
+        <text class="sm" x="202" y="111" text-anchor="middle">stderr、status = 1</text>
+        <path class="wire dash" d="M202 126 V150 H72 V54"/>
+        <path class="wire dash" d="M386 126 V150 H72"/>
+        <text class="sm" x="84" y="170">繼續下一個</text>
+        <rect class="soft" x="8" y="182" width="464" height="28" rx="6"/>
+        <text class="sm" x="240" y="201" text-anchor="middle">全部處理完：印合計（兩個檔以上）和排行，回傳 status</text>
+      </svg>
+      <figcaption>一個檔案讀不到，不影響其他檔案。這和 Unix 的 wc、cat 一樣：盡量完成工作，最後用 exit code 告訴呼叫的人有沒有出錯。</figcaption>
+    </figure>
+    <pre class="code" data-src="projects/wordcount/main.go#run,countFile"><code>func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("wordcount", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	top := fs.Int("top", 5, "列出出現最多次的前幾個字詞")
+	mode := HanChar
+	fs.TextVar(&amp;mode, "han", HanChar, "中文的切法：char（單字）或 bigram（雙字）")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+
+	files := fs.Args()
+	if len(files) == 0 {
+		files = []string{"-"}
+	}
+	var total Stats
+	status := 0
+	for _, name := range files {
+		s, err := countFile(name, stdin, mode)
+		if err != nil {
+			fmt.Fprintf(stderr, "wordcount：%v\n", err)
+			status = 1
+			continue
+		}
+		printStats(stdout, name, s)
+		total.Add(s)
+	}
+	if len(files) &gt; 1 {
+		printStats(stdout, "合計", total)
+	}
+	printTop(stdout, Top(total.Counts, *top))
+	return status
+}
+
+func countFile(name string, stdin io.Reader, mode HanMode) (Stats, error) {
+	if name == "-" {
+		return Count(stdin, mode)
+	}
+	f, err := os.Open(name)
+	if err != nil {
+		return Stats{}, err
+	}
+	defer f.Close()
+	s, err := Count(f, mode)
+	if err != nil {
+		return s, fmt.Errorf("%s：%w", name, err)
+	}
+	return s, nil
+}</code></pre>
+    <pre class="out" data-example="projects/wordcount#Example_runMissing"><code>testdata/notice.txt：3 行，25 個字詞，29 個字元，90 bytes
+wordcount：open testdata/nosuch.txt: no such file or directory
+合計：3 行，25 個字詞，29 個字元，90 bytes
+exit code 1</code></pre>
+    <ul class="notes">
+      <li><strong>每個檔案一個函式</strong>：countFile 裡的 <code>defer f.Close()</code> 在這個函式結束時就執行。如果把 Open 和 defer 直接寫在 run 的迴圈裡，所有檔案要等 run 結束才會關，檔案一多就會用完可以開的檔案數（<a href="20-files.html">20 章</a>）。</li>
+      <li><strong>exit code</strong>：0 是成功，1 是有檔案讀不到，2 是旗標用錯。錯誤一律寫到 stderr，stdout 只放結果，接在管線後面的程式才不會收到錯誤訊息（<a href="21-cli.html#exit">21 章</a>）。</li>
+      <li><strong>"-" 代表標準輸入</strong>：這是 Unix 工具的慣例。沒有給檔名時，files 就是 <code>["-"]</code>，兩種情況走同一條路。</li>
+      <li>run 的參數是 args、stdin、stdout、stderr，回傳 exit code；main 只有一行。測試和 Example 都直接呼叫 run，上面的 Example 把 stderr 也接到 stdout，才看得到錯誤那一行。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="lines">
+    <h2 id="lines">2. 一行一行讀</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 186" role="img" aria-label="bufio.Reader 的 ReadString 每次回傳一行，包含結尾的換行。讀到檔案結尾時，最後一行如果沒有換行，會和 io.EOF 一起回傳，所以要先處理 line 再判斷錯誤">
+        <title>ReadString 的回傳值</title>
+        <text class="sm mono" x="8" y="28">第 1 次</text>
+        <rect class="soft" x="80" y="12" width="200" height="26" rx="4"/>
+        <text class="sm mono" x="90" y="30">"本店公告：\n"</text>
+        <text class="sm mono" x="296" y="30">err = nil</text>
+        <text class="sm mono" x="8" y="72">第 2 次</text>
+        <rect class="soft" x="80" y="56" width="200" height="26" rx="4"/>
+        <text class="sm mono" x="90" y="74">"排骨飯今天…\n"</text>
+        <text class="sm mono" x="296" y="74">err = nil</text>
+        <text class="sm mono" x="8" y="116">最後</text>
+        <rect class="hot" x="80" y="100" width="200" height="26" rx="4"/>
+        <text class="sm mono" x="90" y="118">"SOLD OUT."</text>
+        <text class="sm mono t-hot" x="296" y="118">err = io.EOF</text>
+        <text class="sm" x="8" y="160">最後一行沒有換行時，資料和 io.EOF 一起回來：</text>
+        <text class="sm" x="8" y="180">先處理 line，再看 err</text>
+      </svg>
+      <figcaption>io.Reader 的慣例：回傳的資料和錯誤可能同時有值。先用資料，再處理錯誤，才不會漏掉最後一段。</figcaption>
+    </figure>
+    <pre class="code" data-src="projects/wordcount/count.go#Stats,Count"><code>type Stats struct {
+	Lines  int
+	Words  int
+	Runes  int // 不含行尾的換行
+	Bytes  int // 含換行，和檔案大小相同
+	Counts map[string]int
+}
+
+func Count(r io.Reader, mode HanMode) (Stats, error) {
+	s := Stats{Counts: map[string]int{}}
+	br := bufio.NewReader(r)
+	for {
+		line, err := br.ReadString('\n')
+		if line != "" {
+			s.Lines++
+			s.Bytes += len(line)
+			text := strings.TrimSuffix(strings.TrimSuffix(line, "\n"), "\r")
+			s.Runes += utf8.RuneCountInString(text)
+			for w := range Tokens(text, mode) {
+				s.Words++
+				s.Counts[w]++
+			}
+		}
+		if err == io.EOF {
+			return s, nil
+		}
+		if err != nil {
+			return s, err
+		}
+	}
+}</code></pre>
+    <ul class="notes">
+      <li><strong>Bytes 和檔案大小一樣</strong>：ReadString 回傳的 line 包含換行，len(line) 加起來就是檔案的 byte 數，TestCountMatchesFileSize 用 os.ReadFile 比對過。字元數則去掉行尾的 <code>\n</code> 和 Windows 的 <code>\r</code>。</li>
+      <li><strong>為什麼不用 bufio.Scanner</strong>：Scanner 很方便（<a href="02-input-output.html#scanner">02 章</a>），但一行超過 64KB 就會停下來。壓縮過的 JSON、log 檔很容易碰到：</li>
+    </ul>
+    <pre class="code" data-src="projects/wordcount/main_test.go#Example_scannerLimit"><code>func Example_scannerLimit() {
+	long := strings.Repeat("飯", 30_000) // 90,000 bytes
+	sc := bufio.NewScanner(strings.NewReader(long + "\n"))
+	for sc.Scan() {
+		fmt.Println("讀到一行")
+	}
+	fmt.Printf("錯誤：%v\n", sc.Err())
+	// Output:
+	// 錯誤：bufio.Scanner: token too long
+}</code></pre>
+    <pre class="out" data-example="projects/wordcount#Example_scannerLimit"><code>錯誤：bufio.Scanner: token too long</code></pre>
+    <ul class="notes">
+      <li>迴圈一次都沒有印出「讀到一行」：Scan 直接回傳 false，原因要看 Err。只檢查 Scan 而忘了檢查 Err，就會以為檔案是空的。用 Scanner 時可以呼叫 <code>sc.Buffer(buf, max)</code> 把上限調高；bufio.Reader 的 ReadString 沒有這個限制，TestLongLine 讀了一行 30 萬 byte。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="tokens">
+    <h2 id="tokens">3. 切成字詞</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 184" role="img" aria-label="把 Today's 便當：排骨飯 x2 的每個字元分成三類：英文字母和數字連成一個字詞並轉成小寫；漢字依模式切成單字或雙字；空白、撇號、冒號這類符號是分隔，不會出現在結果裡">
+        <title>每個字元屬於哪一類</title>
+        <rect class="acc" x="8" y="20" width="62" height="34" rx="4"/><text class="sm mono" x="39" y="42" text-anchor="middle">Today</text>
+        <rect class="soft" x="74" y="20" width="18" height="34" rx="4"/><text class="sm mono" x="83" y="42" text-anchor="middle">'</text>
+        <rect class="acc" x="96" y="20" width="20" height="34" rx="4"/><text class="sm mono" x="106" y="42" text-anchor="middle">s</text>
+        <rect class="soft" x="120" y="20" width="18" height="34" rx="4"/>
+        <rect class="hot" x="142" y="20" width="44" height="34" rx="4"/><text class="sm" x="164" y="42" text-anchor="middle">便當</text>
+        <rect class="soft" x="190" y="20" width="24" height="34" rx="4"/><text class="sm" x="202" y="42" text-anchor="middle">：</text>
+        <rect class="hot" x="218" y="20" width="62" height="34" rx="4"/><text class="sm" x="249" y="42" text-anchor="middle">排骨飯</text>
+        <rect class="soft" x="284" y="20" width="18" height="34" rx="4"/>
+        <rect class="acc" x="306" y="20" width="34" height="34" rx="4"/><text class="sm mono" x="323" y="42" text-anchor="middle">x2</text>
+        <rect class="acc" x="8" y="82" width="22" height="20" rx="3"/><text class="sm" x="40" y="97">英數：連成一個字詞，轉小寫</text>
+        <rect class="hot" x="8" y="114" width="22" height="20" rx="3"/><text class="sm" x="40" y="129">漢字：依 -han 切成單字或雙字</text>
+        <rect class="soft" x="8" y="146" width="22" height="20" rx="3"/><text class="sm" x="40" y="161">其他：空白、標點、符號，只當作分隔</text>
+      </svg>
+      <figcaption>漢字在 unicode 裡也是「字母」（unicode.IsLetter 回傳 true），所以要先判斷是不是漢字，再判斷是不是英數。</figcaption>
+    </figure>
+    <pre class="code" data-src="projects/wordcount/tokens.go#Tokens,isHan,isWordRune,runEnd"><code>func Tokens(line string, mode HanMode) iter.Seq[string] {
+	return func(yield func(string) bool) {
+		rest := line
+		for rest != "" {
+			r, size := utf8.DecodeRuneInString(rest)
+			switch {
+			case isHan(r):
+				end := runEnd(rest, isHan)
+				if !yieldHan(rest[:end], mode, yield) {
+					return
+				}
+				rest = rest[end:]
+			case isWordRune(r):
+				end := runEnd(rest, isWordRune)
+				if !yield(strings.ToLower(rest[:end])) {
+					return
+				}
+				rest = rest[end:]
+			default:
+				rest = rest[size:]
+			}
+		}
+	}
+}
+
+func isHan(r rune) bool { return unicode.Is(unicode.Han, r) }
+
+func isWordRune(r rune) bool {
+	return !isHan(r) &amp;&amp; (unicode.IsLetter(r) || unicode.IsDigit(r))
+}
+
+func runEnd(s string, keep func(rune) bool) int {
+	for i, r := range s {
+		if !keep(r) {
+			return i
+		}
+	}
+	return len(s)
+}</code></pre>
+    <pre class="out" data-example="projects/wordcount#Example_tokens"><code>["today" "s" "便" "當" "排" "骨" "飯" "x2"]
+["today" "s" "便當" "排骨" "骨飯" "x2"]</code></pre>
+    <ul class="notes">
+      <li><strong>疊代器</strong>：Tokens 回傳 <code>iter.Seq[string]</code>，Count 用 for range 一個一個拿，不必先建一個 slice。測試裡用 <code>slices.Collect</code> 收成 slice 來比對。TestTokensStop 確認呼叫端 break 之後不會再呼叫 yield（<a href="13-iterators.html#yield">13 章</a>）。</li>
+      <li><strong>unicode.Han</strong> 是一張 Unicode 範圍表，涵蓋繁體、簡體和日文漢字。unicode 套件裡還有 Hiragana、Katakana、Hangul 等表。</li>
+      <li><strong>切片不複製</strong>：<code>rest[:end]</code> 是原本字串的一段，不會配置新的記憶體；只有 ToLower 在需要改大小寫時才產生新字串。</li>
+      <li><strong>限制</strong>：撇號是分隔，所以 Today's 變成 today 和 s；1.27 會變成 1 和 27。要不要保留，看你的用途（延伸挑戰 2）。</li>
+      <li><strong>fuzz 測試</strong>：FuzzTokens 用隨機的字串檢查兩件事：不會產生空字串或含空白的字詞；單字模式下漢字字詞的數量等於原文的漢字數。連不合法的 UTF-8 也要能處理（<a href="30-testing.html">30 章</a>）。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="han">
+    <h2 id="han">4. 中文：單字還是雙字</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 172" role="img" aria-label="排骨飯今天售完切成雙字：排骨、骨飯、飯今、今天、天售、售完，像一個寬度 2 的窗戶一次往右滑一格。其中排骨、今天是真的詞，飯今、天售是跨詞的雜訊">
+        <title>雙字：寬度 2 的窗戶</title>
+        <text class="sm" x="40" y="30">排</text><text class="sm" x="90" y="30">骨</text><text class="sm" x="140" y="30">飯</text><text class="sm" x="190" y="30">今</text><text class="sm" x="240" y="30">天</text><text class="sm" x="290" y="30">售</text><text class="sm" x="340" y="30">完</text>
+        <rect class="acc" x="30" y="44" width="84" height="22" rx="4"/><text class="sm" x="72" y="60" text-anchor="middle">排骨</text>
+        <rect class="soft" x="80" y="72" width="84" height="22" rx="4"/><text class="sm" x="122" y="88" text-anchor="middle">骨飯</text>
+        <rect class="hot" x="130" y="100" width="84" height="22" rx="4"/><text class="sm" x="172" y="116" text-anchor="middle">飯今</text>
+        <rect class="acc" x="180" y="44" width="84" height="22" rx="4"/><text class="sm" x="222" y="60" text-anchor="middle">今天</text>
+        <rect class="hot" x="230" y="72" width="84" height="22" rx="4"/><text class="sm" x="272" y="88" text-anchor="middle">天售</text>
+        <rect class="acc" x="280" y="100" width="84" height="22" rx="4"/><text class="sm" x="322" y="116" text-anchor="middle">售完</text>
+        <text class="sm t-hot" x="8" y="156">飯今、天售是跨過詞的邊界的雜訊，但真的詞出現得比較多次</text>
+      </svg>
+      <figcaption>中文的句子沒有空白，要正確斷詞需要字典或統計模型，標準庫沒有。雙字是不用字典的折衷：真的詞會一再出現，雜訊通常只出現一次。</figcaption>
+    </figure>
+    <pre class="code" data-src="projects/wordcount/tokens.go#HanMode,yieldHan"><code>type HanMode int
+
+func yieldHan(run string, mode HanMode, yield func(string) bool) bool {
+	runes := []rune(run)
+	if mode == HanChar || len(runes) == 1 {
+		for _, r := range runes {
+			if !yield(string(r)) {
+				return false
+			}
+		}
+		return true
+	}
+	for i := range len(runes) - 1 {
+		if !yield(string(runes[i : i+2])) {
+			return false
+		}
+	}
+	return true
+}</code></pre>
+    <p>同一張公告，單字模式下（本頁開頭的輸出）排在前面的是「飯」「排」「骨」，看不出在說什麼；換成雙字：</p>
+    <pre class="shell"><code>go run . -han bigram -top 3 testdata/notice.txt</code></pre>
+    <pre class="out" data-example="projects/wordcount#Example_runBigram"><code>testdata/notice.txt：3 行，21 個字詞，29 個字元，90 bytes
+出現最多的字詞：
+  排骨  2
+  骨飯  2
+  今天  1</code></pre>
+    <ul class="notes">
+      <li><strong>[]rune 才能依字切</strong>：yieldHan 先把這一段漢字轉成 []rune，<code>runes[i:i+2]</code> 才是兩個字；直接切 string 的話，一個漢字是 3 個 byte，會切壞（<a href="08-strings-runes.html#range">08 章</a>）。</li>
+      <li>只有一個字的段落（例如「飯，好吃」的「飯」）在雙字模式下保留那一個字，不然它就消失了。</li>
+      <li>yieldHan 回傳 bool，把「呼叫端已經 break」往外傳，Tokens 收到 false 就立刻 return。拆出來的小函式也要遵守 yield 的規則。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="total">
+    <h2 id="total">5. 合計與排行</h2>
+    <pre class="code" data-src="projects/wordcount/count.go#Stats.Add,WordCount,Top"><code>func (s *Stats) Add(other Stats) {
+	s.Lines += other.Lines
+	s.Words += other.Words
+	s.Runes += other.Runes
+	s.Bytes += other.Bytes
+	if s.Counts == nil {
+		s.Counts = map[string]int{}
+	}
+	for w, c := range other.Counts {
+		s.Counts[w] += c
+	}
+}
+
+type WordCount struct {
+	Word  string
+	Count int
+}
+
+func Top(counts map[string]int, n int) []WordCount {
 	all := make([]WordCount, 0, len(counts))
 	for w, c := range counts {
 		all = append(all, WordCount{w, c})
 	}
 	slices.SortFunc(all, func(a, b WordCount) int {
 		return cmp.Or(
-			cmp.Compare(b.Count, a.Count), <span class="c">// 次數多的在前</span>
-			cmp.Compare(a.Word, b.Word),   <span class="c">// 次數一樣就照字母</span>
+			cmp.Compare(b.Count, a.Count), // 次數多的在前
+			strings.Compare(a.Word, b.Word),
 		)
 	})
-	return all[:min(n, len(all))]
+	return all[:min(max(n, 0), len(all))]
 }</code></pre>
-    <p class="label">輸入（測試用的範例文字）</p>
-    <pre class="out"><code>Go is fun. Go is fast!
-The gopher says: go, go, GO.</code></pre>
-    <p class="label">-top 3 的輸出</p>
-    <pre class="out"><code>行數 2，字數 12，字元數 50
-go       5
-is       2
-fast     1</code></pre>
+    <ul class="notes">
+      <li><strong>零值也能 Add</strong>：run 裡的 <code>var total Stats</code> 沒有初始化 Counts，Add 第一次寫入前才建立 map。nil map 可以讀、不能寫（<a href="07-maps.html">07 章</a>）。</li>
+      <li><strong>排序要有第二個條件</strong>：map 的走訪順序每次都不一樣，次數相同的字詞如果不再依字詞排序，每次執行的結果會不同，Example 也就沒辦法比對。<code>cmp.Or</code> 回傳第一個不是 0 的比較結果，寫多個排序條件很簡潔。</li>
+      <li><strong>Top 先全部排序再切</strong>：m 個字詞要 O(m log m)。一份公告只有幾百個字詞，這樣最簡單。真的要從幾百萬個字詞挑前 10 名，用大小為 n 的 heap 只要 O(m log n)（延伸挑戰 3）。</li>
+      <li><code>min(max(n, 0), len(all))</code>：n 是負數時當成 0，超過字詞數時全部回傳，切片不會越界。</li>
+    </ul>
   </section>
 
-  <section aria-labelledby="notes">
-    <h2 id="notes">工程師筆記</h2>
+  <section aria-labelledby="align">
+    <h2 id="align">6. 中文的對齊</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 150" role="img" aria-label="用 %-6s 補空白時，fmt 依字元數補：go 補 4 個空白、排骨飯補 3 個空白，但排骨飯在終端機上佔 6 格，加起來 9 格，右邊的直線對不齊。依顯示寬度補空白，排骨飯不用補，三行的直線都在第 6 格之後">
+        <title>字元數和顯示寬度</title>
+        <text class="sm bold" x="8" y="24">依字元數補（%-6s）</text>
+        <text class="sm mono" x="8" y="50" xml:space="preserve" style="white-space:pre">|go    |</text>
+        <text class="sm mono" x="8" y="74" xml:space="preserve" style="white-space:pre">|排骨飯   |</text>
+        <text class="sm bold" x="250" y="24">依顯示寬度補</text>
+        <text class="sm mono" x="250" y="50" xml:space="preserve" style="white-space:pre">|go    |</text>
+        <text class="sm mono" x="250" y="74">|排骨飯|</text>
+        <text class="sm t-hot" x="8" y="110">中文字佔 2 格，但只算 1 個字元</text>
+        <text class="sm t-acc" x="250" y="110">每一行都佔 6 格</text>
+      </svg>
+      <figcaption>fmt 的寬度以字元（rune）計算，不知道終端機上一個漢字佔兩格。</figcaption>
+    </figure>
+    <pre class="code" data-src="projects/wordcount/main_test.go#Example_padRight"><code>func Example_padRight() {
+	for _, w := range []string{"go", "排骨飯", "rice"} {
+		fmt.Printf("|%-6s|%s|\n", w, padRight(w, 6))
+	}
+	// Output:
+	// |go    |go    |
+	// |排骨飯   |排骨飯|
+	// |rice  |rice  |
+}</code></pre>
+    <pre class="out" data-example="projects/wordcount#Example_padRight"><code>|go    |go    |
+|排骨飯   |排骨飯|
+|rice  |rice  |</code></pre>
+    <p>在等寬字型下，第二欄的直線對齊，第一欄的不對齊。printTop 先算出前幾名裡最寬的字詞，再用 padRight 把每個字詞補到同樣的寬度：</p>
+    <pre class="code" data-src="projects/wordcount/main.go#printTop,displayWidth,padRight"><code>func printTop(w io.Writer, top []WordCount) {
+	if len(top) == 0 {
+		return
+	}
+	col := 0
+	for _, wc := range top {
+		col = max(col, displayWidth(wc.Word))
+	}
+	fmt.Fprintln(w, "出現最多的字詞：")
+	for _, wc := range top {
+		fmt.Fprintf(w, "  %s  %d\n", padRight(wc.Word, col), wc.Count)
+	}
+}
+
+func displayWidth(s string) int {
+	w := 0
+	for _, r := range s {
+		w++
+		if unicode.In(r, unicode.Han, unicode.Hiragana, unicode.Katakana, unicode.Hangul) ||
+			r &gt;= 0x3000 &amp;&amp; r &lt;= 0x303F || r &gt;= 0xFF01 &amp;&amp; r &lt;= 0xFF60 {
+			w++
+		}
+	}
+	return w
+}
+
+func padRight(s string, width int) string {
+	return s + strings.Repeat(" ", max(width-displayWidth(s), 0))
+}</code></pre>
     <ul class="notes">
-      <li>map 的走訪順序不固定，輸出前一定要排序；排序條件要能分出先後，結果才會穩定。</li>
-      <li><code>cmp.Or</code>（Go 1.22）回傳第一個不是零值的參數，拿來串多個排序條件剛好。</li>
-      <li><code>strings.Fields</code> 依空白切字；中文句子之間沒有空白，要做中文斷詞得用專門的套件。</li>
-      <li><code>bufio.Scanner</code> 預設一行最多 64KB；要處理更長的行，用 <code>sc.Buffer</code> 調大。</li>
-      <li><code>%-8s</code> 的寬度是用 rune 數算的，中文字在終端機佔兩格，對齊會跑掉。</li>
+      <li>displayWidth 是簡化的規則，涵蓋中日韓文字和全形符號；完整的規則（Unicode 的 East Asian Width）在標準庫以外的 golang.org/x/text/width。<a href="08-strings-runes.html#width">08 章</a>有更完整的說明。</li>
+      <li>對齊只在終端機上有意義。輸出要給其他程式讀時，改用 tab 分隔或 JSON（延伸挑戰 4）。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="flags">
+    <h2 id="flags">7. 自己的旗標型別</h2>
+    <p>-han 只接受 char 和 bigram 兩個值。與其收一個字串、到處比對，不如定義一個型別，讓 flag 套件在解析時就檢查：</p>
+    <pre class="code" data-src="projects/wordcount/tokens.go#HanMode.MarshalText,HanMode.UnmarshalText"><code>func (m HanMode) MarshalText() ([]byte, error) {
+	switch m {
+	case HanChar:
+		return []byte("char"), nil
+	case HanBigram:
+		return []byte("bigram"), nil
+	}
+	return nil, fmt.Errorf("不認得的 HanMode %d", int(m))
+}
+
+func (m *HanMode) UnmarshalText(text []byte) error {
+	switch string(text) {
+	case "char":
+		*m = HanChar
+	case "bigram":
+		*m = HanBigram
+	default:
+		return fmt.Errorf("要用 char 或 bigram，收到 %q", text)
+	}
+	return nil
+}</code></pre>
+    <p>run 裡用 <code>fs.TextVar(&amp;mode, "han", HanChar, "…")</code> 註冊。任何實作 encoding.TextUnmarshaler 的型別都可以當旗標，預設值則用 MarshalText 顯示在說明裡。給一個不認得的值：</p>
+    <pre class="shell"><code>go run . -han word testdata/notice.txt</code></pre>
+    <p class="label">輸出（stderr）</p>
+    <pre class="out err"><code>invalid value "word" for flag -han: 要用 char 或 bigram，收到 "word"
+Usage of wordcount:
+  -han value
+    	中文的切法：char（單字）或 bigram（雙字） (default char)
+  -top int
+    	列出出現最多次的前幾個字詞 (default 5)
+exit status 2</code></pre>
+    <ul class="notes">
+      <li>前幾行是 flag 套件印的：錯誤訊息裡包含 UnmarshalText 回傳的錯誤，接著是自動產生的說明。最後一行是 go run 印的，表示程式以 exit code 2 結束。TestRunExitCodes 檢查了這個 exit code 和錯誤訊息。</li>
+      <li>同一個型別也能用在 JSON、環境變數等任何「從文字解析」的地方：encoding/json 也認得 TextUnmarshaler（<a href="23-json.html">23 章</a>）。</li>
+      <li>另一個做法是 <code>fs.Func</code>，傳一個解析字串的函式。值只在一個地方用時比較輕便；值有自己的型別、會在多個地方傳遞時，TextVar 比較清楚（<a href="21-cli.html#flag">21 章</a>）。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="challenges">
+    <h2 id="challenges">延伸挑戰</h2>
+    <p>這些題目沒有附測試。先寫測試描述你要的行為，再改程式；改完 go test 和 Example 都要通過。</p>
+    <ol class="exercises">
+      <li>
+        <h3><span class="level l1">入門</span>挑戰 1：停用詞</h3>
+        <p>加一個 -stop 旗標，指向一個檔案，每行一個不要計入排行的字詞（例如「的」「是」「the」）。</p>
+        <details><summary>提示</summary><p>讀進一個 <code>map[string]bool</code> 當成集合；Count 不用改，在 Top 之前把這些字詞從合計裡刪掉，或在 printTop 時跳過。想一想：停用詞要不要影響「字詞數」？</p></details>
+      </li>
+      <li>
+        <h3><span class="level l2">進階</span>挑戰 2：保留縮寫和小數</h3>
+        <p>讓 don't、Today's、1.27 各自是一個字詞：撇號和小數點夾在兩個英數字元中間時，算在字詞裡。</p>
+        <details><summary>提示</summary><p>改 runEnd 的停止條件：遇到 ' 或 . 時往後看一個字元，如果還是英數就繼續。先把新的期望加進 TestTokens，FuzzTokens 不用改也應該繼續通過。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l2">進階</span>挑戰 3：用 heap 挑前幾名</h3>
+        <p>用 container/heap 維護一個大小為 n 的 min-heap，走過一次 map 就得到前 n 名，結果要和現在的 Top 完全相同（包括次數相同時的順序）。</p>
+        <details><summary>提示</summary><p>heap 的頂端放「目前前 n 名裡最差的那一個」，新的字詞比它好就替換掉。最後把 heap 裡的元素取出、再排序一次。寫一個 benchmark 用十萬個字詞比較兩種做法。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l2">進階</span>挑戰 4：JSON 輸出</h3>
+        <p>加一個 -json 旗標，輸出每個檔案的統計、合計和排行，讓其他程式可以讀。</p>
+        <details><summary>提示</summary><p>定義輸出用的 struct 並加上 json tag，用 encoding/json/v2 的 MarshalWrite 寫到 stdout（<a href="23-json.html">23 章</a>）。map 的輸出順序記得加 <code>json.Deterministic(true)</code>，或直接輸出排序好的 slice。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l3">挑戰</span>挑戰 5：同時讀好幾個檔案</h3>
+        <p>檔案很多時，每個檔案用一個 goroutine 統計，但輸出的順序要和命令列的檔名順序相同，錯誤的處理也要和現在一樣。</p>
+        <details><summary>提示</summary><p>先建立和檔名一樣長的結果 slice，每個 goroutine 只寫自己那一格，就不需要鎖；用 WaitGroup 等全部完成後再依序輸出。同時開的檔案數用 buffered channel 當 semaphore 限制（<a href="19-concurrency-patterns.html">19 章</a>）。用 -race 跑測試。</p></details>
+      </li>
+    </ol>
+  </section>
+
+  <section aria-labelledby="recap">
+    <h2 id="recap">重點回顧</h2>
+    <ul class="recap">
+      <li>一個檔案出錯就回報到 stderr、繼續處理其他檔案，最後用 exit code 表示結果。</li>
+      <li>每個檔案用一個函式處理，defer Close 才會在每個檔案結束時執行。</li>
+      <li>io.Reader 可能同時回傳資料和 io.EOF：先處理資料，再處理錯誤。</li>
+      <li>bufio.Scanner 預設一行最多 64KB；要讀任意長的行用 bufio.Reader，或調高 Buffer。</li>
+      <li>漢字也是 Letter：分類字元時先判斷 unicode.Han。依字切中文要先轉成 []rune。</li>
+      <li>排序加上第二個條件，讓 map 產生的結果固定。</li>
+      <li>fmt 的寬度以字元計算；中文的對齊要依顯示寬度補空白。</li>
+      <li>有固定選項的旗標，定義一個實作 TextUnmarshaler 的型別，用 flag.TextVar 註冊。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="further">
+    <h2 id="further">延伸閱讀</h2>
+    <ul class="notes">
+      <li>套件文件：<a href="https://pkg.go.dev/bufio#Reader.ReadString">bufio.Reader.ReadString</a>、<a href="https://pkg.go.dev/bufio#Scanner.Buffer">bufio.Scanner.Buffer</a>、<a href="https://pkg.go.dev/unicode#pkg-variables">unicode 的範圍表</a>、<a href="https://pkg.go.dev/flag#TextVar">flag.TextVar</a>、<a href="https://pkg.go.dev/encoding#TextUnmarshaler">encoding.TextUnmarshaler</a>、<a href="https://pkg.go.dev/container/heap">container/heap</a>。</li>
+      <li>Go 語言規格：<a href="https://go.dev/ref/spec#Conversions_to_and_from_a_string_type">字串和 []rune 的轉換</a>。</li>
     </ul>
   </section>
 
   <section aria-labelledby="run">
     <h2 id="run">動手跑</h2>
     <p class="label">在 repo 根目錄</p>
-    <pre class="shell"><code>go run ./projects/wordcount -top 5 &lt; README.md
-go test ./projects/wordcount</code></pre>
-    <p><a href="https://github.com/xinqilin/GO-Playground/tree/main/projects/wordcount">在 GitHub 看完整程式碼</a></p>
+    <pre class="shell"><code>go run ./projects/wordcount projects/wordcount/testdata/*.txt
+go run ./projects/wordcount -han bigram README.md
+go test ./projects/wordcount
+go test -run='^$' -fuzz=FuzzTokens -fuzztime=10s ./projects/wordcount</code></pre>
+    <p><a href="https://github.com/xinqilin/GO-Playground/tree/main/projects/wordcount">在 GitHub 看完整程式碼</a>。</p>
   </section>
 </main>
 
