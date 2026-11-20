@@ -89,6 +89,7 @@ go test -race -tags solution ./...          # 全部測試，練習題改用參�
 | 30 | 測試 | [看圖](https://bill-lin.dev/GO-Playground/30-testing.html) | [chapters/30-testing](chapters/30-testing) |
 | 31 | 效能與 profiling | [看圖](https://bill-lin.dev/GO-Playground/31-performance.html) | [chapters/31-performance](chapters/31-performance) |
 | 32 | 工具鏈 | [看圖](https://bill-lin.dev/GO-Playground/32-toolchain.html) | [chapters/32-toolchain](chapters/32-toolchain) |
+| 33 | 寫出道地的 Go | [看圖](https://bill-lin.dev/GO-Playground/33-idiomatic-go.html) | [chapters/33-idiomatic-go](chapters/33-idiomatic-go) |
 
 ### 專題
 

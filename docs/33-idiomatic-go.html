@@ -1,0 +1,827 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>寫出道地的 Go｜Go 圖解手冊</title>
+<meta name="description" content="寫出其他 Go 工程師一看就懂的程式：命名、doc comment、讓零值可以直接用、接受 interface 回傳具體型別、正常流程靠左、在邊界上複製、專案目錄結構，以及一份 code review 檢查清單，附可執行的練習題。">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<header class="site">
+  <a href="index.html">Go 圖解手冊</a>
+  <span class="count">33 / 33</span>
+</header>
+
+<main class="page long">
+  <header class="hero">
+    <div class="num" aria-hidden="true">33</div>
+    <p class="eyebrow">Part 5 · 工程實務 · 第 33 章</p>
+    <h1>寫出道地的 Go</h1>
+    <p class="analogy">同一家連鎖便當店，不管哪一間分店，排骨放哪裡、號碼牌怎麼叫、收據長什麼樣子都一樣，新來的店員第一天就上手。Go 的社群也有這樣的「店規」：命名、註解、錯誤怎麼處理、目錄怎麼放。程式能編譯只是及格，照著大家熟悉的方式寫，別人才讀得快、改得放心。</p>
+  </header>
+
+  <nav class="toc-inline" aria-labelledby="toc-title">
+    <p class="label" id="toc-title">本章內容</p>
+    <ol>
+      <li><a href="#goals">本章你會學到</a></li>
+      <li><a href="#naming">命名</a></li>
+      <li><a href="#doc">doc comment</a></li>
+      <li><a href="#zero">零值就能用</a></li>
+      <li><a href="#interfaces">接受 interface，回傳具體型別</a></li>
+      <li><a href="#flow">正常流程靠左</a></li>
+      <li><a href="#boundaries">在邊界上複製</a></li>
+      <li><a href="#layout">專案的目錄結構</a></li>
+      <li><a href="#review">code review 檢查清單</a></li>
+      <li><a href="#pitfalls">常見錯誤</a></li>
+      <li><a href="#java">從 Java 來的你</a></li>
+      <li><a href="#exercises">練習</a></li>
+      <li><a href="#recap">重點回顧</a></li>
+      <li><a href="#further">延伸閱讀</a></li>
+    </ol>
+  </nav>
+
+  <section aria-labelledby="goals">
+    <h2 id="goals">本章你會學到</h2>
+    <ul class="notes">
+      <li>從呼叫端的角度取名字：package 名稱、匯出名稱、縮寫、getter、receiver。</li>
+      <li>寫出 go doc 和 pkg.go.dev 能好好呈現的 doc comment，包括標題、連結和 Deprecated。</li>
+      <li>設計零值就能使用的型別；需要設定時用 functional options。</li>
+      <li>在使用的地方定義小 interface，回傳具體型別。</li>
+      <li>先處理例外、讓正常流程靠左，錯誤加上脈絡。</li>
+      <li>slice 和 map 跨過 API 邊界時複製，不把鎖和 goroutine 的細節漏出去。</li>
+      <li>從一個 package 開始，需要時才分出 cmd/ 和 internal/。</li>
+    </ul>
+    <p>這一章把前面各章零散提到的慣例收在一起，每一節都會連回詳細說明的那一章。先備：<a href="09-structs-methods.html">09 章 struct 與方法</a>、<a href="10-interfaces.html">10 章 interface</a>、<a href="11-errors.html">11 章錯誤處理</a>、<a href="29-packages-modules.html">29 章 package 與 module</a>。</p>
+  </section>
+
+  <section aria-labelledby="naming">
+    <h2 id="naming">1. 命名</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 214" role="img" aria-label="名稱的長度跟著作用範圍走：三行的迴圈裡用 i，一個函式裡用 n 或 total，整個 package 都看得到的用 ErrNoOneWaiting 這種完整的名字。匯出的名稱前面還會加上 package 名稱，例如 ticket.Machine">
+        <title>作用範圍越大，名字越完整</title>
+        <path class="wire faint" d="M24 176 H456"/>
+        <rect class="soft" x="24" y="128" width="96" height="40" rx="6"/>
+        <text class="sm mono" x="72" y="153" text-anchor="middle">i</text>
+        <rect class="soft" x="140" y="96" width="120" height="72" rx="6"/>
+        <text class="sm mono" x="200" y="128" text-anchor="middle">n、total</text>
+        <text class="sm mute" x="200" y="152" text-anchor="middle">一個函式</text>
+        <rect class="acc" x="280" y="24" width="176" height="144" rx="6"/>
+        <text class="sm mono" x="368" y="64" text-anchor="middle">ErrNoOneWaiting</text>
+        <text class="sm mono" x="368" y="94" text-anchor="middle">ticket.Machine</text>
+        <text class="sm mute" x="368" y="152" text-anchor="middle">其他 package 也看得到</text>
+        <text class="sm mute" x="72" y="196" text-anchor="middle">三行的迴圈</text>
+        <text class="sm" x="368" y="196" text-anchor="middle">作用範圍越大 →</text>
+      </svg>
+      <figcaption>名字是寫給讀的人看的。讀的人離宣告越遠，名字就要帶越多資訊；就在眼前的，短一點反而好讀。</figcaption>
+    </figure>
+    <p>Go 的命名規則不多，但社群幾乎都照著做，所以違反時特別顯眼。這一章的主角是 ticket 這個 package，一台排隊叫號機。先從外面看它長什麼樣子：</p>
+    <pre class="shell"><code>go doc ./chapters/33-idiomatic-go/ticket Machine</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out"><code>package ticket // import "github.com/xinqilin/GO-Playground/chapters/33-idiomatic-go/ticket"
+
+type Machine struct {
+	// Has unexported fields.
+}
+    Machine 是一台叫號機。零值是一台還沒有人取號的叫號機。Machine 開始使用後不能再複製。
+
+func (m *Machine) Call() (int, error)
+func (m *Machine) Called() []int
+func (m *Machine) Remaining() int
+func (m *Machine) Take() int
+func (m *Machine) Waiting() int</code></pre>
+    <p>呼叫端寫出來是 <code>var m ticket.Machine</code>、<code>m.Take()</code>、<code>m.Waiting()</code>，讀起來像一句話。幾條規則：</p>
+    <ul class="notes">
+      <li><strong>package 名稱</strong>：短、全小寫、一個單字，不用底線也不用 MixedCaps，例如 ticket、parking、strconv。它是名稱的一部分：呼叫端看到的是 <code>ticket.Machine</code>，所以型別不必再叫 TicketMachine（練習 1）。避免 util、common、helpers 這種什麼都能放的名字，它說明不了裡面有什麼。</li>
+      <li><strong>MixedCaps</strong>：多個字的名稱用大小寫分開，不用底線：<code>orderCount</code>、<code>OrderCount</code>。開頭的大小寫決定是否匯出（<a href="29-packages-modules.html#package">29 章</a>）。</li>
+      <li><strong>縮寫整個大寫或整個小寫</strong>：<code>UserID</code>、<code>ParseURL</code>、<code>HTTPServer</code>、未匯出時 <code>apiKey</code>，不寫成 UserId、ParseUrl（練習 5）。</li>
+      <li><strong>getter 不加 Get</strong>：讀取用 <code>Waiting()</code>，不是 GetWaiting()；設定才用 <code>SetX</code>。</li>
+      <li><strong>單一方法的 interface 用 -er 結尾</strong>：Reader、Writer、Stringer，以及本章的 waiter。</li>
+      <li><strong>receiver 名稱</strong>：一兩個字母，取型別名稱的開頭，同一個型別的每個方法都用同一個：<code>func (m *Machine)</code>。不要用 this、self。</li>
+      <li><strong>錯誤</strong>：sentinel error 叫 <code>ErrXxx</code>，錯誤型別叫 <code>XxxError</code>（<a href="11-errors.html">11 章</a>）。</li>
+    </ul>
+    <p>這本手冊的識別字一律用英文，註解和字串用中文。Go 允許中文識別字，但中文沒有大小寫，沒辦法表達「匯出」，混用也會讓搜尋和 code review 變得困難。</p>
+  </section>
+
+  <section aria-labelledby="doc">
+    <h2 id="doc">2. doc comment</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 204" role="img" aria-label="緊接在宣告前面的註解就是 doc comment，同一段文字會出現在終端機的 go doc、pkg.go.dev 的網頁，以及編輯器滑鼠移上去的說明裡">
+        <title>同一段註解，三個地方看得到</title>
+        <rect class="acc" x="8" y="62" width="186" height="80" rx="10"/>
+        <text class="sm mono" x="20" y="92">// Take 取一張…</text>
+        <text class="sm mono" x="20" y="120">func (m) Take()</text>
+        <path class="wire" d="M194 102 C230 102 236 36 268 36"/>
+        <path class="wire" d="M194 102 H268"/>
+        <path class="wire" d="M194 102 C230 102 236 168 268 168"/>
+        <rect class="soft" x="268" y="14" width="204" height="44" rx="8"/>
+        <text class="sm" x="282" y="41">終端機的 go doc</text>
+        <rect class="soft" x="268" y="80" width="204" height="44" rx="8"/>
+        <text class="sm" x="282" y="107">pkg.go.dev 的網頁</text>
+        <rect class="soft" x="268" y="146" width="204" height="44" rx="8"/>
+        <text class="sm" x="282" y="173">編輯器的滑鼠提示</text>
+      </svg>
+      <figcaption>doc comment 不用特殊的標記語言。它就是普通的註解，只有幾條簡單的格式規則。</figcaption>
+    </figure>
+    <p>每個匯出的名稱都要有 doc comment：緊接在宣告前面、中間不空行，第一句以名稱開頭，說明它「做什麼」，而不是「怎麼做」。package 本身的說明寫在 package 子句前面，以「Package 名稱」開頭。整個 ticket package：</p>
+    <pre class="code" data-src="chapters/33-idiomatic-go/ticket/ticket.go"><code>// Package ticket 是排隊叫號機：取號、叫號，以及查詢還有幾個人在等。
+//
+// [Machine] 的零值就可以直接使用，也可以同時被多個 goroutine 使用：
+//
+//	var m ticket.Machine
+//	n := m.Take()
+//
+// # 號碼
+//
+// 號碼從 1 開始依序發出，叫號的順序和取號的順序相同。叫過的號碼可以用 [Machine.Called] 查詢。
+package ticket
+
+import (
+	"errors"
+	"slices"
+	"sync"
+)
+
+// ErrNoOneWaiting 表示目前沒有人在等，叫不到號。
+var ErrNoOneWaiting = errors.New("ticket: 沒有人在等")
+
+// Machine 是一台叫號機。零值是一台還沒有人取號的叫號機。Machine 開始使用後不能再複製。
+type Machine struct {
+	mu     sync.Mutex
+	issued int
+	called []int
+}
+
+// Take 取一張號碼牌，回傳它的號碼。
+func (m *Machine) Take() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.issued++
+	return m.issued
+}
+
+// Call 叫下一號並回傳號碼。沒有人在等時回傳 [ErrNoOneWaiting]。
+func (m *Machine) Call() (int, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if len(m.called) == m.issued {
+		return 0, ErrNoOneWaiting
+	}
+	n := len(m.called) + 1
+	m.called = append(m.called, n)
+	return n, nil
+}
+
+// Waiting 回傳還在等的人數。
+func (m *Machine) Waiting() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.issued - len(m.called)
+}
+
+// Called 回傳叫過的號碼，依叫號的順序。回傳的是複本，修改它不會影響 m。
+func (m *Machine) Called() []int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return slices.Clone(m.called)
+}
+
+// Remaining 回傳還在等的人數。
+//
+// Deprecated: 改用 [Machine.Waiting]。
+func (m *Machine) Remaining() int {
+	return m.Waiting()
+}</code></pre>
+    <pre class="shell"><code>go doc ./chapters/33-idiomatic-go/ticket</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out"><code>package ticket // import "github.com/xinqilin/GO-Playground/chapters/33-idiomatic-go/ticket"
+
+Package ticket 是排隊叫號機：取號、叫號，以及查詢還有幾個人在等。
+
+Machine 的零值就可以直接使用，也可以同時被多個 goroutine 使用：
+
+    var m ticket.Machine
+    n := m.Take()
+
+# 號碼
+
+號碼從 1 開始依序發出，叫號的順序和取號的順序相同。叫過的號碼可以用 Machine.Called 查詢。
+
+var ErrNoOneWaiting = errors.New("ticket: 沒有人在等")
+type Machine struct{ ... }</code></pre>
+    <ul class="notes">
+      <li><strong>格式</strong>（Go 1.19 起）：以 <code># </code> 開頭的一行是標題；縮排的行是程式碼；<code>[Machine.Called]</code> 這種方括號是連到其他名稱的連結，在 pkg.go.dev 上可以點；以 <code>-</code> 開頭的行是清單。gofmt 會自動調整 doc comment 的格式。</li>
+      <li><strong>Deprecated</strong>：以 <code>Deprecated: </code> 開頭的段落表示不要再用，並說明改用什麼。Remaining 就是一個例子。有些工具會在你呼叫它時提醒，pkg.go.dev 預設會把它的說明收起來。</li>
+      <li><strong>中文的段落寫在同一行</strong>：go doc 會把段落裡的換行換成空白，中文句子之間就多了一個空格（<a href="32-toolchain.html#command">32 章</a>的 go doc 輸出就是這樣）。一個段落寫成一行，輸出才會整齊。</li>
+      <li><strong>Example 也是文件</strong>：ticket_test.go 的 ExampleMachine 會出現在 pkg.go.dev 上，而且 go test 會驗證它的輸出，永遠不會過期（<a href="30-testing.html#coverage">30 章</a>）。</li>
+      <li>寫給呼叫的人看：參數的限制、錯誤什麼時候發生、能不能同時被多個 goroutine 使用、零值能不能用。內部的實作細節寫在函式裡面的註解。</li>
+    </ul>
+    <pre class="code" data-src="chapters/33-idiomatic-go/ticket/ticket_test.go#ExampleMachine"><code>func ExampleMachine() {
+	var m ticket.Machine
+	m.Take()
+	m.Take()
+	n, err := m.Call()
+	fmt.Println(n, err, m.Waiting())
+	// Output: 1 &lt;nil&gt; 1
+}</code></pre>
+    <pre class="out" data-example="chapters/33-idiomatic-go/ticket#ExampleMachine"><code>1 &lt;nil&gt; 1</code></pre>
+  </section>
+
+  <section aria-labelledby="zero">
+    <h2 id="zero">3. 零值就能用</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 190" role="img" aria-label="宣告 var m ticket.Machine 之後，裡面的 Mutex 是沒鎖的鎖、issued 是 0、called 是 nil slice，每一個欄位的零值都剛好代表一台還沒人取號的叫號機，所以不需要建構函式">
+        <title>每個欄位的零值都有意義</title>
+        <rect class="acc" x="8" y="10" width="200" height="44" rx="8"/>
+        <text class="sm mono" x="20" y="38">var m ticket.Machine</text>
+        <path class="wire" d="M108 54 V78"/>
+        <path class="tip" d="M108 86 l-6 -10 h12 z"/>
+        <rect class="soft" x="8" y="86" width="464" height="92" rx="10"/>
+        <text class="sm mono" x="24" y="114">mu     sync.Mutex</text>
+        <text class="sm mono" x="24" y="140">issued int</text>
+        <text class="sm mono" x="24" y="166">called []int</text>
+        <text class="sm" x="232" y="114">零值：沒有上鎖的鎖</text>
+        <text class="sm" x="232" y="140">零值：還沒發出任何號碼</text>
+        <text class="sm" x="232" y="166">零值：nil，append 時才配置</text>
+        <text class="sm t-acc" x="232" y="38">不需要 New</text>
+      </svg>
+      <figcaption>設計型別時，先問「零值應該代表什麼」。如果每個欄位的零值剛好組成一個合理的初始狀態，就不需要建構函式。</figcaption>
+    </figure>
+    <p>標準庫裡很多型別的零值都能直接用。這是 Go 刻意的設計，你自己的型別也應該盡量做到：</p>
+    <pre class="code" data-src="chapters/33-idiomatic-go/zero.go#zeroDemo"><code>func zeroDemo() {
+	var m ticket.Machine
+	m.Take()
+	m.Take()
+	fmt.Printf("叫號機：%d 人在等\n", m.Waiting())
+
+	var b strings.Builder
+	b.WriteString("排骨飯")
+	b.WriteString(" x2")
+	fmt.Printf("strings.Builder：%s\n", b.String())
+
+	var mu sync.Mutex
+	mu.Lock()
+	mu.Unlock()
+	fmt.Println("sync.Mutex：零值是沒有上鎖的鎖")
+
+	var orders []string
+	orders = append(orders, "滷肉飯")
+	fmt.Printf("nil slice 也能 append：%v\n", orders)
+
+	var prices map[string]int
+	fmt.Printf("nil map 可以讀：%d，寫入會 panic\n", prices["排骨飯"])
+}</code></pre>
+    <pre class="out" data-example="chapters/33-idiomatic-go#Example_zeroDemo"><code>叫號機：2 人在等
+strings.Builder：排骨飯 x2
+sync.Mutex：零值是沒有上鎖的鎖
+nil slice 也能 append：[滷肉飯]
+nil map 可以讀：0，寫入會 panic</code></pre>
+    <ul class="notes">
+      <li><strong>map 是例外</strong>：nil map 可以讀，寫入會 panic（<a href="07-maps.html">07 章</a>）。需要 map 的型別，在第一次寫入時才建立，讀取時不用特別處理。練習 3 的 Tally 就是這樣。</li>
+      <li><strong>零值不合理時才寫 New</strong>：例如一定要給資料庫連線、一定要有的設定。New 回傳 <code>*T</code>，而且讓呼叫端不可能拿到一半初始化的物件。</li>
+      <li><strong>選項很多時</strong>，有兩種常見的寫法：傳一個 Config struct（零值欄位代表預設值），或用 functional options：<code>New(WithPrefix("B"), WithWidth(2))</code>，每個選項是一個修改設定的函式，沒給的就用預設值。練習 4 實作後者。兩種都比十個參數的 New 好讀。</li>
+      <li>文件要寫清楚零值能不能用，ticket 的 package 說明和 Machine 的說明都寫了。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="interfaces">
+    <h2 id="interfaces">4. 接受 interface，回傳具體型別</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 220" role="img" aria-label="ticket package 只提供具體的 Machine 型別，不宣告 interface。使用端的 main package 定義自己需要的小 interface waiter，只有一個 Waiting 方法。Machine 自動滿足它，測試時換成一個假的 fakeWaiter 也可以">
+        <title>interface 定義在使用的地方</title>
+        <rect class="soft" x="8" y="16" width="190" height="120" rx="10"/>
+        <text class="sm bold" x="20" y="42">package ticket</text>
+        <text class="sm mono" x="20" y="72">type Machine struct</text>
+        <text class="sm mono" x="20" y="98">Take、Call、Waiting…</text>
+        <text class="sm mute" x="20" y="124">不宣告 interface</text>
+        <rect class="acc" x="282" y="16" width="190" height="120" rx="10"/>
+        <text class="sm bold" x="290" y="42">package main</text>
+        <text class="sm mono" x="290" y="72">type waiter interface</text>
+        <text class="sm mono" x="314" y="98">Waiting() int</text>
+        <text class="sm mute" x="290" y="124">只要需要的那一個方法</text>
+        <path class="wire dash" d="M198 76 H282"/>
+        <text class="sm" x="240" y="66" text-anchor="middle">自動滿足</text>
+        <rect class="soft" x="282" y="160" width="190" height="44" rx="8"/>
+        <text class="sm mono" x="290" y="188">fakeWaiter（測試）</text>
+        <path class="wire dash" d="M377 160 V136"/>
+      </svg>
+      <figcaption>Go 的 interface 是隱式滿足的（<a href="10-interfaces.html">10 章</a>）。提供功能的一方不需要事先宣告 interface，使用的一方需要什麼，就定義什麼。</figcaption>
+    </figure>
+    <p>看板只需要知道每個櫃台有幾個人在等。它不依賴 *ticket.Machine，而是定義一個只有 Waiting 方法的 interface：</p>
+    <pre class="code" data-src="chapters/33-idiomatic-go/board.go#waiter,busiest,printBoard,interfaceDemo"><code>type waiter interface {
+	Waiting() int
+}
+
+func busiest(counters map[string]waiter) string {
+	best, most := "", -1
+	for _, name := range slices.Sorted(maps.Keys(counters)) {
+		if n := counters[name].Waiting(); n &gt; most {
+			best, most = name, n
+		}
+	}
+	return best
+}
+
+func printBoard(w io.Writer, counters map[string]waiter) error {
+	for _, name := range slices.Sorted(maps.Keys(counters)) {
+		if _, err := fmt.Fprintf(w, "%s櫃台：%d 人在等\n", name, counters[name].Waiting()); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func interfaceDemo() {
+	var pay, pickup ticket.Machine
+	for range 3 {
+		pay.Take()
+	}
+	pickup.Take()
+	counters := map[string]waiter{"結帳": &amp;pay, "取餐": &amp;pickup}
+	printBoard(os.Stdout, counters)
+	fmt.Printf("最忙的是：%s\n", busiest(counters))
+}</code></pre>
+    <pre class="out" data-example="chapters/33-idiomatic-go#Example_interfaceDemo"><code>取餐櫃台：1 人在等
+結帳櫃台：3 人在等
+最忙的是：結帳</code></pre>
+    <p>測試時不用真的取號，給一個假的就好：</p>
+    <pre class="code" data-src="chapters/33-idiomatic-go/main_test.go#fakeWaiter,fakeWaiter.Waiting,TestBusiest"><code>type fakeWaiter int
+
+func (f fakeWaiter) Waiting() int { return int(f) }
+
+func TestBusiest(t *testing.T) {
+	tests := []struct {
+		name     string
+		counters map[string]waiter
+		want     string
+	}{
+		{"最多的", map[string]waiter{"結帳": fakeWaiter(2), "取餐": fakeWaiter(5)}, "取餐"},
+		{"一樣多取名稱在前的", map[string]waiter{"結帳": fakeWaiter(3), "取餐": fakeWaiter(3)}, "取餐"},
+		{"都沒有人", map[string]waiter{"結帳": fakeWaiter(0)}, "結帳"},
+		{"沒有櫃台", nil, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := busiest(tt.counters); got != tt.want {
+				t.Errorf("busiest = %q，想要 %q", got, tt.want)
+			}
+		})
+	}
+}</code></pre>
+    <ul class="notes">
+      <li><strong>接受 interface</strong>：printBoard 收 io.Writer，所以能寫到終端機、檔案、HTTP 回應，TestPrintBoard 還用一個每次都失敗的 Writer 測試錯誤的處理。參數用你需要的最小 interface。</li>
+      <li><strong>回傳具體型別</strong>：ticket 回傳 *Machine，不是某個 interface。呼叫端能用它所有的方法，之後加新方法也不會破壞任何人；需要抽象時，呼叫端自己定義 interface。例外是 error，以及刻意隱藏多種實作的情況。</li>
+      <li><strong>不要為了「以後可能會換」先寫 interface</strong>。只有一個實作的 interface 只是多一層跳轉。真的出現第二個實作，或測試需要替換時再加，Go 的隱式滿足讓這件事很便宜。</li>
+      <li>interface 越小越好用：io.Reader 只有一個方法，所以幾乎什麼都能當 Reader。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="flow">
+    <h2 id="flow">5. 正常流程靠左</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 206" role="img" aria-label="左邊是巢狀的寫法：每個條件都把正常流程往右推一層，else 裡的錯誤處理離它的條件很遠。右邊是靠左的寫法：先處理例外並 return，正常流程沿著左邊一路往下，最後一行是成功的結果">
+        <title>巢狀與靠左</title>
+        <text class="sm bold" x="16" y="24">巢狀</text>
+        <rect class="hot" x="16" y="36" width="200" height="22" rx="3"/>
+        <rect class="hot" x="40" y="62" width="176" height="22" rx="3"/>
+        <rect class="hot" x="64" y="88" width="152" height="22" rx="3"/>
+        <rect class="acc" x="88" y="114" width="128" height="22" rx="3"/>
+        <rect class="soft" x="40" y="140" width="176" height="22" rx="3"/>
+        <rect class="soft" x="16" y="166" width="200" height="22" rx="3"/>
+        <text class="sm bold" x="264" y="24">靠左</text>
+        <rect class="soft" x="264" y="36" width="200" height="22" rx="3"/>
+        <rect class="soft" x="288" y="62" width="176" height="22" rx="3"/>
+        <rect class="acc" x="264" y="88" width="200" height="22" rx="3"/>
+        <rect class="soft" x="264" y="114" width="200" height="22" rx="3"/>
+        <rect class="soft" x="288" y="140" width="176" height="22" rx="3"/>
+        <rect class="acc" x="264" y="166" width="200" height="22" rx="3"/>
+      </svg>
+      <figcaption>綠色是正常流程，灰色是例外的處理。靠左的寫法裡，只要沿著左邊往下讀，就知道一切順利時發生什麼事。</figcaption>
+    </figure>
+    <p>兩個函式做的事完全一樣，main_test.go 的 TestServeSame 在各種情況下比對它們的結果：</p>
+    <pre class="code" data-src="chapters/33-idiomatic-go/flow.go#serveNested,serve"><code>func serveNested(m *ticket.Machine, counter string) (string, error) {
+	if counter != "" {
+		n, err := m.Call()
+		if err == nil {
+			msg := fmt.Sprintf("請 %d 號到%s櫃台", n, counter)
+			if w := m.Waiting(); w &gt;= 3 {
+				msg += fmt.Sprintf("，後面還有 %d 位", w)
+			}
+			return msg, nil
+		} else {
+			return "", fmt.Errorf("%s櫃台：%w", counter, err)
+		}
+	} else {
+		return "", errNoCounter
+	}
+}
+
+func serve(m *ticket.Machine, counter string) (string, error) {
+	if counter == "" {
+		return "", errNoCounter
+	}
+	n, err := m.Call()
+	if err != nil {
+		return "", fmt.Errorf("%s櫃台：%w", counter, err)
+	}
+	msg := fmt.Sprintf("請 %d 號到%s櫃台", n, counter)
+	if w := m.Waiting(); w &gt;= 3 {
+		msg += fmt.Sprintf("，後面還有 %d 位", w)
+	}
+	return msg, nil
+}</code></pre>
+    <pre class="code" data-src="chapters/33-idiomatic-go/flow.go#flowDemo"><code>func flowDemo() {
+	var m ticket.Machine
+	for range 4 {
+		m.Take()
+	}
+	for _, counter := range []string{"結帳", "結帳", "", "取餐", "取餐", "取餐"} {
+		msg, err := serve(&amp;m, counter)
+		switch {
+		case errors.Is(err, ticket.ErrNoOneWaiting):
+			fmt.Printf("沒有人在等：%v\n", err)
+		case err != nil:
+			fmt.Printf("錯誤：%v\n", err)
+		default:
+			fmt.Println(msg)
+		}
+	}
+}</code></pre>
+    <pre class="out" data-example="chapters/33-idiomatic-go#Example_flowDemo"><code>請 1 號到結帳櫃台，後面還有 3 位
+請 2 號到結帳櫃台
+錯誤：沒有指定櫃台
+請 3 號到取餐櫃台
+請 4 號到取餐櫃台
+沒有人在等：取餐櫃台：ticket: 沒有人在等</code></pre>
+    <ul class="notes">
+      <li><strong>先處理例外，然後 return</strong>。if 的區塊以 return 結束時，不要再寫 else；正常的流程留在最外層。</li>
+      <li><strong>錯誤加上脈絡再往上傳</strong>：<code>fmt.Errorf("%s櫃台：%w", counter, err)</code> 告訴讀錯誤訊息的人是哪個櫃台，%w 讓上層仍然能用 errors.Is 判斷（輸出的最後一行）。</li>
+      <li><strong>錯誤只處理一次</strong>：要嘛往上傳，要嘛在這裡處理（記 log、重試、換預設值），不要記了 log 又往上傳，同一個錯誤會在 log 裡出現好幾次。</li>
+      <li><strong>錯誤訊息的寫法</strong>：會被串在別的訊息後面，所以英文的錯誤訊息開頭不大寫、結尾不加標點。標準庫的錯誤常以 package 名稱開頭，例如 bufio.ErrBufferFull 的訊息是 <code>bufio: buffer full</code>，ticket 也照這個習慣。</li>
+      <li>panic 只用在「程式本身有 bug」的情況，不用來處理可以預期的錯誤（<a href="11-errors.html">11 章</a>）。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="boundaries">
+    <h2 id="boundaries">6. 在邊界上複製</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 214" role="img" aria-label="上半部：Called 直接回傳內部的 slice，呼叫端拿到的 slice 和叫號機裡的共用同一個陣列，呼叫端改了第一個元素，叫號機裡的紀錄也被改了。下半部：Called 回傳 slices.Clone 的複本，兩邊是不同的陣列，呼叫端怎麼改都不影響叫號機">
+        <title>共用與複製</title>
+        <text class="sm bold t-hot" x="8" y="22">直接回傳</text>
+        <rect class="soft" x="8" y="34" width="120" height="40" rx="6"/>
+        <text class="sm" x="68" y="59" text-anchor="middle">叫號機</text>
+        <rect class="soft" x="352" y="34" width="120" height="40" rx="6"/>
+        <text class="sm" x="412" y="59" text-anchor="middle">呼叫端</text>
+        <rect class="hot" x="176" y="34" width="128" height="40" rx="6"/>
+        <text class="sm mono" x="240" y="59" text-anchor="middle">[99 2]</text>
+        <path class="wire" d="M128 54 H176"/>
+        <path class="wire" d="M304 54 H352"/>
+        <text class="sm t-hot" x="240" y="96" text-anchor="middle">同一個陣列：改一邊，兩邊都變</text>
+        <text class="sm bold t-acc" x="8" y="128">回傳複本</text>
+        <rect class="soft" x="8" y="140" width="120" height="40" rx="6"/>
+        <text class="sm" x="68" y="165" text-anchor="middle">叫號機</text>
+        <rect class="acc" x="144" y="140" width="80" height="40" rx="6"/>
+        <text class="sm mono" x="184" y="165" text-anchor="middle">[1 2]</text>
+        <rect class="hot" x="256" y="140" width="80" height="40" rx="6"/>
+        <text class="sm mono" x="296" y="165" text-anchor="middle">[99 2]</text>
+        <rect class="soft" x="352" y="140" width="120" height="40" rx="6"/>
+        <text class="sm" x="412" y="165" text-anchor="middle">呼叫端</text>
+        <path class="wire" d="M128 160 H144"/>
+        <path class="wire" d="M336 160 H352"/>
+        <text class="sm t-acc" x="240" y="204" text-anchor="middle">各自的陣列：呼叫端怎麼改都不影響叫號機</text>
+      </svg>
+      <figcaption>slice 和 map 只是指向底層資料的小結構（<a href="06-arrays-slices.html">06 章</a>）。把內部的 slice 交出去，等於把鑰匙也交出去了。</figcaption>
+    </figure>
+    <p>ticket 的 Called 回傳 <code>slices.Clone(m.called)</code>。呼叫端改了拿到的 slice，叫號機裡的紀錄不受影響：</p>
+    <pre class="code" data-src="chapters/33-idiomatic-go/zero.go#calledDemo"><code>func calledDemo() {
+	var m ticket.Machine
+	for range 3 {
+		m.Take()
+	}
+	m.Call()
+	m.Call()
+	got := m.Called()
+	got[0] = 99
+	fmt.Printf("改過的複本：%v\n", got)
+	fmt.Printf("叫號機裡的：%v\n", m.Called())
+}</code></pre>
+    <pre class="out" data-example="chapters/33-idiomatic-go#Example_calledDemo"><code>改過的複本：[99 2]
+叫號機裡的：[1 2]</code></pre>
+    <ul class="notes">
+      <li><strong>兩個方向都要注意</strong>：把收到的 slice 存起來（例如建構函式的參數）也一樣，呼叫端之後改了它，你的內部狀態就跟著變。練習 6 的兩個 bug 剛好是這兩個方向。</li>
+      <li>不是每次都要複製。複製有成本，只在「資料離開或進入你的控制範圍、而且之後還會被改」的地方做，並在文件寫清楚（Called 的說明寫了「回傳的是複本」）。</li>
+      <li><strong>鎖不要外露</strong>：Machine 用具名欄位 <code>mu sync.Mutex</code>，而不是直接嵌入 sync.Mutex。嵌入的話 Lock、Unlock 會變成 Machine 公開的方法，任何人都能從外面鎖住它（<a href="17-sync.html">17 章</a>）。</li>
+      <li><strong>讓呼叫端決定要不要並行</strong>：Take、Call 都是同步的函式，呼叫端想用 goroutine 自己開。函式庫自己開 goroutine 時，要提供停止它的方法（例如接受 context），不然很容易洩漏（<a href="18-context.html">18 章</a>）。</li>
+      <li>需要 context 的函式，ctx 放第一個參數，不要存在 struct 裡。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="layout">
+    <h2 id="layout">7. 專案的目錄結構</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 236" role="img" aria-label="kiosk module 的目錄：go.mod 在最上層；cmd 底下 kiosk 和 board 兩個目錄各是一支程式的 main package；internal 底下 queue 和 display 是兩支程式共用、外部不能 import 的 package">
+        <title>kiosk 的目錄</title>
+        <text class="sm mono bold" x="16" y="28">kiosk/</text>
+        <text class="sm mono" x="40" y="56">go.mod</text>
+        <text class="sm mono" x="40" y="84">cmd/</text>
+        <rect class="acc" x="60" y="94" width="150" height="28" rx="5"/>
+        <text class="sm mono" x="72" y="113">kiosk/main.go</text>
+        <rect class="acc" x="60" y="128" width="150" height="28" rx="5"/>
+        <text class="sm mono" x="72" y="147">board/main.go</text>
+        <text class="sm mono" x="40" y="180">internal/</text>
+        <rect class="soft" x="60" y="190" width="200" height="28" rx="5"/>
+        <text class="sm mono" x="72" y="209">queue/、display/</text>
+        <text class="sm" x="276" y="113">取號機程式</text>
+        <text class="sm" x="276" y="147">叫號看板程式</text>
+        <text class="sm" x="276" y="209">共用，外部不能 import</text>
+        <text class="sm mute" x="276" y="56">module 的根目錄</text>
+      </svg>
+      <figcaption>這是「好幾支程式共用一些 package」時的結構。只有一支程式時，從一個目錄、一個 main package 開始就好。</figcaption>
+    </figure>
+    <p>Go 沒有規定目錄結構，go 指令只在乎 module 和 package。官方的建議很簡單：從最小的結構開始，需要時才分。</p>
+    <ul class="notes">
+      <li><strong>一支小程式</strong>：go.mod 加上幾個 .go 檔，全部是 package main，放在根目錄。這本手冊的每一章就是這樣。</li>
+      <li><strong>程式變大</strong>：把邏輯分到 <code>internal/</code> 底下的 package，main 只負責讀參數、組裝、啟動。internal 底下的 package 只有這個 module 能 import，你可以隨時改它的 API（<a href="29-packages-modules.html#design">29 章</a>）。</li>
+      <li><strong>好幾支程式</strong>：每支程式一個 <code>cmd/名稱/</code> 目錄。<code>go install example.com/kiosk/cmd/kiosk@latest</code> 裝出來的執行檔就叫 kiosk。</li>
+      <li><strong>要給別人 import 的函式庫</strong>：package 放在根目錄或有意義的子目錄。沒有必要多一層 pkg/。</li>
+      <li><strong>依職責分 package，不是依種類</strong>：queue、display 各自負責一件事。不要開 models、utils、interfaces 這種依「是什麼東西」分類的 package，它們會互相 import，最後變成 import cycle。</li>
+    </ul>
+    <p>kiosk 是 testdata 裡一個完整的 module：</p>
+    <pre class="code" data-src="chapters/33-idiomatic-go/testdata/kiosk/cmd/kiosk/main.go"><code>// kiosk 是門口的取號機。
+package main
+
+import (
+	"fmt"
+
+	"example.com/kiosk/internal/display"
+	"example.com/kiosk/internal/queue"
+)
+
+func main() {
+	var q queue.Queue
+	for range 3 {
+		fmt.Printf("您的號碼：%s\n", display.Number("A", q.Take()))
+	}
+}</code></pre>
+    <pre class="shell"><code>go -C chapters/33-idiomatic-go/testdata/kiosk list ./...
+go -C chapters/33-idiomatic-go/testdata/kiosk run ./cmd/kiosk
+go -C chapters/33-idiomatic-go/testdata/kiosk run ./cmd/board</code></pre>
+    <p class="label">輸出</p>
+    <pre class="out"><code>example.com/kiosk/cmd/board
+example.com/kiosk/cmd/kiosk
+example.com/kiosk/internal/display
+example.com/kiosk/internal/queue
+您的號碼：A001
+您的號碼：A002
+您的號碼：A003
+請 A001 到櫃台
+請 A002 到櫃台
+目前沒有人在等</code></pre>
+    <p><code>go build -o bin/ ./cmd/...</code> 一次建出所有程式，每支程式以目錄名稱命名（-o 的值以 / 結尾表示目錄）。本章的 layout_test.go 會實際執行上面這些指令。</p>
+  </section>
+
+  <section aria-labelledby="review">
+    <h2 id="review">8. code review 檢查清單</h2>
+    <p>送出 code review 之前，或 review 別人的程式時，可以照這份清單看一遍。每一項後面是詳細說明的章節。工具能檢查的先交給工具：gofmt、go vet、go test -race、go fix -diff（<a href="32-toolchain.html">32 章</a>）。</p>
+    <div class="table-wrap">
+      <table class="vs">
+        <thead><tr><th scope="col">面向</th><th scope="col">問自己</th><th scope="col">詳見</th></tr></thead>
+        <tbody>
+          <tr><th scope="row">命名</th><td>從呼叫端讀起來順嗎？有沒有和 package 名稱重複、Get 開頭、縮寫大小寫不一致？</td><td>本章第 1 節</td></tr>
+          <tr><th scope="row">文件</th><td>每個匯出的名稱都有以名稱開頭的 doc comment 嗎？有寫零值能不能用、能不能並行使用嗎？</td><td>本章第 2 節</td></tr>
+          <tr><th scope="row">錯誤</th><td>每個 err 都檢查了嗎？往上傳時加了脈絡和 %w 嗎？有沒有同一個錯誤記了 log 又往上傳？</td><td><a href="11-errors.html">11 章</a></td></tr>
+          <tr><th scope="row">資源</th><td>檔案、HTTP 回應的 Body、rows 都關了嗎？Close 的錯誤有處理嗎？</td><td><a href="20-files.html">檔案與 I/O</a> 那一章</td></tr>
+          <tr><th scope="row">並行</th><td>每個 goroutine 都有結束的方式嗎？共用的資料有鎖或 channel 保護嗎？-race 跑過嗎？</td><td><a href="14-goroutines.html">14</a>、<a href="17-sync.html">17</a>、<a href="18-context.html">18 章</a></td></tr>
+          <tr><th scope="row">API</th><td>參數接受最小的 interface、回傳具體型別嗎？內部的 slice、map 有沒有直接交出去？</td><td>本章第 4、6 節</td></tr>
+          <tr><th scope="row">可讀性</th><td>正常流程靠左嗎？有沒有只有一個實作的 interface、只用一次的抽象？</td><td>本章第 4、5 節</td></tr>
+          <tr><th scope="row">測試</th><td>新的行為有測試嗎？錯誤的情況和邊界值有測到嗎？測試失敗時看得懂哪裡錯嗎？</td><td><a href="30-testing.html">30 章</a></td></tr>
+          <tr><th scope="row">效能</th><td>有證據才最佳化嗎？最佳化有 benchmark 前後對照嗎？</td><td><a href="31-performance.html">31 章</a></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>review 的重點是「這段程式明年的同事讀得懂、改得動嗎」，而不是挑出所有和自己習慣不同的地方。工具能統一的（格式、import 順序）不要花時間討論；真正值得討論的是命名、邊界和錯誤處理。</p>
+  </section>
+
+  <section aria-labelledby="pitfalls">
+    <h2 id="pitfalls">常見錯誤</h2>
+    <h3 id="pit-stutter">1. 名稱重複了 package 名稱</h3>
+    <p><code>ticket.TicketMachine</code>、<code>user.UserService</code>。呼叫端已經寫了 package 名稱，型別名稱只要說剩下的部分（第 1 節，練習 1）。</p>
+
+    <h3 id="pit-getter">2. 照 Java 的習慣寫 getter 和 setter</h3>
+    <p>每個欄位都配一對 GetX、SetX。讀取的方法直接叫 X；不需要從外面改的欄位，就不要提供 SetX。很多時候直接匯出欄位就好。</p>
+
+    <h3 id="pit-producer-interface">3. 在提供功能的 package 裡先宣告 interface</h3>
+    <p>寫了 Machine 又寫一個 MachineInterface，然後所有地方都用 interface。interface 交給使用端定義（第 4 節）。</p>
+
+    <h3 id="pit-constructor">4. 零值不能用，又沒有說</h3>
+    <p>型別裡有 map，使用者 <code>var t Tally</code> 之後第一次 Add 就 panic。讓零值能用，或者提供 New 並在文件寫清楚（第 3 節，練習 3）。</p>
+
+    <h3 id="pit-else">5. if 以 return 結束，後面還接 else</h3>
+    <p>正常流程被推到右邊，錯誤處理離條件越來越遠（第 5 節）。</p>
+
+    <h3 id="pit-leak-slice">6. 把內部的 slice、map 直接交出去或存起來</h3>
+    <p>呼叫端一改，你的內部狀態就壞了，而且很難追（第 6 節，練習 6）。</p>
+
+    <h3 id="pit-embed-mutex">7. 在匯出的 struct 裡嵌入 sync.Mutex</h3>
+    <p>Lock、Unlock 變成公開的 API。用不匯出的具名欄位 <code>mu sync.Mutex</code>（第 6 節）。</p>
+
+    <h3 id="pit-utils">8. 開一個 utils package 放所有東西</h3>
+    <p>名稱說明不了內容，所有 package 都 import 它，最後誰都不敢改。依職責取名，或乾脆放回用它的那個 package（第 1、7 節）。</p>
+  </section>
+
+  <section aria-labelledby="java">
+    <h2 id="java">從 Java 來的你</h2>
+    <div class="table-wrap">
+      <table class="vs">
+        <thead><tr><th scope="col">主題</th><th scope="col">Java 的習慣</th><th scope="col">Go 的習慣</th></tr></thead>
+        <tbody>
+          <tr><th scope="row">讀取欄位</th><td class="java"><code>getName()</code>、<code>setName()</code></td><td><code>Name()</code>，或直接匯出欄位</td></tr>
+          <tr><th scope="row">interface</th><td class="java">提供者宣告，實作的類別寫 implements</td><td>使用者定義，隱式滿足，越小越好</td></tr>
+          <tr><th scope="row">建立物件</th><td class="java">建構子、Builder、DI 容器</td><td>零值、New 函式、functional options</td></tr>
+          <tr><th scope="row">命名長度</th><td class="java"><code>CustomerOrderRepositoryImpl</code></td><td>短，靠 package 名稱補上脈絡：<code>order.Store</code></td></tr>
+          <tr><th scope="row">縮寫</th><td class="java"><code>userId</code>、<code>HttpClient</code></td><td><code>userID</code>、<code>HTTPClient</code></td></tr>
+          <tr><th scope="row">錯誤</th><td class="java">丟例外，由上層 catch</td><td>回傳 error，就地判斷，加上脈絡往上傳</td></tr>
+          <tr><th scope="row">文件</th><td class="java">Javadoc 的 @param、@return 標記</td><td>一般的句子，以名稱開頭，沒有標記</td></tr>
+          <tr><th scope="row">目錄</th><td class="java">src/main/java/com/example/…，依層分 package</td><td>從平的開始，cmd/、internal/，依職責分 package</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>從 Java 轉過來最常見的「口音」，是把 Java 的設計模式原樣搬過來：每個類別配一個 interface、工廠和 Builder、很深的 package 階層、到處都是 getter。這些在 Java 有它的理由（例如框架需要 interface 來產生代理），在 Go 通常只是多出來的程式碼。先寫最直接的版本，等真的需要時再加抽象。</p>
+  </section>
+
+  <section aria-labelledby="exercises">
+    <h2 id="exercises">練習</h2>
+    <p>題目在 <code>exercises/33-idiomatic-go/exercises.go</code>：幾個 code review 時用得上的小檢查工具，加上幾個 API 設計的題目。</p>
+    <pre class="shell"><code>go test ./exercises/33-idiomatic-go/                       <span class="c"># 跑全部練習</span>
+go test ./exercises/33-idiomatic-go/ -run TestMixedCaps    <span class="c"># 只跑一題</span>
+go test -tags solution ./exercises/33-idiomatic-go/        <span class="c"># 跑參考解答</span></code></pre>
+    <p>共用的定義在 doc.go：</p>
+    <pre class="code" data-src="exercises/33-idiomatic-go/doc.go#ProblemMissing,Initialisms,Tally,Option,Machine,Queue"><code>const (
+	ProblemMissing = "缺少說明"
+	ProblemName    = "沒有以名稱開頭"
+	ProblemPeriod  = "沒有以句號結尾"
+)
+
+var Initialisms = map[string]bool{
+	"api": true, "html": true, "http": true, "id": true, "ip": true,
+	"json": true, "sql": true, "tcp": true, "url": true, "uuid": true,
+}
+
+type Tally struct {
+	counts map[string]int
+}
+
+type Option func(*Machine)
+
+type Machine struct {
+	prefix string
+	next   int
+	width  int
+}
+
+type Queue struct {
+	waiting []int
+}</code></pre>
+    <ol class="exercises">
+      <li>
+        <h3><span class="level l1">入門</span>練習 1：名稱有沒有重複 package</h3>
+        <p>第 1 節的規則寫成程式。注意 time.Time 這種同名的情況不算。</p>
+        <pre class="code" data-src="exercises/33-idiomatic-go/exercises.go#Stutters"><code>func Stutters(pkg, name string) bool {
+	// TODO: 實作
+	return false
+}</code></pre>
+        <p>測試：<code>TestStutters</code>。</p>
+        <details><summary>提示</summary><p><code>strings.EqualFold</code> 不分大小寫比較。package 名稱都是 ASCII，可以直接切 <code>name[:len(pkg)]</code>，但要先確認 name 比 pkg 長。後面那個字用 <code>unicode.IsUpper</code> 判斷。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l1">入門</span>練習 2：檢查 doc comment</h3>
+        <p>第 2 節的規則：以名稱開頭、是完整的句子。</p>
+        <pre class="code" data-src="exercises/33-idiomatic-go/exercises.go#DocProblems"><code>func DocProblems(name, doc string) []string {
+	// TODO: 實作
+	return nil
+}</code></pre>
+        <p>測試：<code>TestDocProblems</code>。</p>
+        <details><summary>提示</summary><p>先 TrimSpace。「以名稱開頭」要連空白一起比，不然 FeeTable 也會被當成以 Fee 開頭。「。」是多個 byte 的字元，用 strings.HasSuffix 比較就不用管這件事。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l2">進階</span>練習 3：零值就能用的 Tally</h3>
+        <p>第 3 節：map 在第一次寫入時才建立。</p>
+        <pre class="code" data-src="exercises/33-idiomatic-go/exercises.go#Tally.Add,Tally.Count,Tally.Top"><code>func (t *Tally) Add(dish string, n int) {
+	// TODO: 實作
+}
+
+func (t *Tally) Count(dish string) int {
+	// TODO: 實作
+	return 0
+}
+
+func (t *Tally) Top(n int) []string {
+	// TODO: 實作
+	return nil
+}</code></pre>
+        <p>測試：<code>TestTally</code>。</p>
+        <details><summary>提示</summary><p>Add 裡 <code>if t.counts == nil { t.counts = make(…) }</code>；Count 不用檢查，nil map 可以讀。Top 用 <code>slices.SortedFunc(maps.Keys(t.counts), …)</code>，比較函式用 <code>cmp.Or</code> 先比份數、再比菜名，最後用 min 決定要切幾個。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l2">進階</span>練習 4：functional options</h3>
+        <p>第 3 節提到的寫法：沒給的選項用預設值，後給的蓋過先給的。</p>
+        <pre class="code" data-src="exercises/33-idiomatic-go/exercises.go#WithPrefix,WithStart,WithWidth,New,Machine.Next"><code>func WithPrefix(p string) Option {
+	// TODO: 實作
+	return func(*Machine) {}
+}
+
+func WithStart(n int) Option {
+	// TODO: 實作
+	return func(*Machine) {}
+}
+
+func WithWidth(w int) Option {
+	// TODO: 實作
+	return func(*Machine) {}
+}
+
+func New(opts ...Option) *Machine {
+	// TODO: 實作
+	return &amp;Machine{}
+}
+
+func (m *Machine) Next() string {
+	// TODO: 實作
+	return ""
+}</code></pre>
+        <p>測試：<code>TestOptions</code>。</p>
+        <details><summary>提示</summary><p>每個 WithX 回傳一個閉包：<code>func(m *Machine) { m.prefix = p }</code>。New 先建立有預設值的 Machine，再依序呼叫每個 opt。補零可以用 <code>fmt.Sprintf("%0*d", width, n)</code>：* 表示寬度從參數來。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l3">挑戰</span>練習 5：snake_case 轉 MixedCaps</h3>
+        <p>把資料庫欄位名稱轉成 Go 的欄位名稱時用得到，縮寫的規則是重點。</p>
+        <pre class="code" data-src="exercises/33-idiomatic-go/exercises.go#MixedCaps"><code>func MixedCaps(snake string, exported bool) string {
+	// TODO: 實作
+	return ""
+}</code></pre>
+        <p>測試：<code>TestMixedCaps</code>。</p>
+        <details><summary>提示</summary><p><code>strings.FieldsFunc(snake, func(r rune) bool { return r == '_' })</code> 會順便忽略連續和前後的底線。對每一段：是第一段而且不匯出就原樣寫入；在 Initialisms 裡就整個大寫；否則第一個字母大寫。</p></details>
+      </li>
+      <li>
+        <h3><span class="level fix">找錯</span>練習 6：隊伍被外面改掉了</h3>
+        <p>第 6 節的兩個方向：收進來的 slice、交出去的 slice。</p>
+        <pre class="code" data-src="exercises/33-idiomatic-go/exercises.go#QueueOf,Queue.Join,Queue.Waiting"><code>func QueueOf(nums []int) *Queue {
+	return &amp;Queue{waiting: nums}
+}
+
+func (q *Queue) Join(n int) {
+	q.waiting = append(q.waiting, n)
+}
+
+func (q *Queue) Waiting() []int {
+	return q.waiting
+}</code></pre>
+        <p>測試：<code>TestQueueCopies</code>。</p>
+        <details><summary>提示</summary><p>QueueOf 和 Waiting 都要用 <code>slices.Clone</code>。只修 Waiting 的話，呼叫端改了傳進來的 nums，或者 Join 時 append 寫進了呼叫端陣列裡多餘的容量，測試還是會失敗。</p></details>
+      </li>
+    </ol>
+    <p><a href="https://github.com/xinqilin/GO-Playground/blob/main/exercises/33-idiomatic-go/solution.go">參考解答</a>：先自己寫完再看。測試通過的寫法都是對的。</p>
+  </section>
+
+  <section aria-labelledby="recap">
+    <h2 id="recap">重點回顧</h2>
+    <ul class="recap">
+      <li>名稱從呼叫端讀：package 名稱短而具體、不重複、縮寫一致、getter 不加 Get。</li>
+      <li>每個匯出的名稱都有以名稱開頭的 doc comment；# 標題、[連結]、Deprecated: 段落。</li>
+      <li>設計型別時先讓零值有意義；需要設定時用 Config struct 或 functional options。</li>
+      <li>參數接受最小的 interface，回傳具體型別；interface 由使用端定義。</li>
+      <li>先處理例外再 return，正常流程靠左；錯誤加上脈絡、只處理一次。</li>
+      <li>slice、map 跨過 API 邊界時複製；鎖不外露；讓呼叫端決定要不要並行。</li>
+      <li>從一個 package 開始；多支程式用 cmd/，共用的放 internal/，依職責分 package。</li>
+      <li>review 前先跑 gofmt、vet、test -race；討論時把時間花在命名、邊界和錯誤處理。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="further">
+    <h2 id="further">延伸閱讀</h2>
+    <ul class="notes">
+      <li>官方文件：<a href="https://go.dev/doc/effective_go">Effective Go</a>（特別是 <a href="https://go.dev/doc/effective_go#names">Names</a>）、<a href="https://go.dev/doc/comment">Go Doc Comments</a>（<a href="https://go.dev/doc/comment#doclinks">Doc links</a>、<a href="https://go.dev/doc/comment#deprecations">Deprecations</a>）、<a href="https://go.dev/doc/modules/layout">Organizing a Go module</a>。</li>
+      <li>Go wiki：<a href="https://go.dev/wiki/CodeReviewComments">Go Code Review Comments</a>（<a href="https://go.dev/wiki/CodeReviewComments#initialisms">Initialisms</a>、<a href="https://go.dev/wiki/CodeReviewComments#error-strings">Error Strings</a>、<a href="https://go.dev/wiki/CodeReviewComments#receiver-names">Receiver Names</a>）。</li>
+      <li>Go 官方部落格：<a href="https://go.dev/blog/package-names">Package names</a>。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="run">
+    <h2 id="run">動手跑</h2>
+    <p class="label">在 repo 根目錄</p>
+    <pre class="shell"><code>go run ./chapters/33-idiomatic-go                           <span class="c"># 看所有示範</span>
+go doc -all ./chapters/33-idiomatic-go/ticket                <span class="c"># 看 ticket 的完整文件</span>
+go test ./chapters/33-idiomatic-go/...                      <span class="c"># 包含 kiosk 的目錄結構測試</span>
+go -C chapters/33-idiomatic-go/testdata/kiosk run ./cmd/board
+go test ./exercises/33-idiomatic-go/                        <span class="c"># 做練習</span></code></pre>
+    <p>恭喜讀完正文的最後一章。接下來的專題會把前面學到的東西組合成完整的程式。<a href="https://github.com/xinqilin/GO-Playground/tree/main/chapters/33-idiomatic-go">在 GitHub 看本章完整程式碼</a>，或看<a href="https://github.com/xinqilin/GO-Playground/tree/main/exercises/33-idiomatic-go">練習題</a>。</p>
+  </section>
+</main>
+
+<nav class="pager" aria-label="章節導覽">
+  <a class="prev" href="32-toolchain.html">← 32 工具鏈</a>
+  <a class="home" href="index.html">目錄</a>
+  <a class="next" href="project-fibonacci.html">專題：fibonacci →</a>
+</nav>
+</body>
+</html>
