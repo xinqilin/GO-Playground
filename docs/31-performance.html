@@ -76,7 +76,7 @@
       <figcaption>每一步都有工具：go test、go test -bench、go tool pprof。不用安裝任何東西。</figcaption>
     </figure>
     <p>便當店每天有上千筆訂單紀錄，每一行像「10:05,排骨飯,2,90」。我們要算每道菜的營業額。第一版用 regexp 解析每一行，第二版用 strings.Cut。改寫之前，先確認兩個版本的結果完全一樣：</p>
-    <pre class="code" data-src="chapters/31-performance/orders.go#Order,lineRE,parseRegexp,parseCut,revenue"><code>type Order struct {
+    <pre class="code" data-src="chapters/31-performance/orders.go#Order,lineRE,parseRegexp,parseCut,digits,revenue"><code>type Order struct {
 	Time  string
 	Dish  string
 	Qty   int
@@ -90,8 +90,11 @@ func parseRegexp(line string) (Order, error) {
 	if m == nil {
 		return Order{}, fmt.Errorf("%w：%q", errBadLine, line)
 	}
-	qty, _ := strconv.Atoi(m[3])
-	price, _ := strconv.Atoi(m[4])
+	qty, err1 := strconv.Atoi(m[3]) // \d+ 擋掉了正負號，但擋不住太長、放不進 int 的數字
+	price, err2 := strconv.Atoi(m[4])
+	if err1 != nil || err2 != nil {
+		return Order{}, fmt.Errorf("%w：%q", errBadLine, line)
+	}
 	return Order{Time: m[1], Dish: m[2], Qty: qty, Price: price}, nil
 }
 
@@ -101,10 +104,20 @@ func parseCut(line string) (Order, error) {
 	q, p, ok3 := strings.Cut(rest, ",")
 	qty, err1 := strconv.Atoi(q)
 	price, err2 := strconv.Atoi(p)
-	if !ok1 || !ok2 || !ok3 || err1 != nil || err2 != nil || len(t) != 5 || dish == "" {
+	clock := len(t) == 5 &amp;&amp; t[2] == ':' &amp;&amp; digits(t[:2]) &amp;&amp; digits(t[3:])
+	if !ok1 || !ok2 || !ok3 || !clock || dish == "" || !digits(q) || !digits(p) || err1 != nil || err2 != nil {
 		return Order{}, fmt.Errorf("%w：%q", errBadLine, line)
 	}
 	return Order{Time: t, Dish: dish, Qty: qty, Price: price}, nil
+}
+
+func digits(s string) bool {
+	for i := range len(s) {
+		if s[i] &lt; '0' || s[i] &gt; '9' {
+			return false
+		}
+	}
+	return s != ""
 }
 
 func revenue(log string, parse func(string) (Order, error)) (map[string]int, error) {
@@ -136,7 +149,7 @@ func revenue(log string, parse func(string) (Order, error)) (map[string]int, err
 魚排飯 37905 元
 兩種結果相同： true &lt;nil&gt; &lt;nil&gt;
 訂單格式不對："10:05,排骨飯,兩個,90"</code></pre>
-    <p>main_test.go 的 TestParsersAgree 用好幾種正確和錯誤的行，逐一比對兩個版本的結果。有了這個測試，之後怎麼改都不怕改錯。接著用 benchmark 量，兩個版本用子 benchmark 放在一起，輸入完全相同：</p>
+    <p>main_test.go 的 TestParsersAgree 用好幾種正確和錯誤的行，逐一比對兩個版本的結果。測試只抓得到它列出來的情況：這一章最早的 parseCut 只檢查時間是 5 個字元，「ab:cd」和「-2」份都會通過，當時的測試沒有這幾種行，所以沒有發現。regexp 版也有一個漏洞：<code>\d+</code> 擋得住正負號，擋不住放不進 int 的長數字，所以它也要檢查 Atoi 的錯誤。錯誤的行要列得和正確的行一樣仔細。接著用 benchmark 量，兩個版本用子 benchmark 放在一起，輸入完全相同：</p>
     <pre class="code" data-src="chapters/31-performance/main_test.go#BenchmarkRevenue"><code>func BenchmarkRevenue(b *testing.B) {
 	log := sampleLog(1000) // 準備資料不算在時間裡：b.Loop 會在第一次呼叫時重設計時
 	for _, bc := range []struct {
@@ -159,19 +172,19 @@ func revenue(log string, parse func(string) (Order, error)) (map[string]int, err
 goarch: arm64
 pkg: github.com/xinqilin/GO-Playground/chapters/31-performance
 cpu: Apple M1 Pro
-BenchmarkRevenue/regexp-10         	    4671	    241403 ns/op	  160324 B/op	    2002 allocs/op
-BenchmarkRevenue/cut-10            	   27457	     43506 ns/op	     256 B/op	       2 allocs/op
+BenchmarkRevenue/regexp-10         	    4329	    248785 ns/op	  160324 B/op	    2002 allocs/op
+BenchmarkRevenue/cut-10            	   24459	     49128 ns/op	     256 B/op	       2 allocs/op
 PASS
-ok  	github.com/xinqilin/GO-Playground/chapters/31-performance	2.400s</code></pre>
-    <p>1,000 行的紀錄，regexp 版要 0.24 毫秒、每次配置 2,002 次；Cut 版快了 5 倍多，只配置 2 次。這一章接下來會說明這些數字怎麼來、怎麼找出原因。</p>
+ok  	github.com/xinqilin/GO-Playground/chapters/31-performance	2.346s</code></pre>
+    <p>1,000 行的紀錄，regexp 版要 0.25 毫秒、每次配置 2,002 次；Cut 版快了 5 倍多，只配置 2 次。這一章接下來會說明這些數字怎麼來、怎麼找出原因。</p>
     <ul class="notes">
       <li><strong>只量一次不夠</strong>。用 <code>-count=10</code> 跑好幾次，看數字穩不穩定。同一台機器上其他程式、溫度、省電模式都會讓數字跳動。下面是 cut 跑 5 次，彼此差不到 1%，這種程度的差距才能拿來比較：</li>
     </ul>
-    <pre class="out"><code>BenchmarkRevenue/cut-10         	   27186	     43740 ns/op
-BenchmarkRevenue/cut-10         	   27585	     43566 ns/op
-BenchmarkRevenue/cut-10         	   27511	     43545 ns/op
-BenchmarkRevenue/cut-10         	   27565	     43553 ns/op
-BenchmarkRevenue/cut-10         	   27632	     43528 ns/op</code></pre>
+    <pre class="out"><code>BenchmarkRevenue/cut-10         	   24346	     48887 ns/op
+BenchmarkRevenue/cut-10         	   24688	     48595 ns/op
+BenchmarkRevenue/cut-10         	   24684	     48613 ns/op
+BenchmarkRevenue/cut-10         	   24775	     48623 ns/op
+BenchmarkRevenue/cut-10         	   24709	     48570 ns/op</code></pre>
     <ul class="notes">
       <li>改之前、改之後各跑 10 次存成檔案，用官方的 benchstat 工具（<code>golang.org/x/perf/cmd/benchstat</code>，要另外安裝）比較，它會算出中位數、變動範圍，以及差異是不是真的（練習 1 會自己算中位數和變動範圍）。</li>
       <li>準備資料的時間不算進去：<code>b.Loop()</code> 在第一次被呼叫時才開始計時，迴圈前面的 sampleLog 不會影響結果。b.Loop 也保證迴圈裡的呼叫不會被編譯器當成「結果沒用到」而整個省略。</li>
@@ -211,33 +224,33 @@ go tool pprof -http=localhost:8080 cpu.out   <span class="c"># 在瀏覽器裡�
     <p class="label">輸出</p>
     <pre class="out"><code>File: perf.test
 Type: alloc_space
-Time: 2026-11-21 01:49:25 CST
-Showing nodes accounting for 665.55MB, 99.40% of 669.57MB total
-Dropped 35 nodes (cum &lt;= 3.35MB)
+Time: 2026-11-21 07:30:42 CST
+Showing nodes accounting for 719.05MB, 99.45% of 723.06MB total
+Dropped 27 nodes (cum &lt;= 3.62MB)
 Showing top 8 nodes out of 10
       flat  flat%   sum%        cum   cum%
-  337.03MB 50.33% 50.33%   666.05MB 99.47%  regexp.(*Regexp).FindStringSubmatch
-  328.03MB 48.99% 99.33%   329.03MB 49.14%  regexp.(*Regexp).doOnePass
-    0.50MB 0.075% 99.40%   666.55MB 99.55%  github.com/xinqilin/GO-Playground/chapters/31-performance.revenue
-         0     0% 99.40%   666.55MB 99.55%  github.com/xinqilin/GO-Playground/chapters/31-performance.BenchmarkRevenue.func1
-         0     0% 99.40%   666.05MB 99.47%  github.com/xinqilin/GO-Playground/chapters/31-performance.parseRegexp
-         0     0% 99.40%   666.05MB 99.47%  github.com/xinqilin/GO-Playground/chapters/31-performance.revenue-range1 (inline)
-         0     0% 99.40%   329.54MB 49.22%  regexp.(*Regexp).find
-         0     0% 99.40%   666.05MB 99.47%  strings.Lines.func1 (inline)</code></pre>
+  366.03MB 50.62% 50.62%   720.06MB 99.58%  regexp.(*Regexp).FindStringSubmatch
+  353.03MB 48.82% 99.45%   354.03MB 48.96%  regexp.(*Regexp).doOnePass
+         0     0% 99.45%   720.06MB 99.58%  github.com/xinqilin/GO-Playground/chapters/31-performance.BenchmarkRevenue.func1
+         0     0% 99.45%   720.06MB 99.58%  github.com/xinqilin/GO-Playground/chapters/31-performance.parseRegexp
+         0     0% 99.45%   720.06MB 99.58%  github.com/xinqilin/GO-Playground/chapters/31-performance.revenue
+         0     0% 99.45%   720.06MB 99.58%  github.com/xinqilin/GO-Playground/chapters/31-performance.revenue-range1 (inline)
+         0     0% 99.45%   354.03MB 48.96%  regexp.(*Regexp).find
+         0     0% 99.45%   720.06MB 99.58%  strings.Lines.func1 (inline)</code></pre>
     <pre class="shell"><code>go tool pprof -sample_index=alloc_space -list=parseRegexp mem.out</code></pre>
     <p class="label">輸出（前幾行）</p>
-    <pre class="out"><code>Total: 669.57MB
+    <pre class="out"><code>Total: 723.06MB
 ROUTINE ======================== github.com/xinqilin/GO-Playground/chapters/31-performance.parseRegexp in …/chapters/31-performance/orders.go
-         0   666.05MB (flat, cum) 99.47% of Total
+         0   720.06MB (flat, cum) 99.58% of Total
          .          .     42:func parseRegexp(line string) (Order, error) {
-         .   666.05MB     43:	m := lineRE.FindStringSubmatch(line)
+         .   720.06MB     43:	m := lineRE.FindStringSubmatch(line)
          .          .     44:	if m == nil {
          .          .     45:		return Order{}, fmt.Errorf("%w：%q", errBadLine, line)
          .          .     46:	}
-         .          .     47:	qty, _ := strconv.Atoi(m[3])
-         .          .     48:	price, _ := strconv.Atoi(m[4])</code></pre>
+         .          .     47:	qty, err1 := strconv.Atoi(m[3]) // \d+ 擋掉了正負號，但擋不住太長、放不進 int 的數字
+         .          .     48:	price, err2 := strconv.Atoi(m[4])</code></pre>
     <ul class="notes">
-      <li>整個 benchmark 配置的 669 MB，幾乎全部來自第 43 行的 FindStringSubmatch：每一行都要配置一個存放比對結果的 slice，比對本身也要配置工作用的記憶體。Cut 版直接回傳原本字串的子字串，完全不用配置。</li>
+      <li>整個 benchmark 配置的 723 MB，幾乎全部來自第 43 行的 FindStringSubmatch：每一行都要配置一個存放比對結果的 slice，比對本身也要配置工作用的記憶體。Cut 版直接回傳原本字串的子字串，完全不用配置。</li>
       <li><strong>alloc_space</strong> 是「總共配置過多少」，找出讓 GC 忙碌的地方。<strong>inuse_space</strong>（預設）是「profile 當下還活著多少」，找出記憶體為什麼一直漲。</li>
       <li>regexp 很方便，但在每秒處理大量資料的熱點上，固定格式的解析用 strings 的函式就夠了（<a href="24-text.html#pit-regexp-overuse">24 章</a>）。</li>
       <li>不是 benchmark 的程式：一般的程式用 runtime/pprof 的 <code>StartCPUProfile</code>、<code>WriteHeapProfile</code> 寫出 profile；HTTP 服務 import net/http/pprof，就能從 /debug/pprof/ 隨時抓正在執行的服務的 profile（這個端點不要對外公開）。</li>
@@ -563,17 +576,17 @@ ok  	github.com/xinqilin/GO-Playground/chapters/31-performance	2.504s</code></pr
     <p>GC 什麼時候開始，由 <strong>GOGC</strong> 決定。預設是 100：上一次 GC 後存活 4 MB，heap 長到 8 MB 時就再做一次。設定 <code>GODEBUG=gctrace=1</code>，每次 GC 都會印出一行：</p>
     <pre class="shell"><code>GODEBUG=gctrace=1 go test -run='^$' -bench='Revenue/regexp' -benchtime=300x ./chapters/31-performance 2&gt;&amp;1 | grep '^gc ' | tail -2</code></pre>
     <p class="label">輸出</p>
-    <pre class="out"><code>gc 15 @0.079s 0%: 0.017+0.18+0.019 ms clock, 0.17+0/0.080/0.014+0.19 ms cpu, 3-&gt;3-&gt;0 MB, 4 MB goal, 0 MB stacks, 0 MB globals, 10 P
-gc 16 @0.085s 0%: 0.026+0.11+0.035 ms clock, 0.26+0.007/0.064/0.043+0.35 ms cpu, 3-&gt;3-&gt;0 MB, 4 MB goal, 0 MB stacks, 0 MB globals, 10 P</code></pre>
+    <pre class="out"><code>gc 15 @0.076s 0%: 0.018+0.19+0.012 ms clock, 0.18+0.034/0.10/0.003+0.12 ms cpu, 3-&gt;3-&gt;0 MB, 4 MB goal, 0 MB stacks, 0 MB globals, 10 P
+gc 16 @0.082s 0%: 0.045+0.14+0.009 ms clock, 0.45+0.007/0.086/0.041+0.098 ms cpu, 3-&gt;3-&gt;0 MB, 4 MB goal, 0 MB stacks, 0 MB globals, 10 P</code></pre>
     <ul class="notes">
-      <li><code>gc 16 @0.085s 0%</code>：第 16 次 GC，程式開始後 0.085 秒，GC 到目前為止用掉的 CPU 比例。</li>
+      <li><code>gc 16 @0.082s 0%</code>：第 16 次 GC，程式開始後 0.082 秒，GC 到目前為止用掉的 CPU 比例。</li>
       <li><code>3-&gt;3-&gt;0 MB, 4 MB goal</code>：GC 開始時 heap 3 MB，結束時 3 MB，其中還活著的只有不到 1 MB，下一次的目標是 4 MB（4 MB 是最小的目標）。</li>
-      <li>regexp 版每一行都配置，heap 很快就到目標，0.085 秒就做了 16 次 GC。把 GOGC 調大，GC 次數就變少：</li>
+      <li>regexp 版每一行都配置，heap 很快就到目標，0.082 秒就做了 16 次 GC。把 GOGC 調大，GC 次數就變少：</li>
     </ul>
     <pre class="shell"><code>GODEBUG=gctrace=1 go test -run='^$' -bench='Revenue/regexp' -benchtime=300x ./chapters/31-performance 2&gt;&amp;1 | grep -c '^gc '
 GOGC=400 GODEBUG=gctrace=1 go test -run='^$' -bench='Revenue/regexp' -benchtime=300x ./chapters/31-performance 2&gt;&amp;1 | grep -c '^gc '</code></pre>
     <p class="label">輸出</p>
-    <pre class="out"><code>40
+    <pre class="out"><code>39
 9</code></pre>
     <ul class="notes">
       <li><strong>GOGC</strong>：越大，GC 越少、記憶體用得越多。<code>GOGC=off</code> 完全關掉，只適合很短的批次程式。</li>

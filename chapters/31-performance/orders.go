@@ -44,22 +44,37 @@ func parseRegexp(line string) (Order, error) {
 	if m == nil {
 		return Order{}, fmt.Errorf("%w：%q", errBadLine, line)
 	}
-	qty, _ := strconv.Atoi(m[3])
-	price, _ := strconv.Atoi(m[4])
+	qty, err1 := strconv.Atoi(m[3]) // \d+ 擋掉了正負號，但擋不住太長、放不進 int 的數字
+	price, err2 := strconv.Atoi(m[4])
+	if err1 != nil || err2 != nil {
+		return Order{}, fmt.Errorf("%w：%q", errBadLine, line)
+	}
 	return Order{Time: m[1], Dish: m[2], Qty: qty, Price: price}, nil
 }
 
 // parseCut 用 strings.Cut 一段一段切：子字串和原本的字串共用記憶體，不用另外配置。
+// regexp 檢查的每一條規則都要自己再寫一次，少寫一條，兩個版本的結果就不一樣了。
 func parseCut(line string) (Order, error) {
 	t, rest, ok1 := strings.Cut(line, ",")
 	dish, rest, ok2 := strings.Cut(rest, ",")
 	q, p, ok3 := strings.Cut(rest, ",")
 	qty, err1 := strconv.Atoi(q)
 	price, err2 := strconv.Atoi(p)
-	if !ok1 || !ok2 || !ok3 || err1 != nil || err2 != nil || len(t) != 5 || dish == "" {
+	clock := len(t) == 5 && t[2] == ':' && digits(t[:2]) && digits(t[3:])
+	if !ok1 || !ok2 || !ok3 || !clock || dish == "" || !digits(q) || !digits(p) || err1 != nil || err2 != nil {
 		return Order{}, fmt.Errorf("%w：%q", errBadLine, line)
 	}
 	return Order{Time: t, Dish: dish, Qty: qty, Price: price}, nil
+}
+
+// digits 回傳 s 是不是由一個以上的 0–9 組成。Atoi 還接受 + 和 - 號，regexp 的 \d 不接受。
+func digits(s string) bool {
+	for i := range len(s) {
+		if s[i] < '0' || s[i] > '9' {
+			return false
+		}
+	}
+	return s != ""
 }
 
 // revenue 算出每道菜的營業額，parse 決定用哪一種方法解析每一行。
