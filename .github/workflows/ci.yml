@@ -16,6 +16,7 @@ jobs:
       - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
+          cache-dependency-path: chapters/28-database/go.sum
       - name: gofmt
         run: |
           out=$(gofmt -l .)
@@ -40,3 +41,15 @@ jobs:
           fi
       - name: 頁面與程式碼同步
         run: go run ./tools/docsync -check
+      - name: 資料庫那一章（獨立的 module）
+        working-directory: chapters/28-database
+        run: |
+          go vet ./...
+          go vet -tags solution ./...
+          go test -race -tags solution ./...
+          passed=$( (go test -json ./exercises/... || true) | jq -r 'select(.Action=="pass" and .Test!=null and (.Test|contains("/")|not)) | .Package+" "+.Test')
+          if [ -n "$passed" ]; then
+            echo "這些測試在還沒作答時就通過了，測試寫得太鬆："
+            echo "$passed"
+            exit 1
+          fi

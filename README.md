@@ -79,6 +79,7 @@ go test -race -tags solution ./...          # 全部測試，練習題改用參�
 | 25 | 日誌 | [看圖](https://bill-lin.dev/GO-Playground/25-logging.html) | [chapters/25-logging](chapters/25-logging) |
 | 26 | HTTP 服務 | [看圖](https://bill-lin.dev/GO-Playground/26-http.html) | [chapters/26-http](chapters/26-http) |
 | 27 | HTTP 用戶端 | [看圖](https://bill-lin.dev/GO-Playground/27-http-client.html) | [chapters/27-http-client](chapters/27-http-client) |
+| 28 | 資料庫 | [看圖](https://bill-lin.dev/GO-Playground/28-database.html) | [chapters/28-database](chapters/28-database) |
 
 ### Part 5 工程實務
 

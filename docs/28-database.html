@@ -1,0 +1,1098 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>資料庫｜Go 圖解手冊</title>
+<meta name="description" content="用 database/sql 和純 Go 的 SQLite driver 操作資料庫：開啟與連線池、Exec 與 Query、用參數防止 SQL injection、NULL、交易、context 逾時、migration，以及用真的資料庫檔案測試，附可執行的練習題。">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<header class="site">
+  <a href="index.html">Go 圖解手冊</a>
+  <span class="count">28 / 33</span>
+</header>
+
+<main class="page long">
+  <header class="hero">
+    <div class="num" aria-hidden="true">28</div>
+    <p class="eyebrow">Part 4 · 標準庫實戰 · 第 28 章</p>
+    <h1>資料庫</h1>
+    <p class="analogy">倉庫和管理員：你不能自己進倉庫翻箱子，要填單子交給管理員。貨名寫在單子的格子裡，管理員只會把它當成貨名，不會當成指令；扣庫存和記出貨要成套做，做到一半出錯就全部還原；管理員只有幾個，借走了不還，後面的人只能排隊。</p>
+  </header>
+
+  <nav class="toc-inline" aria-labelledby="toc-title">
+    <p class="label" id="toc-title">本章內容</p>
+    <ol>
+      <li><a href="#goals">本章你會學到</a></li>
+      <li><a href="#open">database/sql 與 driver</a></li>
+      <li><a href="#exec">寫入：Exec</a></li>
+      <li><a href="#query">讀取：Query 與 QueryRow</a></li>
+      <li><a href="#injection">參數與 SQL injection</a></li>
+      <li><a href="#null">NULL</a></li>
+      <li><a href="#tx">交易</a></li>
+      <li><a href="#pool">連線池與 context</a></li>
+      <li><a href="#migrate">migration 與測試</a></li>
+      <li><a href="#pitfalls">常見錯誤</a></li>
+      <li><a href="#java">從 Java 來的你</a></li>
+      <li><a href="#exercises">練習</a></li>
+      <li><a href="#recap">重點回顧</a></li>
+      <li><a href="#further">延伸閱讀</a></li>
+    </ol>
+  </nav>
+
+  <section aria-labelledby="goals">
+    <h2 id="goals">本章你會學到</h2>
+    <ul class="notes">
+      <li>database/sql 和 driver 的分工；*sql.DB 是連線池，不是一條連線。</li>
+      <li>ExecContext、QueryContext、QueryRowContext，以及 Result、Rows 的正確用法。</li>
+      <li>一律用參數（?）帶入值，從根本擋掉 SQL injection；欄位名稱用白名單。</li>
+      <li>NULL 怎麼讀、怎麼寫：sql.Null[T]、COALESCE。</li>
+      <li>交易：defer Rollback、Commit，以及並發時怎麼確保不會超賣。</li>
+      <li>連線池的上限、忘了關 rows 的後果，以及用 context 取消慢查詢。</li>
+      <li>用 embed 和 PRAGMA user_version 寫一個簡單的 migration；用真的資料庫檔案測試。</li>
+    </ul>
+    <p>先備：<a href="11-errors.html">11 章的錯誤處理</a>、<a href="18-context.html">18 章的 context</a>、<a href="20-files.html#fs">20 章的 embed</a>。SQL 本身（SELECT、INSERT、UPDATE、JOIN）只會用到基本的語法，這一章的重點是 Go 這一側。</p>
+    <p>這一章用 SQLite：整個資料庫就是一個檔案，不用另外安裝伺服器。driver 用 <code>modernc.org/sqlite</code>，它是純 Go 寫的，不需要 C 編譯器，Windows 也能直接用。因為它是第三方套件，這一章是一個獨立的 module，有自己的 go.mod（<a href="29-packages-modules.html">package 與 module</a> 那一章會解釋），所以指令要在它的目錄裡跑：</p>
+    <pre class="shell"><code>go -C chapters/28-database run .          <span class="c"># -C 先切換到那個目錄再執行</span>
+cd chapters/28-database &amp;&amp; go test ./...  <span class="c"># 或是先 cd 進去</span></code></pre>
+  </section>
+
+  <section aria-labelledby="open">
+    <h2 id="open">1. database/sql 與 driver</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 220" role="img" aria-label="你的程式只呼叫標準庫的 database/sql。database/sql 管連線池、交易、把結果轉成 Go 的型別。下面一層是 driver，它知道怎麼和某一種資料庫溝通，例如 SQLite、MySQL、PostgreSQL。driver 用空白 import 註冊一個名字，sql.Open 用這個名字選 driver">
+        <title>database/sql 和 driver 的分工</title>
+        <rect class="soft" x="90" y="10" width="300" height="38" rx="8"/>
+        <text class="sm" x="240" y="34" text-anchor="middle">你的程式：只呼叫 database/sql</text>
+        <path class="wire" d="M240 48 V62"/>
+        <rect class="acc" x="90" y="62" width="300" height="56" rx="8"/>
+        <text class="sm mono" x="240" y="84" text-anchor="middle">database/sql（標準庫）</text>
+        <text class="sm" x="240" y="106" text-anchor="middle">連線池、交易、Scan 轉型別</text>
+        <path class="wire" d="M240 118 V132"/>
+        <rect class="soft" x="90" y="132" width="300" height="38" rx="8"/>
+        <text class="sm mono" x="240" y="156" text-anchor="middle">driver：modernc.org/sqlite</text>
+        <path class="wire" d="M240 170 V184"/>
+        <rect class="soft" x="160" y="184" width="160" height="30" rx="8"/>
+        <text class="sm mono" x="240" y="204" text-anchor="middle">bento.db</text>
+        <text class="sm mono" x="400" y="156">"sqlite"</text>
+      </svg>
+      <figcaption>換資料庫時，大部分的 Go 程式碼不用改，要改的是 driver、連線字串，以及各家不同的 SQL 語法。</figcaption>
+    </figure>
+    <p>標準庫的 <code>database/sql</code> 只定義介面，不認得任何一種資料庫。driver 套件在自己的 init 裡呼叫 <code>sql.Register("sqlite", …)</code> 註冊一個名字，程式用空白 import 讓 init 執行，再用 <code>sql.Open("sqlite", 連線字串)</code> 選它：</p>
+    <pre class="code" data-src="chapters/28-database/db.go#openDB"><code>func openDB(ctx context.Context, path string) (*sql.DB, error) {
+	// ? 後面底線開頭的參數由 driver 處理：開啟外鍵檢查、被鎖住時最多等 5 秒、
+	// 使用 WAL 模式（讀寫可以同時進行）、交易一開始就拿寫入鎖（第 6 節）。
+	dsn := path + "?_foreign_keys=1&amp;_busy_timeout=5000&amp;_journal_mode=WAL&amp;_txlock=immediate"
+	db, err := sql.Open("sqlite", dsn)
+	if err != nil {
+		return nil, err
+	}
+	db.SetMaxOpenConns(8)
+	db.SetMaxIdleConns(8)
+	db.SetConnMaxIdleTime(5 * time.Minute)
+
+	if err := db.PingContext(ctx); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("連不上資料庫：%w", err)
+	}
+	if err := migrate(ctx, db); err != nil {
+		db.Close()
+		return nil, err
+	}
+	return db, nil
+}</code></pre>
+    <pre class="code" data-src="chapters/28-database/db.go#openDemo"><code>func openDemo() {
+	ctx := context.Background()
+	dir, err := os.MkdirTemp("", "bento-*")
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	defer os.RemoveAll(dir)
+
+	db, err := openDB(ctx, filepath.Join(dir, "bento.db"))
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	defer db.Close()
+
+	var version int
+	if err := db.QueryRowContext(ctx, "PRAGMA user_version").Scan(&amp;version); err != nil {
+		fmt.Println(err)
+		return
+	}
+	tables, err := (&amp;store{db: db}).names(ctx, `SELECT name FROM sqlite_schema WHERE type = 'table' ORDER BY name`)
+	fmt.Printf("migration 版本：%d\n", version)
+	fmt.Printf("資料表：%v %v\n", tables, err)
+	fmt.Printf("連線池上限：%d\n", db.Stats().MaxOpenConnections)
+}</code></pre>
+    <pre class="out" data-example="chapters/28-database#Example_openDemo"><code>migration 版本：2
+資料表：[dishes orders] &lt;nil&gt;
+連線池上限：8</code></pre>
+    <ul class="notes">
+      <li><code>sql.Open</code> 不會真的連線，只檢查參數、準備好連線池。第一次需要連線時才連，所以開啟之後用 <code>PingContext</code> 確認連得上，有問題在啟動時就發現。</li>
+      <li><code>*sql.DB</code> 是一個連線池，可以被很多 goroutine 同時使用。整個程式開一個，程式結束時 Close；不要每個請求開一次。</li>
+      <li>連線字串的格式是 driver 自己定的。這裡 ? 後面底線開頭的參數，modernc.org/sqlite 會轉成 SQLite 的 PRAGMA 設定，例如 SQLite 預設不檢查外鍵，要自己打開。</li>
+      <li>openDB 開啟失敗時 Close 已經開的資源再回傳錯誤，呼叫的一方拿到錯誤就不用再收拾。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="exec">
+    <h2 id="exec">2. 寫入：Exec</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 200" role="img" aria-label="ExecContext 執行不回傳資料列的 SQL，例如 INSERT、UPDATE、DELETE，回傳 sql.Result。LastInsertId 是新增那一列的 id，RowsAffected 是改到幾列。資料庫的限制，例如 UNIQUE、CHECK、外鍵，違反時回傳錯誤">
+        <title>Exec 和 Result</title>
+        <rect class="acc" x="16" y="16" width="200" height="40" rx="8"/>
+        <text class="sm mono" x="116" y="41" text-anchor="middle">ExecContext</text>
+        <text class="sm" x="236" y="41">INSERT、UPDATE、DELETE</text>
+        <path class="wire" d="M116 56 V72 H60 V84"/>
+        <path class="wire" d="M116 72 H190 V84"/>
+        <path class="wire" d="M116 72 H372 V84"/>
+        <rect class="soft" x="16" y="84" width="96" height="56" rx="8"/>
+        <text class="sm mono" x="64" y="106" text-anchor="middle">LastInsertId</text>
+        <text class="sm" x="64" y="128" text-anchor="middle">新的 id</text>
+        <rect class="soft" x="126" y="84" width="128" height="56" rx="8"/>
+        <text class="sm mono" x="190" y="106" text-anchor="middle">RowsAffected</text>
+        <text class="sm" x="190" y="128" text-anchor="middle">改到幾列</text>
+        <rect class="hot" x="280" y="84" width="184" height="56" rx="8"/>
+        <text class="sm" x="372" y="106" text-anchor="middle">違反限制：error</text>
+        <text class="sm mono" x="372" y="128" text-anchor="middle">UNIQUE、CHECK、外鍵</text>
+        <text class="sm" x="240" y="172" text-anchor="middle">UPDATE 改到 0 列不是錯誤：要自己看 RowsAffected</text>
+      </svg>
+      <figcaption>資料表上的限制是最後一道防線：程式有 bug、有人直接改資料庫，壞資料一樣進不去。</figcaption>
+    </figure>
+    <p>不回傳資料列的 SQL 用 <code>ExecContext</code>。值用 ? 帶入（第 4 節說明為什麼），回傳的 <code>sql.Result</code> 告訴你新增的 id 和改到幾列。把所有的 SQL 集中在一個 store 型別裡，其他程式只看到「新增一道菜」這種方法：</p>
+    <pre class="code" data-src="chapters/28-database/store.go#ErrNotFound,Dish,store,isUnique,store.addDish,store.restock"><code>var (
+	ErrNotFound  = errors.New("找不到")
+	ErrDuplicate = errors.New("已經有了")
+	ErrSoldOut   = errors.New("賣完了")
+)
+
+type Dish struct {
+	ID    int64
+	Name  string
+	Price int
+	Stock int
+}
+
+type store struct {
+	db *sql.DB
+}
+
+func isUnique(err error) bool {
+	e, ok := errors.AsType[*sqlite.Error](err)
+	return ok &amp;&amp; e.Code() == sqlite3.SQLITE_CONSTRAINT_UNIQUE
+}
+
+func (s *store) addDish(ctx context.Context, name string, price, stock int) (int64, error) {
+	res, err := s.db.ExecContext(ctx,
+		`INSERT INTO dishes (name, price, stock) VALUES (?, ?, ?)`, name, price, stock)
+	if isUnique(err) {
+		return 0, fmt.Errorf("%s %w", name, ErrDuplicate)
+	}
+	if err != nil {
+		return 0, err
+	}
+	return res.LastInsertId()
+}
+
+func (s *store) restock(ctx context.Context, name string, n int) error {
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE dishes SET stock = stock + ? WHERE name = ?`, n, name)
+	if err != nil {
+		return err
+	}
+	changed, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if changed == 0 {
+		return fmt.Errorf("%s：%w", name, ErrNotFound)
+	}
+	return nil
+}</code></pre>
+    <pre class="code" data-src="chapters/28-database/demos.go#execDemo"><code>func execDemo() {
+	ctx := context.Background()
+	s, done := newDemoStore(false)
+	defer done()
+
+	for _, d := range []Dish{{Name: "滷肉飯", Price: 50, Stock: 20}, {Name: "排骨飯", Price: 90, Stock: 5}, {Name: "雞腿飯", Price: 100, Stock: 0}} {
+		id, err := s.addDish(ctx, d.Name, d.Price, d.Stock)
+		fmt.Println("新增", d.Name, "id =", id, err)
+	}
+
+	_, err := s.addDish(ctx, "排骨飯", 95, 3)
+	fmt.Println(err, errors.Is(err, ErrDuplicate))
+	_, err = s.addDish(ctx, "空氣便當", 0, 1)
+	fmt.Println(err)
+
+	fmt.Printf("補雞腿飯：%v\n", s.restock(ctx, "雞腿飯", 10))
+	fmt.Printf("補鰻魚飯：%v\n", s.restock(ctx, "鰻魚飯", 10))
+}</code></pre>
+    <pre class="out" data-example="chapters/28-database#Example_execDemo"><code>新增 滷肉飯 id = 1 &lt;nil&gt;
+新增 排骨飯 id = 2 &lt;nil&gt;
+新增 雞腿飯 id = 3 &lt;nil&gt;
+排骨飯 已經有了 true
+constraint failed: CHECK constraint failed: price &gt; 0 (275)
+補雞腿飯：&lt;nil&gt;
+補鰻魚飯：鰻魚飯：找不到</code></pre>
+    <ul class="notes">
+      <li>違反 UNIQUE 是「名稱重複」，呼叫的一方需要知道；store 把 driver 的錯誤（*sqlite.Error 和它的代碼）轉成自己的 ErrDuplicate。driver 的型別只出現在 isUnique 裡，換資料庫時只改這裡。</li>
+      <li>價格 0 這種錯誤是程式的 bug，不需要特別轉換，原樣回傳就好；呼叫的一方會記錄下來。</li>
+      <li>UPDATE 找不到符合的列，資料庫不會報錯，只是改到 0 列。restock 用 RowsAffected 判斷，轉成 ErrNotFound。</li>
+      <li>LastInsertId 不是每種資料庫都支援。PostgreSQL 的 driver 要用 <code>INSERT … RETURNING id</code> 搭配 QueryRow 拿新的 id。</li>
+      <li>每個方法的第一個參數都是 ctx，並使用 …Context 版本的方法：請求被取消時，查詢也跟著停（第 7 節）。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="query">
+    <h2 id="query">3. 讀取：Query 與 QueryRow</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 214" role="img" aria-label="QueryContext 回傳 Rows，它像一個游標：rows.Next 移到下一列，rows.Scan 把這一列的欄位依序放進變數，直到 Next 回傳 false。迴圈結束後檢查 rows.Err，看是讀完了還是中途出錯；defer rows.Close 把連線還回連線池。QueryRowContext 只讀一列，沒有資料時 Scan 回傳 sql.ErrNoRows">
+        <title>Rows 是一個游標</title>
+        <rect class="acc" x="16" y="16" width="150" height="38" rx="8"/>
+        <text class="sm mono" x="91" y="40" text-anchor="middle">QueryContext</text>
+        <path class="wire" d="M166 35 H186"/>
+        <rect class="soft" x="186" y="16" width="130" height="38" rx="8"/>
+        <text class="sm mono" x="251" y="40" text-anchor="middle">rows.Next()</text>
+        <path class="wire" d="M316 35 H336"/>
+        <rect class="soft" x="336" y="16" width="128" height="38" rx="8"/>
+        <text class="sm mono" x="400" y="40" text-anchor="middle">rows.Scan(…)</text>
+        <path class="wire dash" d="M400 54 V70 H251 V54"/>
+        <text class="sm" x="326" y="88" text-anchor="middle">每一列重複</text>
+        <rect class="soft" x="186" y="104" width="278" height="34" rx="8"/>
+        <text class="sm" x="325" y="126" text-anchor="middle">Next 是 false：檢查 rows.Err()</text>
+        <text class="sm mono t-hot" x="91" y="126" text-anchor="middle">defer rows.Close()</text>
+        <rect class="acc" x="16" y="160" width="190" height="38" rx="8"/>
+        <text class="sm mono" x="111" y="184" text-anchor="middle">QueryRowContext</text>
+        <text class="sm" x="222" y="184">只要一列；沒有時 sql.ErrNoRows</text>
+      </svg>
+      <figcaption>Rows 開著的時候，它佔著一條連線。讀完、出錯、提早 return 都要關掉，defer 讓每一條路都會關。</figcaption>
+    </figure>
+    <p>回傳多列用 <code>QueryContext</code>，然後用 Next、Scan 一列一列讀；只要一列用 <code>QueryRowContext</code>，它的錯誤延到 Scan 才回傳：</p>
+    <pre class="code" data-src="chapters/28-database/store.go#store.findDish,store.listDishes"><code>func (s *store) findDish(ctx context.Context, name string) (Dish, error) {
+	var d Dish
+	err := s.db.QueryRowContext(ctx,
+		`SELECT id, name, price, stock FROM dishes WHERE name = ?`, name,
+	).Scan(&amp;d.ID, &amp;d.Name, &amp;d.Price, &amp;d.Stock)
+	if errors.Is(err, sql.ErrNoRows) {
+		return Dish{}, fmt.Errorf("%s：%w", name, ErrNotFound)
+	}
+	return d, err
+}
+
+func (s *store) listDishes(ctx context.Context, maxPrice int) ([]Dish, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT id, name, price, stock FROM dishes WHERE price &lt;= ? ORDER BY price, id`, maxPrice)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var dishes []Dish
+	for rows.Next() {
+		var d Dish
+		if err := rows.Scan(&amp;d.ID, &amp;d.Name, &amp;d.Price, &amp;d.Stock); err != nil {
+			return nil, err
+		}
+		dishes = append(dishes, d)
+	}
+	return dishes, rows.Err()
+}</code></pre>
+    <pre class="code" data-src="chapters/28-database/demos.go#queryDemo"><code>func queryDemo() {
+	ctx := context.Background()
+	s, done := newDemoStore(true)
+	defer done()
+
+	dishes, err := s.listDishes(ctx, 90)
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	for _, d := range dishes {
+		fmt.Printf("%d %s %d 元，剩 %d 份\n", d.ID, d.Name, d.Price, d.Stock)
+	}
+
+	d, err := s.findDish(ctx, "雞腿飯")
+	fmt.Printf("%+v %v\n", d, err)
+	_, err = s.findDish(ctx, "鰻魚飯")
+	fmt.Println(err, errors.Is(err, ErrNotFound))
+}</code></pre>
+    <pre class="out" data-example="chapters/28-database#Example_queryDemo"><code>1 滷肉飯 50 元，剩 20 份
+2 排骨飯 90 元，剩 5 份
+{ID:3 Name:雞腿飯 Price:100 Stock:0} &lt;nil&gt;
+鰻魚飯：找不到 true</code></pre>
+    <ul class="notes">
+      <li><strong>Scan 的順序</strong>和 SELECT 的欄位順序一一對應，個數也要一樣。所以永遠寫出欄位名稱，不要 <code>SELECT *</code>：資料表加了一個欄位，Scan 就壞了。</li>
+      <li><strong>rows.Err()</strong>：Next 回傳 false 可能是讀完了，也可能是讀到一半連線斷了。沒檢查的話，只讀到一半的結果會被當成完整的。</li>
+      <li><strong>sql.ErrNoRows</strong> 只會從 QueryRow 的 Scan 回傳。查不到常常是正常情況，store 把它轉成自己的 ErrNotFound，呼叫的一方用 errors.Is 判斷（<a href="11-errors.html#sentinel">11 章</a>）。Query 查不到則是迴圈一次都沒有跑，不是錯誤。</li>
+      <li>ORDER BY 寫清楚。沒有 ORDER BY 時，資料庫回傳的順序沒有保證，今天剛好是新增的順序，加了索引之後可能就變了。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="injection">
+    <h2 id="injection">4. 參數與 SQL injection</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 210" role="img" aria-label="用字串相加時，使用者輸入的 x' OR '1'='1 變成 SQL 的一部分，WHERE 條件永遠成立，查出全部的資料。用問號參數時，SQL 和值分開送給資料庫，輸入永遠只是一個值，只會去找名稱剛好是這串文字的菜">
+        <title>拼字串和參數</title>
+        <text class="sm bold" x="16" y="24">輸入：x' OR '1'='1</text>
+        <rect class="hot" x="16" y="38" width="448" height="62" rx="8"/>
+        <text class="sm" x="30" y="60">拼字串：輸入變成 SQL 的一部分</text>
+        <text class="sm mono" x="30" y="86">WHERE name = 'x' OR '1'='1'</text>
+        <text class="sm t-hot" x="450" y="86" text-anchor="end">全部查出來</text>
+        <rect class="acc" x="16" y="116" width="448" height="62" rx="8"/>
+        <text class="sm" x="30" y="138">參數：SQL 和值分開送</text>
+        <text class="sm mono" x="30" y="164">WHERE name = ?   值：x' OR '1'='1</text>
+        <text class="sm t-acc" x="450" y="164" text-anchor="end">0 筆</text>
+        <text class="sm" x="240" y="202" text-anchor="middle">參數只能放「值」；欄位名稱、ORDER BY 要用白名單</text>
+      </svg>
+      <figcaption>資料庫先把 SQL 解析好，再把參數放進去，參數裡的引號、分號都只是文字。這是唯一可靠的做法，自己跳脫引號遲早會漏。</figcaption>
+    </figure>
+    <p>SQL injection 是最常見的資料庫漏洞：程式把使用者的輸入拼進 SQL，輸入就能改變 SQL 的意思。比較兩種寫法：</p>
+    <pre class="code" data-src="chapters/28-database/store.go#store.names"><code>func (s *store) names(ctx context.Context, query string, args ...any) ([]string, error) {
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&amp;name); err != nil {
+			return nil, err
+		}
+		out = append(out, name)
+	}
+	return out, rows.Err()
+}</code></pre>
+    <pre class="code" data-src="chapters/28-database/demos.go#store.searchUnsafe,store.search,sortColumns,store.dishNamesBy,injectionDemo"><code>func (s *store) searchUnsafe(ctx context.Context, name string) ([]string, error) {
+	return s.names(ctx, "SELECT name FROM dishes WHERE name = '"+name+"'")
+}
+
+func (s *store) search(ctx context.Context, name string) ([]string, error) {
+	return s.names(ctx, "SELECT name FROM dishes WHERE name = ?", name)
+}
+
+var sortColumns = map[string]string{
+	"price": "price, id",
+	"name":  "name",
+	"stock": "stock DESC, id",
+}
+
+func (s *store) dishNamesBy(ctx context.Context, sort string) ([]string, error) {
+	order, ok := sortColumns[sort]
+	if !ok {
+		return nil, fmt.Errorf("不能用 %q 排序", sort)
+	}
+	return s.names(ctx, "SELECT name FROM dishes ORDER BY "+order)
+}
+
+func injectionDemo() {
+	ctx := context.Background()
+	s, done := newDemoStore(true)
+	defer done()
+
+	for _, input := range []string{"排骨飯", "x' OR '1'='1", "阿嬤's 滷肉"} {
+		got, err := s.searchUnsafe(ctx, input)
+		fmt.Printf("拼字串 %q → %v %v\n", input, got, err)
+		got, err = s.search(ctx, input)
+		fmt.Printf("用 ?   %q → %v %v\n", input, got, err)
+	}
+
+	for _, sort := range []string{"stock", "price; DROP TABLE dishes"} {
+		got, err := s.dishNamesBy(ctx, sort)
+		fmt.Println("排序", sort, "→", got, err)
+	}
+}</code></pre>
+    <pre class="out" data-example="chapters/28-database#Example_injectionDemo"><code>拼字串 "排骨飯" → [排骨飯] &lt;nil&gt;
+用 ?   "排骨飯" → [排骨飯] &lt;nil&gt;
+拼字串 "x' OR '1'='1" → [排骨飯 滷肉飯 雞腿飯] &lt;nil&gt;
+用 ?   "x' OR '1'='1" → [] &lt;nil&gt;
+拼字串 "阿嬤's 滷肉" → [] SQL logic error: near "s": syntax error (1)
+用 ?   "阿嬤's 滷肉" → [] &lt;nil&gt;
+排序 stock → [滷肉飯 排骨飯 雞腿飯] &lt;nil&gt;
+排序 price; DROP TABLE dishes → [] 不能用 "price; DROP TABLE dishes" 排序</code></pre>
+    <ul class="notes">
+      <li>拼字串的版本，一般的輸入看起來完全正常，測試也會過。輸入裡有單引號時，客人的名字「阿嬤's 滷肉」讓 SQL 壞掉；攻擊者的輸入則讓它查出所有資料，甚至改資料。</li>
+      <li>用 ? 的版本，三種輸入都只是要找的名稱。不管輸入是什麼，都不需要額外處理。</li>
+      <li>參數的寫法各家不同：SQLite、MySQL 用 <code>?</code>，PostgreSQL 用 <code>$1</code>、<code>$2</code>。</li>
+      <li>參數只能代替「值」，不能代替資料表名稱、欄位名稱、ASC/DESC。這些需要依輸入改變時，像 sortColumns 那樣只從固定的清單裡挑，清單外的一律拒絕。</li>
+      <li>LIKE 的 <code>%</code> 和 <code>_</code> 是萬用字元。用 ? 帶入 <code>"%" + 輸入 + "%"</code> 不會被 injection，但使用者輸入的 % 也會被當成萬用字元。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="null">
+    <h2 id="null">5. NULL</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 196" role="img" aria-label="資料庫的 NULL 表示沒有值，和空字串、0 不一樣。Go 的 string 沒有辦法表示「沒有值」，所以 NULL 不能 Scan 進 string。可以 Scan 進 sql.Null[string]，它有 V 和 Valid 兩個欄位；也可以用指標，或在 SQL 裡用 COALESCE 換成預設值">
+        <title>NULL 不是空字串</title>
+        <rect class="soft" x="16" y="16" width="140" height="56" rx="8"/>
+        <text class="sm mono" x="86" y="40" text-anchor="middle">'不要辣'</text>
+        <text class="sm" x="86" y="62" text-anchor="middle">有備註</text>
+        <rect class="soft" x="170" y="16" width="140" height="56" rx="8"/>
+        <text class="sm mono" x="240" y="40" text-anchor="middle">''</text>
+        <text class="sm" x="240" y="62" text-anchor="middle">備註是空的</text>
+        <rect class="hot" x="324" y="16" width="140" height="56" rx="8"/>
+        <text class="sm mono" x="394" y="40" text-anchor="middle">NULL</text>
+        <text class="sm" x="394" y="62" text-anchor="middle">根本沒寫</text>
+        <text class="sm" x="16" y="104">讀進 Go：</text>
+        <text class="sm mono t-hot" x="30" y="128">string</text>
+        <text class="sm" x="184" y="128">NULL 放不進去：Scan 回傳錯誤</text>
+        <text class="sm mono t-acc" x="30" y="152">sql.Null[string]</text>
+        <text class="sm mono" x="184" y="152">{V: "", Valid: false}</text>
+        <text class="sm mono t-acc" x="30" y="176">COALESCE(note, '')</text>
+        <text class="sm" x="184" y="176">在 SQL 裡先換成預設值</text>
+      </svg>
+      <figcaption>Go 的每個型別都有零值，沒有「沒有值」這種狀態。可能是 NULL 的欄位，要用能多帶一個「有沒有值」的型別接。</figcaption>
+    </figure>
+    <p>訂單的備註可以不寫，資料表裡就是 NULL。直接 Scan 進 string 會失敗；Go 1.22 起標準庫有泛型的 <code>sql.Null[T]</code>，用 Valid 分辨「有值」和「NULL」：</p>
+    <pre class="code" data-src="chapters/28-database/store.go#Order"><code>type Order struct {
+	ID     int64
+	DishID int64
+	Qty    int
+	Total  int
+	Note   sql.Null[string]
+}</code></pre>
+    <pre class="code" data-src="chapters/28-database/demos.go#nullDemo"><code>func nullDemo() {
+	ctx := context.Background()
+	s, done := newDemoStore(true)
+	defer done()
+
+	_, err := s.db.ExecContext(ctx, `INSERT INTO orders (dish_id, qty, total, note)
+		VALUES (1, 1, 50, NULL), (2, 2, 180, '不要辣')`)
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+
+	var note string
+	err = s.db.QueryRowContext(ctx, `SELECT note FROM orders WHERE id = 1`).Scan(&amp;note)
+	fmt.Printf("Scan 進 string：%v\n", err)
+
+	for id := 1; id &lt;= 2; id++ {
+		var o Order
+		err := s.db.QueryRowContext(ctx,
+			`SELECT id, note FROM orders WHERE id = ?`, id).Scan(&amp;o.ID, &amp;o.Note)
+		if err != nil {
+			fmt.Println(err)
+			return
+		}
+		if o.Note.Valid {
+			fmt.Printf("訂單 %d 的備註：%s\n", o.ID, o.Note.V)
+		} else {
+			fmt.Printf("訂單 %d 沒有備註\n", o.ID)
+		}
+	}
+
+	notes, err := s.names(ctx, `SELECT COALESCE(note, '（無）') FROM orders ORDER BY id`)
+	fmt.Printf("用 COALESCE：%v %v\n", notes, err)
+}</code></pre>
+    <pre class="out" data-example="chapters/28-database#Example_nullDemo"><code>Scan 進 string：sql: Scan error on column index 0, name "note": converting NULL to string is unsupported
+訂單 1 沒有備註
+訂單 2 的備註：不要辣
+用 COALESCE：[（無） 不要辣] &lt;nil&gt;</code></pre>
+    <ul class="notes">
+      <li><strong>寫入 NULL</strong>：參數傳 Valid 是 false 的 sql.Null，或直接傳 nil。第 6 節的 placeOrder 沒有備註時就存 NULL。</li>
+      <li><strong>指標</strong>也可以：Scan 進 <code>*string</code> 型別的變數，NULL 會變成 nil。在 JSON 裡 nil 會變成 null，有時比 sql.Null 方便（<a href="05-pointers.html">05 章</a>）。</li>
+      <li>Go 1.22 以前的程式會看到 <code>sql.NullString</code>、<code>sql.NullInt64</code> 這些各別的型別，意思一樣。</li>
+      <li>設計資料表時，能用 NOT NULL 加上預設值的欄位就這樣做，程式就不用到處處理 NULL。只有「沒有值」本身有意義的欄位才允許 NULL，例如 ISBN 不明的舊書（練習 1）。</li>
+      <li>NULL 在 SQL 裡也很特別：<code>note = NULL</code> 永遠不成立，要寫 <code>note IS NULL</code>；UNIQUE 允許很多列都是 NULL。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="tx">
+    <h2 id="tx">6. 交易</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 210" role="img" aria-label="BeginTx 開始一個交易，之後的查詢都用 tx 執行：檢查庫存、扣庫存、新增訂單。全部成功就 Commit，三件事一起生效；中途任何一步出錯就 return，defer 的 Rollback 把已經做的全部復原。Commit 之後再呼叫 Rollback 不會有作用">
+        <title>交易：全部生效或全部復原</title>
+        <rect class="acc" x="16" y="16" width="120" height="38" rx="8"/>
+        <text class="sm mono" x="76" y="40" text-anchor="middle">BeginTx</text>
+        <path class="wire" d="M136 35 H150"/>
+        <rect class="soft" x="150" y="16" width="100" height="38" rx="8"/>
+        <text class="sm" x="200" y="40" text-anchor="middle">查庫存</text>
+        <path class="wire" d="M250 35 H264"/>
+        <rect class="soft" x="264" y="16" width="100" height="38" rx="8"/>
+        <text class="sm" x="314" y="40" text-anchor="middle">扣庫存</text>
+        <path class="wire" d="M364 35 H378"/>
+        <rect class="soft" x="378" y="16" width="86" height="38" rx="8"/>
+        <text class="sm" x="421" y="40" text-anchor="middle">新增訂單</text>
+        <path class="wire" d="M421 54 V82"/>
+        <path class="tip" d="M421 94 L415 82 L427 82 Z"/>
+        <rect class="acc" x="364" y="94" width="100" height="38" rx="8"/>
+        <text class="sm mono" x="414" y="118" text-anchor="middle">Commit</text>
+        <text class="sm" x="414" y="152" text-anchor="middle">三件事一起生效</text>
+        <path class="wire dash" d="M200 54 V112 H170"/>
+        <path class="wire dash" d="M314 54 V112 H170"/>
+        <rect class="hot" x="16" y="94" width="154" height="38" rx="8"/>
+        <text class="sm mono" x="93" y="118" text-anchor="middle">defer Rollback</text>
+        <text class="sm" x="93" y="152" text-anchor="middle">中途出錯：全部復原</text>
+        <text class="sm" x="240" y="196" text-anchor="middle">失敗的時候，不會只扣了庫存卻沒有訂單</text>
+      </svg>
+      <figcaption>Commit 之前，交易做的改變只有它自己看得到；Rollback 之後就像什麼都沒發生。</figcaption>
+    </figure>
+    <p>下單要做三件事：確認庫存、扣庫存、新增訂單。扣了庫存之後新增訂單失敗，就會少一份便當卻沒有訂單。把它們放進同一個交易，要嘛全部生效，要嘛全部復原：</p>
+    <pre class="code" data-src="chapters/28-database/store.go#store.placeOrder"><code>func (s *store) placeOrder(ctx context.Context, dish string, qty int, note string) (Order, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return Order{}, err
+	}
+	defer tx.Rollback() // 中途 return 時復原；Commit 之後呼叫則什麼都不做
+
+	var id int64
+	var price, stock int
+	err = tx.QueryRowContext(ctx,
+		`SELECT id, price, stock FROM dishes WHERE name = ?`, dish).Scan(&amp;id, &amp;price, &amp;stock)
+	if errors.Is(err, sql.ErrNoRows) {
+		return Order{}, fmt.Errorf("%s：%w", dish, ErrNotFound)
+	}
+	if err != nil {
+		return Order{}, err
+	}
+	if stock &lt; qty {
+		return Order{}, fmt.Errorf("%s %w，剩 %d 份", dish, ErrSoldOut, stock)
+	}
+
+	if _, err := tx.ExecContext(ctx,
+		`UPDATE dishes SET stock = stock - ? WHERE id = ?`, qty, id); err != nil {
+		return Order{}, err
+	}
+	o := Order{DishID: id, Qty: qty, Total: price * qty, Note: sql.Null[string]{V: note, Valid: note != ""}}
+	res, err := tx.ExecContext(ctx,
+		`INSERT INTO orders (dish_id, qty, total, note) VALUES (?, ?, ?, ?)`, o.DishID, o.Qty, o.Total, o.Note)
+	if err != nil {
+		return Order{}, err
+	}
+	if o.ID, err = res.LastInsertId(); err != nil {
+		return Order{}, err
+	}
+	return o, tx.Commit()
+}</code></pre>
+    <pre class="code" data-src="chapters/28-database/demos.go#txDemo"><code>func txDemo() {
+	ctx := context.Background()
+	s, done := newDemoStore(true)
+	defer done()
+
+	o, err := s.placeOrder(ctx, "排骨飯", 2, "不要辣")
+	fmt.Printf("%+v %v\n", o, err)
+	_, err = s.placeOrder(ctx, "排骨飯", 5, "")
+	fmt.Println(err, errors.Is(err, ErrSoldOut))
+	_, err = s.placeOrder(ctx, "鰻魚飯", 1, "")
+	fmt.Println(err)
+
+	d, _ := s.findDish(ctx, "排骨飯")
+	var orders int
+	s.db.QueryRowContext(ctx, `SELECT count(*) FROM orders`).Scan(&amp;orders)
+	fmt.Printf("排骨飯剩 %d 份，共 %d 筆訂單\n", d.Stock, orders)
+}</code></pre>
+    <pre class="out" data-example="chapters/28-database#Example_txDemo"><code>{ID:1 DishID:2 Qty:2 Total:180 Note:{V:不要辣 Valid:true}} &lt;nil&gt;
+排骨飯 賣完了，剩 3 份 true
+鰻魚飯：找不到
+排骨飯剩 3 份，共 1 筆訂單</code></pre>
+    <ul class="notes">
+      <li><strong>defer tx.Rollback()</strong> 寫在 BeginTx 成功之後。任何一條 return 的路都會復原；成功時先 Commit，之後的 Rollback 什麼都不做（它回傳的 ErrTxDone 忽略即可）。</li>
+      <li>交易裡的查詢一定要用 <code>tx</code> 的方法。不小心用了 <code>s.db</code>，那個查詢會從連線池拿另一條連線，不在這個交易裡：看不到交易裡還沒 Commit 的改變，失敗時也不會跟著復原。</li>
+      <li>交易要短：交易開著的時候，它鎖住的資料別人要等。不要在交易裡呼叫外部的 API 或等使用者輸入。</li>
+    </ul>
+    <p>同時有很多人下單時會怎樣？測試讓 20 個人同時搶 5 份排骨飯，用 -race 跑：</p>
+    <pre class="code" data-src="chapters/28-database/main_test.go#newTestStore,TestPlaceOrderConcurrent"><code>func newTestStore(t *testing.T) *store {
+	t.Helper()
+	db, err := openDB(t.Context(), filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { db.Close() })
+	return &amp;store{db: db}
+}
+
+func TestPlaceOrderConcurrent(t *testing.T) {
+	s := newTestStore(t)
+	ctx := t.Context()
+	if _, err := s.addDish(ctx, "排骨飯", 90, 5); err != nil {
+		t.Fatal(err)
+	}
+
+	var ok, soldOut atomic.Int64
+	var wg sync.WaitGroup
+	for range 20 {
+		wg.Go(func() {
+			_, err := s.placeOrder(ctx, "排骨飯", 1, "")
+			switch {
+			case err == nil:
+				ok.Add(1)
+			case errors.Is(err, ErrSoldOut):
+				soldOut.Add(1)
+			default:
+				t.Errorf("非預期的錯誤：%v", err)
+			}
+		})
+	}
+	wg.Wait()
+
+	d, err := s.findDish(ctx, "排骨飯")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var orders int
+	if err := s.db.QueryRowContext(ctx, `SELECT count(*) FROM orders`).Scan(&amp;orders); err != nil {
+		t.Fatal(err)
+	}
+	if ok.Load() != 5 || soldOut.Load() != 15 || d.Stock != 0 || orders != 5 {
+		t.Errorf("成功 %d、賣完 %d、剩 %d 份、%d 筆訂單；want 5、15、0、5",
+			ok.Load(), soldOut.Load(), d.Stock, orders)
+	}
+}</code></pre>
+
+    <section class="deep" aria-labelledby="tx-deep">
+      <p class="tag">深入：第一次讀可以先跳過</p>
+      <h3 id="tx-deep">為什麼不會超賣：鎖與隔離等級</h3>
+      <p>placeOrder 先讀庫存再扣。如果兩個交易同時讀到「剩 1 份」，兩個都會扣，庫存就變成 -1。會不會發生，取決於資料庫怎麼處理同時進行的交易。</p>
+      <ul class="notes">
+        <li><strong>SQLite</strong> 同一時間只允許一個寫入的交易。openDB 的 <code>_txlock=immediate</code> 讓交易一開始就拿寫入鎖，其他交易在 BeginTx 排隊（最多等 busy_timeout 的 5 秒），輪到它們時已經看得到前一筆的結果。沒有這個設定時，交易先讀再寫，兩個交易可能都讀完了才搶寫入鎖，其中一個會直接收到「database is locked」。</li>
+        <li><strong>MySQL、PostgreSQL</strong> 允許很多交易同時寫，預設的隔離等級下，上面的「先讀再扣」會超賣。常見的做法有兩種：讀的時候加鎖（<code>SELECT … FOR UPDATE</code>），或把條件寫進 UPDATE：<code>UPDATE dishes SET stock = stock - ? WHERE id = ? AND stock &gt;= ?</code>，再看 RowsAffected 是不是 1。後者在每一種資料庫都成立。</li>
+        <li>dishes 資料表的 <code>CHECK (stock &gt;= 0)</code> 是最後一道防線：就算程式寫錯，庫存變成負數的 UPDATE 也會失敗，交易跟著復原。</li>
+        <li><code>BeginTx</code> 的第二個參數 <code>*sql.TxOptions</code> 可以指定隔離等級和唯讀，各家資料庫支援的不同。</li>
+      </ul>
+    </section>
+  </section>
+
+  <section aria-labelledby="pool">
+    <h2 id="pool">7. 連線池與 context</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 206" role="img" aria-label="連線池的上限是 1 條連線時：第一個查詢的 rows 沒有關，那條連線一直被佔著。第二個查詢要等連線池有空的連線，永遠等不到；有 context 的期限時，100 毫秒後放棄並回傳 context deadline exceeded。關掉 rows 之後，連線回到池子，查詢又能進行">
+        <title>借了不還的連線</title>
+        <rect class="soft" x="16" y="16" width="448" height="66" rx="10"/>
+        <text class="sm" x="30" y="38">連線池（上限 1 條）</text>
+        <rect class="hot" x="30" y="46" width="200" height="28" rx="6"/>
+        <text class="sm" x="130" y="65" text-anchor="middle">第 1 條：rows 沒關，佔著</text>
+        <rect class="soft" x="16" y="104" width="214" height="56" rx="8"/>
+        <text class="sm" x="123" y="126" text-anchor="middle">第二個查詢：排隊等</text>
+        <text class="sm mono" x="123" y="148" text-anchor="middle">WaitCount 1</text>
+        <path class="wire" d="M230 132 H250"/>
+        <path class="tip" d="M262 132 L250 126 L250 138 Z"/>
+        <rect class="hot" x="262" y="104" width="202" height="56" rx="8"/>
+        <text class="sm" x="363" y="126" text-anchor="middle">100ms 後放棄</text>
+        <text class="sm mono" x="363" y="148" text-anchor="middle">deadline exceeded</text>
+        <text class="sm" x="240" y="192" text-anchor="middle">沒有期限的話，第二個查詢會永遠卡住</text>
+      </svg>
+      <figcaption>連線池用光時，新的查詢不會報錯，只會等。所以連線外洩的症狀不是錯誤訊息，而是整個服務越來越慢、最後卡死。</figcaption>
+    </figure>
+    <p>*sql.DB 依需要開新連線，用完放回池子給下一個查詢。上限用 <code>SetMaxOpenConns</code> 設：資料庫能承受的連線數有限，好幾個程式共用同一個資料庫時更要設。為了看清楚，示範把上限縮成 1 條：</p>
+    <pre class="code" data-src="chapters/28-database/demos.go#poolDemo"><code>func poolDemo() {
+	ctx := context.Background()
+	s, done := newDemoStore(true)
+	defer done()
+	s.db.SetMaxOpenConns(1) // 示範用：連線池只有 1 條連線
+
+	rows, err := s.db.QueryContext(ctx, `SELECT name FROM dishes`)
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	// 忘了 rows.Close()：唯一的連線一直被佔著。
+
+	waitCtx, cancel := context.WithTimeout(ctx, 100*time.Millisecond)
+	defer cancel()
+	_, err = s.findDish(waitCtx, "排骨飯")
+	st := s.db.Stats()
+	fmt.Printf("下一個查詢：%v\n", err)
+	fmt.Printf("使用中 %d 條，等過 %d 次\n", st.InUse, st.WaitCount)
+
+	rows.Close()
+	_, err = s.findDish(ctx, "排骨飯")
+	fmt.Printf("關掉 rows 之後：%v\n", err)
+
+	slowCtx, cancel := context.WithTimeout(ctx, 100*time.Millisecond)
+	defer cancel()
+	var n int
+	err = s.db.QueryRowContext(slowCtx, `WITH RECURSIVE c(x) AS (
+		SELECT 1 UNION ALL SELECT x + 1 FROM c WHERE x &lt; 1000000000
+	) SELECT count(*) FROM c`).Scan(&amp;n)
+	fmt.Printf("數到十億：%v %v\n", err, errors.Is(err, context.DeadlineExceeded))
+}</code></pre>
+    <pre class="out" data-example="chapters/28-database#Example_poolDemo"><code>下一個查詢：context deadline exceeded
+使用中 1 條，等過 1 次
+關掉 rows 之後：&lt;nil&gt;
+數到十億：context deadline exceeded true</code></pre>
+    <ul class="notes">
+      <li>連線在 Exec 完成、QueryRow 的 Scan 完成、Rows 被關掉、交易 Commit 或 Rollback 之後才會回到池子。忘了任何一個，那條連線就借了不還。</li>
+      <li><code>db.Stats()</code> 回傳連線池的狀態：使用中幾條、閒置幾條、累計等了幾次、等了多久。放進監控，連線外洩在變成事故之前就看得到。</li>
+      <li>context 的期限到了，database/sql 會取消正在進行的查詢，modernc.org/sqlite 會中斷 SQLite 的執行。HTTP 服務裡把 <code>r.Context()</code> 一路傳下來，客人斷線時查詢也會停（<a href="26-http.html#request">26 章</a>）。</li>
+      <li>其他設定：<code>SetMaxIdleConns</code>（池子裡最多留幾條閒置的）、<code>SetConnMaxIdleTime</code> 和 <code>SetConnMaxLifetime</code>（多久換一條新的；資料庫或中間的防火牆會切斷太久的連線）。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="migrate">
+    <h2 id="migrate">8. migration 與測試</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 196" role="img" aria-label="migration 檔依照編號排列：001 建立 dishes，002 建立 orders。資料庫的 user_version 記錄已經跑到第幾個。程式啟動時，從 user_version 的下一個開始執行，每個檔案和版本號的更新放在同一個交易裡。新的資料庫從 0 跑到 2；已經是 2 的資料庫什麼都不做">
+        <title>migration 的版本號</title>
+        <rect class="soft" x="16" y="16" width="160" height="38" rx="8"/>
+        <text class="sm mono" x="96" y="40" text-anchor="middle">001_dishes.sql</text>
+        <rect class="soft" x="16" y="62" width="160" height="38" rx="8"/>
+        <text class="sm mono" x="96" y="86" text-anchor="middle">002_orders.sql</text>
+        <rect class="soft" x="16" y="108" width="160" height="38" rx="8"/>
+        <text class="sm mono" x="96" y="132" text-anchor="middle">003_….sql</text>
+        <text class="sm" x="96" y="170" text-anchor="middle">之後只加新檔案</text>
+        <rect class="acc" x="240" y="16" width="224" height="56" rx="8"/>
+        <text class="sm" x="352" y="38" text-anchor="middle">新的資料庫：user_version 0</text>
+        <text class="sm" x="352" y="60" text-anchor="middle">跑 001、002 → 版本 2</text>
+        <rect class="soft" x="240" y="90" width="224" height="56" rx="8"/>
+        <text class="sm" x="352" y="112" text-anchor="middle">已經是版本 2</text>
+        <text class="sm" x="352" y="134" text-anchor="middle">什麼都不做</text>
+        <path class="wire" d="M176 35 H240"/>
+        <path class="wire" d="M176 81 H220 V44 H240"/>
+      </svg>
+      <figcaption>資料表的結構也是程式碼，要跟著版本走：每一次修改是一個新的檔案，已經在正式環境跑過的檔案就不再改。</figcaption>
+    </figure>
+    <p>資料表要在程式第一次執行時建立，之後每次改結構（加欄位、加索引）都要套用到所有已經存在的資料庫上。這就是 migration。SQL 檔放在 migrations 目錄：</p>
+    <pre class="code" data-src="chapters/28-database/migrations/001_dishes.sql"><code>-- 菜單：每道菜的名稱不能重複，價格要大於 0，庫存不能是負的。
+CREATE TABLE dishes (
+    id    INTEGER PRIMARY KEY,
+    name  TEXT    NOT NULL UNIQUE,
+    price INTEGER NOT NULL CHECK (price &gt; 0),
+    stock INTEGER NOT NULL DEFAULT 0 CHECK (stock &gt;= 0)
+);</code></pre>
+    <pre class="code" data-src="chapters/28-database/migrations/002_orders.sql"><code>-- 訂單：dish_id 一定要對到一道存在的菜；備註可以是 NULL。
+CREATE TABLE orders (
+    id      INTEGER PRIMARY KEY,
+    dish_id INTEGER NOT NULL REFERENCES dishes (id),
+    qty     INTEGER NOT NULL CHECK (qty &gt; 0),
+    total   INTEGER NOT NULL,
+    note    TEXT
+);
+
+CREATE INDEX orders_dish_id ON orders (dish_id);</code></pre>
+    <p>用 <a href="20-files.html#fs">20 章的 embed</a> 把它們編進執行檔，部署時就不用另外帶檔案。已經跑到第幾個，記在 SQLite 資料庫檔案裡的 <code>PRAGMA user_version</code>：</p>
+    <pre class="code" data-src="chapters/28-database/db.go#migrations,migrate,applyMigration"><code>var migrations embed.FS
+
+func migrate(ctx context.Context, db *sql.DB) error {
+	names, err := fs.Glob(migrations, "migrations/*.sql")
+	if err != nil {
+		return err
+	}
+	var done int
+	if err := db.QueryRowContext(ctx, "PRAGMA user_version").Scan(&amp;done); err != nil {
+		return err
+	}
+	if done &gt; len(names) {
+		return fmt.Errorf("資料庫的版本 %d 比程式認得的 %d 新，請更新程式", done, len(names))
+	}
+	for i := done; i &lt; len(names); i++ {
+		if err := applyMigration(ctx, db, names[i], i+1); err != nil {
+			return fmt.Errorf("%s：%w", names[i], err)
+		}
+	}
+	return nil
+}
+
+func applyMigration(ctx context.Context, db *sql.DB, name string, version int) error {
+	stmts, err := migrations.ReadFile(name)
+	if err != nil {
+		return err
+	}
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback() // Commit 成功之後再 Rollback 不會有作用
+
+	if _, err := tx.ExecContext(ctx, string(stmts)); err != nil {
+		return err
+	}
+	// PRAGMA 不能用 ? 帶參數；version 是程式自己算出來的整數，不是外面來的輸入，所以可以直接放進字串。
+	if _, err := tx.ExecContext(ctx, fmt.Sprintf("PRAGMA user_version = %d", version)); err != nil {
+		return err
+	}
+	return tx.Commit()
+}</code></pre>
+    <pre class="code" data-src="chapters/28-database/db.go#migrateDemo"><code>func migrateDemo() {
+	ctx := context.Background()
+	dir, err := os.MkdirTemp("", "bento-*")
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	defer os.RemoveAll(dir)
+	path := filepath.Join(dir, "bento.db")
+
+	for i := 1; i &lt;= 2; i++ {
+		db, err := openDB(ctx, path)
+		if err != nil {
+			fmt.Println(err)
+			return
+		}
+		var version int
+		db.QueryRowContext(ctx, "PRAGMA user_version").Scan(&amp;version)
+		fmt.Printf("第 %d 次開啟：版本 %d\n", i, version)
+		if i == 2 {
+			// 假裝有一個更新版的程式，已經把這個資料庫升到第 3 版。
+			db.ExecContext(ctx, "PRAGMA user_version = 3")
+		}
+		db.Close()
+	}
+
+	_, err = openDB(ctx, path)
+	fmt.Printf("舊程式開新資料庫：%v\n", err)
+}</code></pre>
+    <pre class="out" data-example="chapters/28-database#Example_migrateDemo"><code>第 1 次開啟：版本 2
+第 2 次開啟：版本 2
+舊程式開新資料庫：資料庫的版本 3 比程式認得的 2 新，請更新程式</code></pre>
+    <ul class="notes">
+      <li>每個檔案和版本號在同一個交易裡：SQLite 的 CREATE TABLE 也能復原，中途失敗不會留下一半的結構。MySQL 的 DDL 會自動 Commit，沒有這個保證。</li>
+      <li>舊版的程式遇到更新的資料庫時拒絕開啟，避免它用舊的認知寫入資料。</li>
+      <li>其他資料庫沒有 user_version，常見的做法是建一個 schema_migrations 資料表記錄版本。社群也有現成的 migration 工具，需要往回復原（down migration）、多人同時開發時可以考慮。</li>
+    </ul>
+    <p><strong>測試</strong>直接用真的資料庫。SQLite 只是一個檔案，每個測試在 <code>t.TempDir()</code> 開一個新的，測試結束自動刪除；第 6 節的 newTestStore 就是這樣做的。這比用假的 store 測試更有價值：SQL 寫錯、限制、交易的行為，假的都測不到。</p>
+    <p>要小心的是 <code>":memory:"</code>：記憶體裡的資料庫只屬於開它的那一條連線，連線池裡的另一條連線看到的是另一個空的資料庫：</p>
+    <pre class="code" data-src="chapters/28-database/main_test.go#TestMemoryPerConnection"><code>func TestMemoryPerConnection(t *testing.T) {
+	ctx := t.Context()
+	db, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	c1, err := db.Conn(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c1.Close()
+	c2, err := db.Conn(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c2.Close()
+
+	if _, err := c1.ExecContext(ctx, `CREATE TABLE dishes (name TEXT)`); err != nil {
+		t.Fatal(err)
+	}
+	_, err = c2.ExecContext(ctx, `INSERT INTO dishes VALUES ('排骨飯')`)
+	if err == nil || !strings.Contains(err.Error(), "no such table") {
+		t.Errorf("第二條連線：err = %v，want no such table", err)
+	}
+}</code></pre>
+    <ul class="notes">
+      <li>測試偶爾出現「no such table」，常常就是這個原因：查詢剛好拿到了另一條連線。用暫存檔案最單純。</li>
+      <li>正式環境用 MySQL、PostgreSQL 的話，測試也該用同一種資料庫（例如在 CI 裡用容器跑一個），SQLite 的行為和它們不完全一樣。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="pitfalls">
+    <h2 id="pitfalls">常見錯誤</h2>
+    <h3 id="pit-concat">1. 用字串組 SQL</h3>
+    <p>使用者的輸入會變成 SQL 的一部分。值一律用 ? 帶入，欄位名稱用白名單（第 4 節）。</p>
+
+    <h3 id="pit-rows-close">2. rows 沒有關</h3>
+    <p>特別是迴圈中間的 return：連線借了不還，連線池用光後所有查詢都卡住。QueryContext 成功後立刻 defer rows.Close()（第 3、7 節，練習 6）。</p>
+
+    <h3 id="pit-rows-err">3. 沒有檢查 rows.Err()</h3>
+    <p>讀到一半出錯時，Next 一樣回傳 false，不完整的結果會被當成完整的（第 3 節）。</p>
+
+    <h3 id="pit-open-per-request">4. 每個請求 sql.Open 一次</h3>
+    <p>*sql.DB 是連線池，整個程式開一個、共用。每次都開，連線池就沒有作用，用完也常常忘了關（第 1 節）。</p>
+
+    <h3 id="pit-db-in-tx">5. 交易裡用 db 而不是 tx</h3>
+    <p>那個查詢不在交易裡：看不到交易裡的改變，失敗時也不會復原。連線池上限很小時甚至會卡死（第 6 節）。</p>
+
+    <h3 id="pit-null">6. 把可能是 NULL 的欄位 Scan 進 string</h3>
+    <p>平常資料都有值所以沒事，第一筆 NULL 出現時才出錯。用 sql.Null[T]、指標或 COALESCE（第 5 節）。</p>
+
+    <h3 id="pit-memory">7. ":memory:" 搭配連線池</h3>
+    <p>每條連線各有一個資料庫，資料表時有時無。測試用 t.TempDir() 裡的檔案（第 8 節）。</p>
+
+    <h3 id="pit-no-context">8. 使用沒有 Context 的方法</h3>
+    <p>db.Query、db.Exec 不能取消，慢查詢會一直跑下去。一律用 QueryContext、ExecContext，把請求的 ctx 傳進來（第 7 節）。</p>
+  </section>
+
+  <section aria-labelledby="java">
+    <h2 id="java">從 Java 來的你</h2>
+    <div class="table-wrap">
+      <table class="vs">
+        <thead><tr><th scope="col">主題</th><th scope="col">Java</th><th scope="col">Go</th></tr></thead>
+        <tbody>
+          <tr><th scope="row">標準介面</th><td class="java">JDBC</td><td>database/sql</td></tr>
+          <tr><th scope="row">註冊 driver</th><td class="java">ServiceLoader 自動載入</td><td>空白 import：<code>_ "modernc.org/sqlite"</code></td></tr>
+          <tr><th scope="row">連線池</th><td class="java">HikariCP 等另外的函式庫</td><td>*sql.DB 內建</td></tr>
+          <tr><th scope="row">參數</th><td class="java"><code>PreparedStatement</code> 的 <code>?</code></td><td>直接把值傳給 <code>ExecContext(ctx, sql, args...)</code></td></tr>
+          <tr><th scope="row">讀結果</th><td class="java"><code>ResultSet</code> 加 <code>getString</code></td><td><code>rows.Next</code> 加 <code>rows.Scan(&amp;a, &amp;b)</code></td></tr>
+          <tr><th scope="row">NULL</th><td class="java">包裝型別 Integer、<code>wasNull()</code></td><td><code>sql.Null[T]</code>、指標</td></tr>
+          <tr><th scope="row">交易</th><td class="java"><code>@Transactional</code></td><td>BeginTx、defer Rollback、Commit</td></tr>
+          <tr><th scope="row">ORM</th><td class="java">JPA、Hibernate</td><td>標準庫沒有，直接寫 SQL</td></tr>
+          <tr><th scope="row">migration</th><td class="java">Flyway、Liquibase</td><td>自己寫，或用社群的工具</td></tr>
+          <tr><th scope="row">測試</th><td class="java">H2、Testcontainers</td><td>真的 SQLite 檔案、容器裡的資料庫</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>Go 社群普遍直接寫 SQL：多寫幾行 Scan，換來每一個送到資料庫的查詢都看得見，不會出現 ORM 背後自動產生的 N+1 查詢。<code>@Transactional</code> 的範圍由註解和代理決定，Go 的交易範圍就是 BeginTx 到 Commit 之間的程式碼。</p>
+  </section>
+
+  <section aria-labelledby="exercises">
+    <h2 id="exercises">練習</h2>
+    <p>題目在 <code>chapters/28-database/exercises/exercises.go</code>，是社區圖書室的借還書系統。每個測試都用一個新的資料庫檔案。</p>
+    <pre class="shell"><code>cd chapters/28-database
+go test ./exercises/                        <span class="c"># 跑全部練習</span>
+go test ./exercises/ -run TestBorrow        <span class="c"># 只跑一題</span>
+go test -tags solution ./exercises/         <span class="c"># 跑參考解答</span></code></pre>
+    <p>資料表和共用的型別在 doc.go，Open 已經寫好了：</p>
+    <pre class="code" data-src="chapters/28-database/exercises/doc.go#ErrNotFound,MaxLoans,Book,OverdueLoan,Library,schema"><code>var (
+	ErrNotFound  = errors.New("找不到這本書")
+	ErrOnLoan    = errors.New("這本書已經借出去了")
+	ErrNotOnLoan = errors.New("這本書沒有借出去")
+	ErrLimit     = errors.New("借的書已經到上限了")
+)
+
+const MaxLoans = 3
+
+type Book struct {
+	ID     int64
+	Title  string
+	Author string
+	ISBN   sql.Null[string]
+}
+
+type OverdueLoan struct {
+	Title    string
+	Member   string
+	DaysLate int
+}
+
+type Library struct {
+	db *sql.DB
+}
+
+const schema = `
+CREATE TABLE IF NOT EXISTS books (
+    id     INTEGER PRIMARY KEY,
+    title  TEXT NOT NULL,
+    author TEXT NOT NULL,
+    isbn   TEXT UNIQUE
+);
+CREATE TABLE IF NOT EXISTS loans (
+    id       INTEGER PRIMARY KEY,
+    book_id  INTEGER NOT NULL REFERENCES books (id),
+    member   TEXT    NOT NULL,
+    due      TEXT    NOT NULL,           -- 到期日，格式是 2006-01-02
+    returned INTEGER NOT NULL DEFAULT 0  -- 0：還沒還，1：已經還了
+);`</code></pre>
+    <ol class="exercises">
+      <li>
+        <h3><span class="level l1">入門</span>練習 1：新增一本書</h3>
+        <p>沒有 ISBN 的書要存 NULL。</p>
+        <pre class="code" data-src="chapters/28-database/exercises/exercises.go#Library.AddBook"><code>func (l *Library) AddBook(ctx context.Context, title, author, isbn string) (int64, error) {
+	// TODO: 實作
+	return 0, nil
+}</code></pre>
+        <p>測試：<code>TestAddBook</code>。</p>
+        <details><summary>提示</summary><p>isbn 參數傳 <code>sql.Null[string]{V: isbn, Valid: isbn != ""}</code>。如果存成空字串，第二本沒有 ISBN 的書會違反 UNIQUE。id 用 LastInsertId。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l2">進階</span>練習 2：某個作者的書</h3>
+        <p>有一位作者的名字裡有單引號。</p>
+        <pre class="code" data-src="chapters/28-database/exercises/exercises.go#Library.ByAuthor"><code>func (l *Library) ByAuthor(ctx context.Context, author string) ([]Book, error) {
+	// TODO: 實作
+	return nil, nil
+}</code></pre>
+        <p>測試：<code>TestByAuthor</code>，它也會檢查連線有沒有還回連線池。</p>
+        <details><summary>提示</summary><p>照第 3 節 listDishes 的樣子：QueryContext、defer rows.Close()、Next 迴圈、Scan、最後回傳 rows.Err()。ISBN 直接 Scan 進 Book 的 sql.Null 欄位。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l2">進階</span>練習 3：還書</h3>
+        <p>不用先查再改。</p>
+        <pre class="code" data-src="chapters/28-database/exercises/exercises.go#Library.Return"><code>func (l *Library) Return(ctx context.Context, bookID int64) error {
+	// TODO: 實作
+	return nil
+}</code></pre>
+        <p>測試：<code>TestReturn</code>。</p>
+        <details><summary>提示</summary><p>把「還沒還」的條件寫進 UPDATE 的 WHERE，再看 RowsAffected 是不是 0，和第 2 節的 restock 一樣。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l3">挑戰</span>練習 4：借書</h3>
+        <p>三個檢查和新增要在同一個交易裡，10 個人同時借同一本書時只能有一個人成功。</p>
+        <pre class="code" data-src="chapters/28-database/exercises/exercises.go#Library.Borrow"><code>func (l *Library) Borrow(ctx context.Context, bookID int64, member string, due time.Time) error {
+	// TODO: 實作
+	return nil
+}</code></pre>
+        <p>測試：<code>TestBorrow</code>，請用 -race 跑。</p>
+        <details><summary>提示</summary><p>BeginTx 之後 defer Rollback，所有的查詢都用 tx。存在與否可以用 <code>SELECT EXISTS (SELECT 1 FROM … WHERE …)</code>，結果直接 Scan 進 bool。Open 已經設了 _txlock=immediate，交易之間會排隊（第 6 節的深入）。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l2">進階</span>練習 5：逾期名單</h3>
+        <p>到期日存成 2006-01-02 格式的文字，字串的大小順序剛好就是日期的先後。</p>
+        <pre class="code" data-src="chapters/28-database/exercises/exercises.go#Library.Overdue"><code>func (l *Library) Overdue(ctx context.Context, today time.Time) ([]OverdueLoan, error) {
+	// TODO: 實作
+	return nil, nil
+}</code></pre>
+        <p>測試：<code>TestOverdue</code>。</p>
+        <details><summary>提示</summary><p>loans JOIN books 拿書名，WHERE 用 <code>due &lt; ?</code> 帶入 <code>today.Format(time.DateOnly)</code>。天數在 Go 裡算：兩個日期都用 <code>time.Parse(time.DateOnly, …)</code> 解析，相減後除以 24 小時（<a href="22-time.html">22 章</a>）。</p></details>
+      </li>
+      <li>
+        <h3><span class="level fix">找錯</span>練習 6：有沒有這本書</h3>
+        <p>呼叫幾次之後，其他查詢都卡住了。</p>
+        <pre class="code" data-src="chapters/28-database/exercises/exercises.go#Library.HasTitle"><code>func (l *Library) HasTitle(ctx context.Context, author, word string) (bool, error) {
+	rows, err := l.db.QueryContext(ctx, `SELECT title FROM books WHERE author = ?`, author)
+	if err != nil {
+		return false, err
+	}
+	for rows.Next() {
+		var title string
+		if err := rows.Scan(&amp;title); err != nil {
+			return false, err
+		}
+		if strings.Contains(title, word) {
+			return true, nil
+		}
+	}
+	rows.Close()
+	return false, rows.Err()
+}</code></pre>
+        <p>測試：<code>TestHasTitle</code>，它在每次呼叫後檢查 <code>db.Stats().InUse</code>。</p>
+        <details><summary>提示</summary><p>常見錯誤 2。找到的時候從哪裡離開了函式？</p></details>
+      </li>
+    </ol>
+    <p><a href="https://github.com/xinqilin/GO-Playground/blob/main/chapters/28-database/exercises/solution.go">參考解答</a>：先自己寫完再看。測試通過的寫法都是對的。</p>
+  </section>
+
+  <section aria-labelledby="recap">
+    <h2 id="recap">重點回顧</h2>
+    <ul class="recap">
+      <li>database/sql 是介面，driver 用空白 import 註冊；*sql.DB 是連線池，整個程式開一個。</li>
+      <li>sql.Open 不會連線，開啟後用 PingContext 確認。</li>
+      <li>寫入用 ExecContext，看 LastInsertId 和 RowsAffected；資料表的限制是最後一道防線。</li>
+      <li>多列用 QueryContext：defer rows.Close()、Next 迴圈、Scan、rows.Err()；一列用 QueryRowContext，查不到是 sql.ErrNoRows。</li>
+      <li>值一律用參數帶入，欄位名稱用白名單。</li>
+      <li>可能是 NULL 的欄位用 sql.Null[T]、指標或 COALESCE。</li>
+      <li>交易：BeginTx、defer Rollback、所有查詢用 tx、最後 Commit；並發時用鎖或條件式 UPDATE 防止超賣。</li>
+      <li>連線借了要還；所有的方法用 Context 版本，查詢才能被取消。</li>
+      <li>migration 依編號執行並記錄版本；測試用暫存目錄裡真的資料庫。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="further">
+    <h2 id="further">延伸閱讀</h2>
+    <ul class="notes">
+      <li>Go 官方的資料庫指南：<a href="https://go.dev/doc/database/">Accessing relational databases</a>，其中的 <a href="https://go.dev/doc/database/sql-injection">Avoiding SQL injection risk</a>、<a href="https://go.dev/doc/database/execute-transactions">Executing transactions</a>、<a href="https://go.dev/doc/database/manage-connections">Managing connections</a>、<a href="https://go.dev/doc/database/cancel-operations">Canceling in-progress operations</a>。</li>
+      <li>套件文件：<a href="https://pkg.go.dev/database/sql">database/sql</a>、<a href="https://pkg.go.dev/modernc.org/sqlite">modernc.org/sqlite</a>（連線字串的參數）。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="run">
+    <h2 id="run">動手跑</h2>
+    <p class="label">在 repo 根目錄</p>
+    <pre class="shell"><code>go -C chapters/28-database run .                   <span class="c"># 每個示範用一個暫存的資料庫</span>
+go -C chapters/28-database test -race .            <span class="c"># 驗證頁面上的輸出和並發下單的測試</span>
+go -C chapters/28-database test ./exercises/       <span class="c"># 做練習</span></code></pre>
+    <p>第一次執行時 go 會下載 SQLite driver 和它依賴的套件，之後就不用了。</p>
+    <p><a href="https://github.com/xinqilin/GO-Playground/tree/main/chapters/28-database">在 GitHub 看本章完整程式碼</a>，或看<a href="https://github.com/xinqilin/GO-Playground/tree/main/chapters/28-database/exercises">練習題</a>。</p>
+  </section>
+</main>
+
+<nav class="pager" aria-label="章節導覽">
+  <a class="prev" href="27-http-client.html">← 27 HTTP 用戶端</a>
+  <a class="home" href="index.html">目錄</a>
+  <a class="next" href="29-packages-modules.html">29 package 與 module →</a>
+</nav>
+</body>
+</html>
