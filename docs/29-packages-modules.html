@@ -357,7 +357,7 @@ require (
       <li><strong>module</strong>：module 路徑，也是 import 路徑的開頭。要發佈的話，它就是程式碼的位置（例如 GitHub 上的 repo）。</li>
       <li><strong>go</strong>：至少需要的 Go 版本，也決定語言的行為（<a href="00-hello.html#anatomy">00 章</a>）。</li>
       <li><strong>require</strong>：直接用到的 module，以及建置需要的間接 module（標著 <code>// indirect</code>）。第一個區塊是程式碼直接 import 的 modernc.org/sqlite，第二個區塊是它需要的。</li>
-      <li>其他指令：<code>replace</code>（換成別的版本或本機的目錄，第 6 節）、<code>exclude</code>（排除某個版本）、<code>retract</code>（作者宣告自己某一版不要用，第 7 節）、<code>tool</code>（Go 1.24 起，記錄專案用到的命令列工具，<a href="32-toolchain.html">工具鏈</a>那一章）。</li>
+      <li>其他指令：<code>replace</code>（換成別的版本或本機的目錄，第 6 節）、<code>exclude</code>（排除某個版本）、<code>retract</code>（作者宣告自己某一版不要用，第 7 節）、<code>tool</code>（Go 1.24 起，記錄專案用到的命令列工具，<a href="32-toolchain.html#tools">工具鏈</a>那一章）。</li>
     </ul>
     <p>go.sum 每個版本有兩行，一行是整個 module 內容的雜湊，一行只有它的 go.mod：</p>
     <pre class="out"><code>modernc.org/sqlite v1.62.0 h1:gMaCjSM1qpl+iOjiWhR1LYP3zqrYDI+5GYLGt6veP2g=
