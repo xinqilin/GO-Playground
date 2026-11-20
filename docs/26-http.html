@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>HTTP 服務｜Go 圖解手冊</title>
-<meta name="description" content="只用標準庫 net/http 寫 HTTP 服務：Go 1.22 的方法與路徑路由、middleware、JSON 回應，以及用 httptest 測試。">
+<meta name="description" content="用 net/http 寫 HTTP 服務：Handler 與 ResponseWriter 的順序、Go 1.22 起的 ServeMux 路由、讀取與驗證請求、JSON API 的錯誤回應、middleware、http.Server 的逾時、優雅關機，以及用 httptest 和 Go 1.27 的 NewTestServer 測試，附可執行的練習題。">
 <link rel="stylesheet" href="assets/style.css">
 </head>
 <body>
@@ -13,132 +13,1048 @@
   <span class="count">26 / 33</span>
 </header>
 
-<main class="page">
+<main class="page long">
   <header class="hero">
     <div class="num" aria-hidden="true">26</div>
     <p class="eyebrow">Part 4 · 標準庫實戰 · 第 26 章</p>
     <h1>HTTP 服務</h1>
-    <p class="analogy">HTTP server 像一間餐廳：路由是帶位的服務生，handler 是廚師，middleware 是門口的登記簿。</p>
+    <p class="analogy">便當店的點餐窗口：客人遞單子進來，窗口依照單子上寫的「做什麼、給哪一桌」交給對的師傅，做好了照固定的格式交回去。單子寫錯就當場退回並說明哪裡錯；打烊時先拉下鐵門不再收單，手上的做完才關燈。</p>
   </header>
 
-  <section aria-labelledby="look">
-    <h2 id="look">看圖</h2>
-    <div class="figs">
-      <figure class="fig">
-        <svg viewBox="0 0 480 226" role="img" aria-label="curl 送出的請求先經過 logRequests middleware，再由 ServeMux 依方法和路徑找到 hello、create 或 get handler，回應原路回去">
-          <title>一個請求走過的路</title>
-          <rect class="soft" x="12" y="80" width="80" height="70" rx="8"/>
-          <text class="small mono" x="52" y="120" text-anchor="middle">curl</text>
-          <rect class="wire acc-ln dash" x="110" y="20" width="358" height="196" rx="14"/>
-          <text class="small mono t-acc" x="126" y="42">logRequests（middleware）</text>
-          <rect class="acc" x="124" y="60" width="170" height="136" rx="8"/>
-          <text class="small mono bold" x="209" y="82" text-anchor="middle">ServeMux</text>
-          <text class="sm mono" x="134" y="110">GET /hello/{name}</text>
-          <text class="sm mono" x="134" y="140">POST /notes</text>
-          <text class="sm mono" x="134" y="170">GET /notes/{id}</text>
-          <path class="wire" d="M294 105 H310 M294 135 H310 M294 165 H310"/>
-          <path class="tip" d="M320 105 L310 99 L310 111 Z"/>
-          <path class="tip" d="M320 135 L310 129 L310 141 Z"/>
-          <path class="tip" d="M320 165 L310 159 L310 171 Z"/>
-          <rect class="hot" x="320" y="92" width="130" height="26" rx="6"/>
-          <rect class="soft" x="320" y="122" width="130" height="26" rx="6"/>
-          <rect class="soft" x="320" y="152" width="130" height="26" rx="6"/>
-          <text class="small mono t-hot" x="385" y="110" text-anchor="middle">hello</text>
-          <text class="small mono" x="385" y="140" text-anchor="middle">create</text>
-          <text class="small mono" x="385" y="170" text-anchor="middle">get</text>
-          <path class="wire" d="M92 105 H114"/>
-          <path class="tip" d="M124 105 L112 99 L112 111 Z"/>
-          <path class="wire acc-ln dash" d="M124 135 H102"/>
-          <path class="tip acc-tip" d="M92 135 L104 129 L104 141 Z"/>
-        </svg>
-        <figcaption>請求先經過 middleware，再由 <code>ServeMux</code> 依「方法 + 路徑」找到對應的 handler；路徑裡的 <code>{name}</code> 用 <code>r.PathValue</code> 取出。</figcaption>
-      </figure>
+  <nav class="toc-inline" aria-labelledby="toc-title">
+    <p class="label" id="toc-title">本章內容</p>
+    <ol>
+      <li><a href="#goals">本章你會學到</a></li>
+      <li><a href="#handler">Handler 與 ResponseWriter</a></li>
+      <li><a href="#routing">ServeMux 的路由</a></li>
+      <li><a href="#request">讀取與驗證請求</a></li>
+      <li><a href="#json">JSON API 與錯誤回應</a></li>
+      <li><a href="#middleware">middleware</a></li>
+      <li><a href="#server">http.Server 與逾時</a></li>
+      <li><a href="#shutdown">優雅關機</a></li>
+      <li><a href="#testing">測試</a></li>
+      <li><a href="#pitfalls">常見錯誤</a></li>
+      <li><a href="#java">從 Java 來的你</a></li>
+      <li><a href="#exercises">練習</a></li>
+      <li><a href="#recap">重點回顧</a></li>
+      <li><a href="#further">延伸閱讀</a></li>
+    </ol>
+  </nav>
 
-      <figure class="fig">
-        <svg viewBox="0 0 480 162" role="img" aria-label="httptest 用假的請求呼叫真的 handler，再用 Recorder 收下回應，直接檢查狀態碼和內容，不用開 port">
-          <title>httptest：不開 port 也能測</title>
-          <rect class="soft" x="12" y="50" width="120" height="60" rx="8"/>
-          <rect class="acc" x="180" y="50" width="120" height="60" rx="8"/>
-          <rect class="soft" x="348" y="50" width="120" height="60" rx="8"/>
-          <text class="small mono" x="72" y="76" text-anchor="middle">NewRequest</text>
-          <text class="small" x="72" y="98" text-anchor="middle">假的請求</text>
-          <text class="small mono" x="240" y="76" text-anchor="middle">ServeHTTP</text>
-          <text class="small" x="240" y="98" text-anchor="middle">真的 handler</text>
-          <text class="small mono" x="408" y="76" text-anchor="middle">Recorder</text>
-          <text class="small" x="408" y="98" text-anchor="middle">收下回應</text>
-          <path class="wire" d="M132 80 H168 M300 80 H336"/>
-          <path class="tip" d="M178 80 L166 74 L166 86 Z"/>
-          <path class="tip" d="M346 80 L334 74 L334 86 Z"/>
-          <text class="small t-acc" x="240" y="146" text-anchor="middle">直接檢查 rec.Code、rec.Body，不用開 port、不用網路</text>
-        </svg>
-        <figcaption><code>httptest</code> 用假的請求和假的 ResponseWriter 直接呼叫 handler，測試快、穩定，也不需要網路。</figcaption>
-      </figure>
-    </div>
-  </section>
-
-  <section aria-labelledby="code">
-    <h2 id="code">最小範例</h2>
-    <pre class="code"><code>func main() {
-	mux := http.NewServeMux()
-	mux.HandleFunc("GET /hello/{name}", func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprintf(w, "哈囉，%s\n", r.PathValue("name"))
-	})
-	srv := &amp;http.Server{
-		Addr:              ":8080",
-		Handler:           mux,
-		ReadHeaderTimeout: 5 * time.Second,
-	}
-	log.Fatal(srv.ListenAndServe())
-}</code></pre>
-    <p class="label">另一個終端機</p>
-    <pre class="out"><code>$ curl localhost:8080/hello/Gopher
-哈囉，Gopher</code></pre>
-  </section>
-
-  <section aria-labelledby="notes">
-    <h2 id="notes">工程師筆記</h2>
+  <section aria-labelledby="goals">
+    <h2 id="goals">本章你會學到</h2>
     <ul class="notes">
-      <li>Go 1.22 起 <code>ServeMux</code> 支援方法和路徑變數：<code>"GET /notes/{id}"</code>，用 <code>r.PathValue("id")</code> 取值；方法不對會自動回 405。</li>
-      <li>handler 會被很多 goroutine 同時呼叫，共用的資料要加鎖。</li>
-      <li><code>http.Server</code> 一定要設逾時（至少 <code>ReadHeaderTimeout</code>）；直接呼叫 <code>http.ListenAndServe</code> 沒有任何逾時。</li>
-      <li>middleware 就是「收一個 <code>http.Handler</code>、回傳一個 <code>http.Handler</code>」的函式，可以一層一層包起來。</li>
-      <li>HTTP client 也要設逾時：<code>&amp;http.Client{Timeout: 10 * time.Second}</code>；預設的 <code>http.DefaultClient</code> 沒有逾時。</li>
-      <li>關機時呼叫 <code>srv.Shutdown(ctx)</code>，等進行中的請求做完再結束；專題 todoapi 有完整示範。</li>
+      <li>http.Handler、HandlerFunc，以及寫回應時「標頭、狀態碼、內容」的順序。</li>
+      <li>Go 1.22 起的 ServeMux：方法、路徑變數、<code>{path...}</code>、<code>{$}</code>，以及哪個 pattern 會贏。</li>
+      <li>讀取請求：查詢字串、路徑變數、限制大小並嚴格地解析 JSON，每一種錯都回對的 4xx。</li>
+      <li>把錯誤集中轉成一致的 JSON 回應，內部錯誤不外洩。</li>
+      <li>middleware：記錄每個請求、把 panic 變成 500，以及包裝 ResponseWriter 的注意事項。</li>
+      <li>http.Server 的四個逾時、優雅關機。</li>
+      <li>用 httptest 的記錄器做單元測試，用 Go 1.27 的 NewTestServer 做不用開 port 的端對端測試。</li>
     </ul>
+    <p>先備：<a href="10-interfaces.html">10 章的 interface</a>、<a href="11-errors.html">11 章的錯誤處理</a>、<a href="17-sync.html">17 章的 Mutex</a>、<a href="18-context.html">18 章的 context</a>、<a href="23-json.html">23 章的 JSON</a>、<a href="25-logging.html">25 章的 slog</a>。整章的程式是一個可以真的跑起來的便當店訂單 API。</p>
+  </section>
+
+  <section aria-labelledby="handler">
+    <h2 id="handler">1. Handler 與 ResponseWriter</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 196" role="img" aria-label="http.Handler 只有一個方法 ServeHTTP，參數是 ResponseWriter 和 *Request。寫回應有固定的順序：先設標頭，再寫狀態碼，最後寫內容；第一次寫內容時，標頭和狀態碼就一起送出去了">
+        <title>寫回應的順序</title>
+        <rect class="acc" x="16" y="14" width="448" height="36" rx="8"/>
+        <text class="sm mono" x="240" y="37" text-anchor="middle">ServeHTTP(w http.ResponseWriter, r *http.Request)</text>
+        <rect class="soft" x="16" y="74" width="140" height="56" rx="8"/>
+        <text class="sm" x="86" y="96" text-anchor="middle">1. 標頭</text>
+        <text class="sm mono" x="86" y="118" text-anchor="middle">w.Header().Set</text>
+        <path class="wire" d="M156 102 H158"/>
+        <path class="tip" d="M170 102 L158 96 L158 108 Z"/>
+        <rect class="soft" x="170" y="74" width="140" height="56" rx="8"/>
+        <text class="sm" x="240" y="96" text-anchor="middle">2. 狀態碼</text>
+        <text class="sm mono" x="240" y="118" text-anchor="middle">w.WriteHeader</text>
+        <path class="wire" d="M310 102 H312"/>
+        <path class="tip" d="M324 102 L312 96 L312 108 Z"/>
+        <rect class="soft" x="324" y="74" width="140" height="56" rx="8"/>
+        <text class="sm" x="394" y="96" text-anchor="middle">3. 內容</text>
+        <text class="sm mono" x="394" y="118" text-anchor="middle">w.Write</text>
+        <text class="sm t-hot" x="240" y="160" text-anchor="middle">第一次 Write 時，1 和 2 就送出去了</text>
+        <text class="sm" x="240" y="184" text-anchor="middle">之後再改標頭、再呼叫 WriteHeader 都沒有作用</text>
+      </svg>
+      <figcaption>沒有呼叫 WriteHeader 就直接 Write，狀態碼是 200；沒有設 Content-Type，net/http 會看內容的開頭猜一個。</figcaption>
+    </figure>
+    <p>net/http 的核心是 <code>http.Handler</code>，一個只有一個方法 <code>ServeHTTP(ResponseWriter, *Request)</code> 的 interface。任何有這個方法的型別都是 Handler。大部分時候寫的是一個函式，用 <code>http.HandlerFunc</code> 轉型就變成 Handler（它是一個函式型別，ServeHTTP 就是呼叫自己）。需要帶著狀態的時候，寫一個型別自己實作 ServeHTTP：</p>
+    <pre class="code" data-src="chapters/26-http/handler.go#hello,counter,counter.ServeHTTP,handlerDemo"><code>func hello(w http.ResponseWriter, r *http.Request) {
+	name := r.URL.Query().Get("name")
+	if name == "" {
+		name = "客人"
+	}
+	fmt.Fprintf(w, "歡迎光臨，%s\n", name)
+}
+
+type counter struct {
+	n atomic.Int64
+}
+
+func (c *counter) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	fmt.Fprintf(w, "您是今天第 %d 位客人\n", c.n.Add(1))
+}
+
+func handlerDemo() {
+	send(http.HandlerFunc(hello), "GET", "/hello?name=Amei", "", "Content-Type")
+	send(http.HandlerFunc(hello), "GET", "/hello", "")
+
+	c := &amp;counter{}
+	send(c, "GET", "/", "")
+	send(c, "GET", "/", "")
+}</code></pre>
+    <pre class="out" data-example="chapters/26-http#Example_handlerDemo"><code>GET /hello?name=Amei → 200，Content-Type: text/plain; charset=utf-8
+歡迎光臨，Amei
+GET /hello → 200
+歡迎光臨，客人
+GET / → 200
+您是今天第 1 位客人
+GET / → 200
+您是今天第 2 位客人</code></pre>
+    <ul class="notes">
+      <li>本章的示範都用 <code>send</code> 這個小工具送請求：它用 httptest 直接呼叫 handler，不用開 port（第 8 節）。</li>
+      <li>每個請求在自己的 goroutine 裡執行，同一個 handler 會同時被很多 goroutine 呼叫。counter 用 atomic 計數；用一般的 int 就是 data race（<a href="17-sync.html">17 章</a>）。</li>
+      <li><code>r.URL.Query().Get("name")</code> 讀查詢字串，沒有這個參數時是空字串。</li>
+    </ul>
+    <p>ResponseWriter 有順序：標頭、狀態碼、內容。順序錯了不會有錯誤，只是設定沒有效果：</p>
+    <pre class="code" data-src="chapters/26-http/handler.go#lateHeader,rightOrder"><code>func lateHeader(w http.ResponseWriter, r *http.Request) {
+	io.WriteString(w, `{"ok":true}`)
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+}
+
+func rightOrder(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	io.WriteString(w, `{"ok":true}`)
+}</code></pre>
+    <pre class="out" data-example="chapters/26-http#Example_writeOrderDemo"><code>POST /late → 200，Content-Type: text/plain; charset=utf-8
+{"ok":true}
+POST /right → 201，Content-Type: application/json
+{"ok":true}</code></pre>
+    <p>lateHeader 想回 201 和 JSON，客戶端拿到的卻是 200 和 text/plain：第一次 Write 時標頭已經送出，net/http 從內容猜了 Content-Type。真的 server 還會在 log 裡留下一行 <code>http: superfluous response.WriteHeader call</code>。</p>
+  </section>
+
+  <section aria-labelledby="routing">
+    <h2 id="routing">2. ServeMux 的路由</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 208" role="img" aria-label="GET /orders/latest 同時符合 GET /orders/{id} 和 GET /orders/latest 兩個 pattern。後者更具體，因為它符合的請求是前者的一部分，所以後者贏，和註冊的順序無關">
+        <title>最具體的 pattern 贏</title>
+        <rect class="soft" x="150" y="12" width="180" height="34" rx="8"/>
+        <text class="sm mono" x="240" y="34" text-anchor="middle">GET /orders/latest</text>
+        <path class="wire" d="M200 46 V64 H110 V78"/>
+        <path class="wire" d="M280 46 V64 H370 V78"/>
+        <path class="tip" d="M110 90 L104 78 L116 78 Z"/>
+        <path class="tip" d="M370 90 L364 78 L376 78 Z"/>
+        <rect class="soft" x="16" y="90" width="188" height="56" rx="8"/>
+        <text class="sm mono" x="110" y="112" text-anchor="middle">GET /orders/{id}</text>
+        <text class="sm" x="110" y="134" text-anchor="middle">符合所有的 /orders/X</text>
+        <rect class="acc" x="276" y="90" width="188" height="56" rx="8"/>
+        <text class="sm mono" x="370" y="112" text-anchor="middle">GET /orders/latest</text>
+        <text class="sm" x="370" y="134" text-anchor="middle">只符合這一個路徑</text>
+        <text class="sm t-acc" x="370" y="170" text-anchor="middle">更具體：它贏</text>
+        <text class="sm" x="240" y="198" text-anchor="middle">兩個一樣具體、又會符合同一個請求：註冊時就 panic</text>
+      </svg>
+      <figcaption>ServeMux 不看註冊的順序，只看哪個 pattern 符合的範圍比較小。所以 pattern 可以照任何順序註冊，結果都一樣。</figcaption>
+    </figure>
+    <p>Go 1.22 起，<code>http.ServeMux</code> 的 pattern 可以寫 HTTP 方法和路徑變數：<code>"GET /orders/{id}"</code>。路徑變數用 <code>r.PathValue("id")</code> 取出，Go 1.23 起 <code>r.Pattern</code> 是對到的那個 pattern。用一個印出結果的 handler 看各種請求會對到哪裡：</p>
+    <pre class="code" data-src="chapters/26-http/routes.go#whichRoute,routeDemo"><code>func whichRoute(w http.ResponseWriter, r *http.Request) {
+	fmt.Fprintf(w, "pattern=%q id=%q path=%q", r.Pattern, r.PathValue("id"), r.PathValue("path"))
+}
+
+func routeDemo() {
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /orders/{id}", whichRoute)
+	mux.HandleFunc("GET /orders/latest", whichRoute)
+	mux.HandleFunc("POST /orders", whichRoute)
+	mux.HandleFunc("GET /menu/", whichRoute)
+	mux.HandleFunc("GET /files/{path...}", whichRoute)
+	mux.HandleFunc("GET /{$}", whichRoute)
+
+	for _, req := range []struct{ method, target string }{
+		{"GET", "/orders/42"},
+		{"GET", "/orders/latest"},
+		{"HEAD", "/orders/42"},
+		{"DELETE", "/orders/42"},
+		{"GET", "/menu/today"},
+		{"GET", "/menu"},
+		{"GET", "/files/2026/11/menu.pdf"},
+		{"GET", "/"},
+		{"GET", "/about"},
+	} {
+		send(mux, req.method, req.target, "", "Allow", "Location")
+	}
+}</code></pre>
+    <pre class="out" data-example="chapters/26-http#Example_routeDemo"><code>GET /orders/42 → 200
+pattern="GET /orders/{id}" id="42" path=""
+GET /orders/latest → 200
+pattern="GET /orders/latest" id="" path=""
+HEAD /orders/42 → 200
+pattern="GET /orders/{id}" id="42" path=""
+DELETE /orders/42 → 405，Allow: GET, HEAD
+Method Not Allowed
+GET /menu/today → 200
+pattern="GET /menu/" id="" path=""
+GET /menu → 307，Location: /menu/
+&lt;a href="/menu/"&gt;Temporary Redirect&lt;/a&gt;.
+GET /files/2026/11/menu.pdf → 200
+pattern="GET /files/{path...}" id="" path="2026/11/menu.pdf"
+GET / → 200
+pattern="GET /{$}" id="" path=""
+GET /about → 404
+404 page not found</code></pre>
+    <ul class="notes">
+      <li><strong>方法</strong>：<code>GET</code> 的 pattern 也接受 HEAD。路徑對了但方法不對，回 405，<code>Allow</code> 標頭列出可以用的方法。沒寫方法的 pattern 接受所有方法。</li>
+      <li><strong>{id}</strong> 對一段路徑（兩個 / 之間）。<strong>{path...}</strong> 只能放在最後，對剩下的全部，包含 /。</li>
+      <li><strong>結尾的 /</strong>：<code>/menu/</code> 對 /menu/ 底下的所有路徑；請求 /menu（沒有斜線）會被轉址到 /menu/。</li>
+      <li><strong>{$}</strong> 表示「到這裡結束」。<code>"GET /"</code> 會對到所有的路徑（是最後的備案），只要首頁的話寫 <code>"GET /{$}"</code>。</li>
+      <li>兩個 pattern 一樣具體、又會對到同一個請求（例如 <code>/orders/{id}</code> 和 <code>/orders/{num}</code>），HandleFunc 註冊時就 panic，程式一啟動就會發現。</li>
+    </ul>
+    <p>路徑變數拿到的永遠是字串，數字要自己轉、自己檢查（第 4 節）。內建的 ServeMux 夠大部分的 API 用；需要更多功能（依標頭路由、正規表示式）時才考慮第三方的路由套件。</p>
+  </section>
+
+  <section aria-labelledby="request">
+    <h2 id="request">3. 讀取與驗證請求</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 220" role="img" aria-label="解析請求內容的四道關卡：Content-Type 不是 JSON 回 415；內容超過上限回 413；JSON 語法錯、型別錯、有不認得的欄位回 400；通過之後再檢查值的範圍，不合理也回 400">
+        <title>請求內容的四道關卡</title>
+        <rect class="soft" x="16" y="12" width="300" height="38" rx="8"/>
+        <text class="sm" x="30" y="36">Content-Type 是 application/json？</text>
+        <text class="sm mono t-hot" x="400" y="36" text-anchor="middle">否 → 415</text>
+        <rect class="soft" x="16" y="62" width="300" height="38" rx="8"/>
+        <text class="sm" x="30" y="86">大小在上限之內？（MaxBytesReader）</text>
+        <text class="sm mono t-hot" x="400" y="86" text-anchor="middle">否 → 413</text>
+        <rect class="soft" x="16" y="112" width="300" height="38" rx="8"/>
+        <text class="sm" x="30" y="136">JSON 正確、欄位都認得？</text>
+        <text class="sm mono t-hot" x="400" y="136" text-anchor="middle">否 → 400</text>
+        <rect class="soft" x="16" y="162" width="300" height="38" rx="8"/>
+        <text class="sm" x="30" y="186">值合理？（數量、必填）</text>
+        <text class="sm mono t-hot" x="400" y="186" text-anchor="middle">否 → 400</text>
+        <path class="wire" d="M316 31 H350"/>
+        <path class="wire" d="M316 81 H350"/>
+        <path class="wire" d="M316 131 H350"/>
+        <path class="wire" d="M316 181 H350"/>
+        <text class="sm t-acc" x="166" y="216" text-anchor="middle">全部通過，才交給店家的邏輯</text>
+      </svg>
+      <figcaption>客戶端送來的東西一律不相信。每一關擋下來的都是客戶端的錯（4xx），訊息要讓對方知道怎麼改。</figcaption>
+    </figure>
+    <p>請求的資料有四個來源：路徑變數 <code>r.PathValue</code>、查詢字串 <code>r.URL.Query()</code>、標頭 <code>r.Header.Get</code>，以及內容 <code>r.Body</code>（一個 io.Reader）。內容最需要小心：大小沒有上限、格式可能是任何東西。把檢查集中在一個函式裡：</p>
+    <pre class="code" data-src="chapters/26-http/api.go#maxBody,decodeJSON"><code>const maxBody = 1 &lt;&lt; 20
+
+func decodeJSON(w http.ResponseWriter, r *http.Request, v any) error {
+	if mt, _, _ := mime.ParseMediaType(r.Header.Get("Content-Type")); mt != "application/json" {
+		return &amp;httpError{http.StatusUnsupportedMediaType, "Content-Type 要是 application/json"}
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, maxBody)
+	err := json.UnmarshalRead(r.Body, v, json.RejectUnknownMembers(true))
+	if err == nil {
+		return nil
+	}
+	if _, ok := errors.AsType[*http.MaxBytesError](err); ok {
+		return &amp;httpError{http.StatusRequestEntityTooLarge, "內容太大"}
+	}
+	if errors.Is(err, json.ErrUnknownName) {
+		se, _ := errors.AsType[*json.SemanticError](err)
+		return &amp;httpError{http.StatusBadRequest, "不認得的欄位 " + string(se.JSONPointer)}
+	}
+	if se, ok := errors.AsType[*json.SemanticError](err); ok &amp;&amp; se.JSONPointer != "" {
+		return &amp;httpError{http.StatusBadRequest, "欄位 " + string(se.JSONPointer) + " 的型別不對"}
+	}
+	if _, ok := errors.AsType[*jsontext.SyntacticError](err); ok || errors.Is(err, io.ErrUnexpectedEOF) {
+		return &amp;httpError{http.StatusBadRequest, "JSON 格式不對"}
+	}
+	return err // 讀取 body 時的其他錯誤，例如連線中斷
+}</code></pre>
+    <ul class="notes">
+      <li><code>http.MaxBytesReader</code> 讀超過上限時回傳 <code>*http.MaxBytesError</code>，並讓 server 在回應後關掉這個連線，對方就不能繼續灌資料。</li>
+      <li>用 <a href="23-json.html#decode">23 章</a>的 json/v2 加上 RejectUnknownMembers：客戶端把 qty 拼成 qyt，會得到 400 和「不認得的欄位」，而不是默默地被當成 0。</li>
+      <li>給客戶端的訊息用 JSON Pointer 指出是哪個欄位，不直接回傳 err.Error()：v2 的錯誤訊息每次可能不同（<a href="23-json.html#pit-error-text">23 章</a>），而且內部的型別名稱不需要讓外面知道。</li>
+      <li><code>mime.ParseMediaType</code> 讓 <code>application/json; charset=utf-8</code> 也能通過。</li>
+    </ul>
+    <p>用各種錯法送給點餐的 API（它在下一節）：</p>
+    <pre class="code" data-src="chapters/26-http/api.go#decodeDemo"><code>func decodeDemo() {
+	h := (&amp;api{shop: newShop(), logger: slog.New(slog.DiscardHandler)}).routes()
+	send(h, "POST", "/orders", `{"dish":"滷肉飯","qty":0}`)
+	send(h, "POST", "/orders", `{"dish":"滷肉飯","qty":"二"}`)
+	send(h, "POST", "/orders", `{"dish":"滷肉飯","qty":2,"spicy":true}`)
+	send(h, "POST", "/orders", `{"dish":"滷肉飯",`)
+	send(h, "POST", "/orders", `{"dish":"`+strings.Repeat("滷", maxBody/3)+`"}`)
+	sendAs(h, "text/plain", "POST", "/orders", `{"dish":"滷肉飯","qty":2}`)
+}</code></pre>
+    <pre class="out" data-example="chapters/26-http#Example_decodeDemo"><code>POST /orders → 400
+{"error":"qty 要在 1 到 20 之間"}
+POST /orders → 400
+{"error":"欄位 /qty 的型別不對"}
+POST /orders → 400
+{"error":"不認得的欄位 /spicy"}
+POST /orders → 400
+{"error":"JSON 格式不對"}
+POST /orders → 413
+{"error":"內容太大"}
+POST /orders → 415
+{"error":"Content-Type 要是 application/json"}</code></pre>
+    <p>request 的 <code>r.Context()</code> 在客戶端斷線、或 server 關機時會被取消。handler 裡要查資料庫、呼叫別的服務時，把它傳下去（<a href="18-context.html#listen">18 章</a>），對方已經走了就不用繼續做。</p>
+  </section>
+
+  <section aria-labelledby="json">
+    <h2 id="json">4. JSON API 與錯誤回應</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 214" role="img" aria-label="handler 回傳 error。handle 把錯誤交給 statusOf：httpError 用它自己的狀態碼和訊息；ErrNotFound 變成 404；ErrSoldOut 變成 409；其他沒預期到的錯誤變成 500，細節只記在 log，客戶端只看到「伺服器發生錯誤」">
+        <title>錯誤集中轉成回應</title>
+        <rect class="soft" x="16" y="14" width="150" height="40" rx="8"/>
+        <text class="sm" x="91" y="39" text-anchor="middle">handler 回傳 error</text>
+        <path class="wire" d="M166 34 H186"/>
+        <path class="tip" d="M198 34 L186 28 L186 40 Z"/>
+        <rect class="acc" x="198" y="14" width="110" height="40" rx="8"/>
+        <text class="sm mono" x="253" y="39" text-anchor="middle">statusOf</text>
+        <path class="wire" d="M253 54 V70 H60 V82"/>
+        <path class="wire" d="M253 70 H190 V82"/>
+        <path class="wire" d="M253 70 H310 V82"/>
+        <path class="wire" d="M253 70 H420 V82"/>
+        <rect class="soft" x="16" y="82" width="90" height="56" rx="8"/>
+        <text class="sm mono" x="61" y="104" text-anchor="middle">httpError</text>
+        <text class="sm" x="61" y="126" text-anchor="middle">自己的碼</text>
+        <rect class="soft" x="130" y="82" width="120" height="56" rx="8"/>
+        <text class="sm mono" x="190" y="104" text-anchor="middle">ErrNotFound</text>
+        <text class="sm mono" x="190" y="126" text-anchor="middle">404</text>
+        <rect class="soft" x="260" y="82" width="100" height="56" rx="8"/>
+        <text class="sm mono" x="310" y="104" text-anchor="middle">ErrSoldOut</text>
+        <text class="sm mono" x="310" y="126" text-anchor="middle">409</text>
+        <rect class="hot" x="370" y="82" width="94" height="56" rx="8"/>
+        <text class="sm" x="417" y="104" text-anchor="middle">其他</text>
+        <text class="sm mono" x="417" y="126" text-anchor="middle">500</text>
+        <text class="sm" x="240" y="168" text-anchor="middle">回應一律是 {"error": "..."}</text>
+        <text class="sm t-hot" x="417" y="196" text-anchor="middle">細節只記在 log</text>
+      </svg>
+      <figcaption>每個 handler 只管「成功時回什麼」和「失敗時回傳哪個錯誤」，錯誤長什麼樣子由一個地方決定，整個 API 才會一致。</figcaption>
+    </figure>
+    <p>店家的邏輯和 HTTP 無關：它只回傳 <a href="11-errors.html#sentinel">11 章</a>的那種錯誤值，不知道什麼是 404：</p>
+    <pre class="code" data-src="chapters/26-http/shop.go#ErrNotFound,Order,shop,shop.place,shop.find"><code>var (
+	ErrNotFound    = errors.New("找不到這筆訂單")
+	ErrSoldOut     = errors.New("賣完了")
+	ErrUnknownDish = errors.New("沒有這道菜")
+)
+
+type Order struct {
+	ID    int    `json:"id"`
+	Dish  string `json:"dish"`
+	Qty   int    `json:"qty"`
+	Total int    `json:"total"`
+}
+
+type shop struct {
+	mu     sync.Mutex
+	prices map[string]int
+	stock  map[string]int
+	orders map[int]Order
+	nextID int
+}
+
+func (s *shop) place(dish string, qty int) (Order, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	price, ok := s.prices[dish]
+	if !ok {
+		return Order{}, fmt.Errorf("%w：%s", ErrUnknownDish, dish)
+	}
+	if s.stock[dish] &lt; qty {
+		return Order{}, fmt.Errorf("%s %w，剩 %d 份", dish, ErrSoldOut, s.stock[dish])
+	}
+	s.stock[dish] -= qty
+	o := Order{ID: s.nextID, Dish: dish, Qty: qty, Total: price * qty}
+	s.orders[o.ID] = o
+	s.nextID++
+	return o, nil
+}
+
+func (s *shop) find(id int) (Order, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	o, ok := s.orders[id]
+	if !ok {
+		return Order{}, ErrNotFound
+	}
+	return o, nil
+}</code></pre>
+    <p>HTTP 這一層讓 handler 回傳 error，由 <code>handle</code> 統一轉成回應。客戶端犯的錯用 httpError 帶著狀態碼；店家的錯用 errors.Is 對應；其他沒預期到的一律 500，細節只記在 log：</p>
+    <pre class="code" data-src="chapters/26-http/api.go#api,api.routes,apiFunc,api.handle,errorBody,httpError,statusOf,writeJSON"><code>type api struct {
+	shop   *shop
+	logger *slog.Logger
+}
+
+func (a *api) routes() *http.ServeMux {
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /menu", a.handle(a.listMenu))
+	mux.HandleFunc("POST /orders", a.handle(a.createOrder))
+	mux.HandleFunc("GET /orders/{id}", a.handle(a.getOrder))
+	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
+		io.WriteString(w, "ok\n")
+	})
+	return mux
+}
+
+type apiFunc func(w http.ResponseWriter, r *http.Request) error
+
+func (a *api) handle(f apiFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		err := f(w, r)
+		if err == nil {
+			return
+		}
+		status, msg := statusOf(err)
+		if status == http.StatusInternalServerError {
+			// 內部錯誤的細節只記在 log，不告訴客戶端。
+			a.logger.ErrorContext(r.Context(), "內部錯誤", "path", r.URL.Path, "err", err)
+		}
+		writeJSON(w, status, errorBody{Error: msg})
+	}
+}
+
+type errorBody struct {
+	Error string `json:"error"`
+}
+
+type httpError struct {
+	status int
+	msg    string
+}
+
+func statusOf(err error) (int, string) {
+	if he, ok := errors.AsType[*httpError](err); ok {
+		return he.status, he.msg
+	}
+	switch {
+	case errors.Is(err, ErrNotFound):
+		return http.StatusNotFound, err.Error()
+	case errors.Is(err, ErrSoldOut):
+		return http.StatusConflict, err.Error()
+	case errors.Is(err, ErrUnknownDish):
+		return http.StatusBadRequest, err.Error()
+	}
+	return http.StatusInternalServerError, "伺服器發生錯誤"
+}
+
+func writeJSON(w http.ResponseWriter, status int, v any) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	w.Write(b) // 寫失敗通常是客戶端已經斷線，沒有什麼能做的
+	return nil
+}</code></pre>
+    <pre class="code" data-src="chapters/26-http/api.go#api.createOrder,api.getOrder"><code>func (a *api) createOrder(w http.ResponseWriter, r *http.Request) error {
+	var in struct {
+		Dish string `json:"dish"`
+		Qty  int    `json:"qty"`
+	}
+	if err := decodeJSON(w, r, &amp;in); err != nil {
+		return err
+	}
+	if in.Qty &lt; 1 || in.Qty &gt; 20 {
+		return &amp;httpError{http.StatusBadRequest, "qty 要在 1 到 20 之間"}
+	}
+	o, err := a.shop.place(in.Dish, in.Qty)
+	if err != nil {
+		return err
+	}
+	w.Header().Set("Location", "/orders/"+strconv.Itoa(o.ID))
+	return writeJSON(w, http.StatusCreated, o)
+}
+
+func (a *api) getOrder(w http.ResponseWriter, r *http.Request) error {
+	id, err := strconv.Atoi(r.PathValue("id"))
+	if err != nil {
+		return &amp;httpError{http.StatusBadRequest, "訂單編號要是數字"}
+	}
+	o, err := a.shop.find(id)
+	if err != nil {
+		return err
+	}
+	return writeJSON(w, http.StatusOK, o)
+}</code></pre>
+    <pre class="out" data-example="chapters/26-http#Example_apiDemo"><code>GET /menu → 200
+[{"dish":"滷肉飯","price":50,"left":20},{"dish":"排骨飯","price":90,"left":5},{"dish":"雞腿飯","price":100,"left":0}]
+POST /orders → 201，Location: /orders/1
+{"id":1,"dish":"排骨飯","qty":2,"total":180}
+GET /orders/1 → 200
+{"id":1,"dish":"排骨飯","qty":2,"total":180}
+POST /orders → 409
+{"error":"排骨飯 賣完了，剩 3 份"}
+POST /orders → 409
+{"error":"雞腿飯 賣完了，剩 0 份"}
+GET /orders/99 → 404
+{"error":"找不到這筆訂單"}
+GET /orders/abc → 400
+{"error":"訂單編號要是數字"}</code></pre>
+    <ul class="notes">
+      <li>建立成功回 <strong>201</strong>，<code>Location</code> 標頭指向新的資源。查不到 404，狀態衝突（賣完了）409，輸入不合法 400，伺服器自己的問題 500。</li>
+      <li>writeJSON 先 Marshal 成 []byte，成功了才寫標頭和狀態碼。邊編碼邊寫的話，編到一半失敗時 200 已經送出去了。</li>
+      <li>500 的訊息故意很籠統。資料庫的錯誤訊息可能包含資料表名稱、SQL、主機名稱，這些都不該讓外面的人看到。</li>
+      <li>需要的東西（shop、logger）放在 api 的欄位裡，handler 是它的方法。不用全域變數，測試時每次建一個新的 api 就好。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="middleware">
+    <h2 id="middleware">5. middleware</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 204" role="img" aria-label="請求由外往內經過 logRequests、recoverPanic，到 ServeMux 和 handler；回應由內往外回來。recoverPanic 把 panic 變成 500，外面的 logRequests 因此記得到 500。如果順序反過來，panic 會穿過 logRequests，那個請求就不會被記錄">
+        <title>middleware 一層包一層</title>
+        <rect class="soft" x="16" y="16" width="448" height="140" rx="10"/>
+        <text class="sm mono" x="30" y="36">logRequests</text>
+        <rect class="soft" x="56" y="46" width="368" height="100" rx="10"/>
+        <text class="sm mono" x="70" y="66">recoverPanic</text>
+        <rect class="acc" x="96" y="76" width="288" height="60" rx="10"/>
+        <text class="sm mono" x="240" y="102" text-anchor="middle">ServeMux → handler</text>
+        <text class="sm" x="240" y="124" text-anchor="middle">panic</text>
+        <path class="wire" d="M240 166 V176"/>
+        <text class="sm" x="240" y="194" text-anchor="middle">請求由外往內，回應由內往外：外層看得到內層改過的結果</text>
+      </svg>
+      <figcaption>middleware 就是「收一個 Handler、回傳一個 Handler」的函式。順序有意義：logRequests 在 recoverPanic 外面，才記得到 panic 被改成的 500。</figcaption>
+    </figure>
+    <p>每個請求都要做的事（記錄、驗證身分、限流、加標頭）寫成 middleware，包在路由外面，handler 就不用每一個都寫一次。記錄每個請求需要知道 handler 寫了哪個狀態碼，但 ResponseWriter 沒有提供讀取的方法，所以包一層把它記下來：</p>
+    <pre class="code" data-src="chapters/26-http/middleware.go#statusWriter,statusWriter.WriteHeader,statusWriter.Write,statusWriter.Unwrap,logRequests"><code>type statusWriter struct {
+	http.ResponseWriter
+	status int
+	bytes  int
+}
+
+func (sw *statusWriter) WriteHeader(code int) {
+	if sw.status == 0 {
+		sw.status = code
+	}
+	sw.ResponseWriter.WriteHeader(code)
+}
+
+func (sw *statusWriter) Write(b []byte) (int, error) {
+	if sw.status == 0 {
+		sw.status = http.StatusOK // 沒有呼叫 WriteHeader 就直接 Write，等於 200
+	}
+	n, err := sw.ResponseWriter.Write(b)
+	sw.bytes += n
+	return n, err
+}
+
+func (sw *statusWriter) Unwrap() http.ResponseWriter {
+	return sw.ResponseWriter
+}
+
+func logRequests(logger *slog.Logger, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+		sw := &amp;statusWriter{ResponseWriter: w}
+		next.ServeHTTP(sw, r)
+		logger.InfoContext(r.Context(), "request",
+			"method", r.Method, "path", r.URL.Path, "pattern", r.Pattern,
+			"status", sw.status, "bytes", sw.bytes, "took", time.Since(start))
+	})
+}</code></pre>
+    <ul class="notes">
+      <li>嵌入 http.ResponseWriter，只覆寫要攔下來的方法（<a href="09-structs-methods.html#embed">09 章</a>）。</li>
+      <li>原本的 ResponseWriter 可能還有 Flush（串流回應）這類額外的功能，包一層之後型別斷言就找不到了。加上 <code>Unwrap</code> 方法，<code>http.NewResponseController(w).Flush()</code> 會一層一層往裡找。</li>
+      <li>r.Pattern 是 ServeMux 對到之後才填上的，所以在 next.ServeHTTP 之後讀。記錄 pattern（<code>GET /orders/{id}</code>）而不是實際的路徑，統計時才不會每個訂單編號都是不同的一類。</li>
+    </ul>
+    <p>handler panic 時，net/http 會記下 panic、直接切斷這個連線，客戶端只看到連線被關掉。recoverPanic 把它改成一般的 500：</p>
+    <pre class="code" data-src="chapters/26-http/middleware.go#recoverPanic,api.handler"><code>func recoverPanic(logger *slog.Logger, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer func() {
+			v := recover()
+			if v == nil {
+				return
+			}
+			if v == http.ErrAbortHandler {
+				panic(v) // 這是 handler 故意中止連線的訊號，交給 net/http 處理
+			}
+			logger.ErrorContext(r.Context(), "panic", "path", r.URL.Path, "value", v)
+			writeJSON(w, http.StatusInternalServerError, errorBody{Error: "伺服器發生錯誤"})
+		}()
+		next.ServeHTTP(w, r)
+	})
+}
+
+func (a *api) handler() http.Handler {
+	return logRequests(a.logger, recoverPanic(a.logger, a.routes()))
+}</code></pre>
+    <pre class="code" data-src="chapters/26-http/middleware.go#middlewareDemo"><code>func middlewareDemo() {
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &amp;slog.HandlerOptions{ReplaceAttr: dropVolatile}))
+	a := &amp;api{shop: newShop(), logger: logger}
+	mux := a.routes()
+	mux.HandleFunc("GET /oops", func(w http.ResponseWriter, r *http.Request) {
+		var m map[string]int
+		m["排骨飯"]++ // 寫入 nil map：panic
+	})
+	h := logRequests(logger, recoverPanic(logger, mux))
+
+	send(h, "GET", "/healthz", "")
+	send(h, "GET", "/orders/7", "")
+	send(h, "GET", "/oops", "")
+}</code></pre>
+    <pre class="out" data-example="chapters/26-http#Example_middlewareDemo"><code>level=INFO msg=request method=GET path=/healthz pattern="GET /healthz" status=200 bytes=3
+GET /healthz → 200
+ok
+level=INFO msg=request method=GET path=/orders/7 pattern="GET /orders/{id}" status=404 bytes=33
+GET /orders/7 → 404
+{"error":"找不到這筆訂單"}
+level=ERROR msg=panic path=/oops value="assignment to entry in nil map"
+level=INFO msg=request method=GET path=/oops pattern="GET /oops" status=500 bytes=33
+GET /oops → 500
+{"error":"伺服器發生錯誤"}</code></pre>
+    <ul class="notes">
+      <li>範例的 Logger 拿掉了時間和 took（耗時），輸出才會每次一樣（dropVolatile，和 <a href="25-logging.html#slog">25 章</a>的 dropTime 同樣的做法）。</li>
+      <li>recoverPanic 救得了 handler 的 goroutine，救不了 handler 自己開的 goroutine：那裡的 panic 一樣會讓整個程式結束。</li>
+      <li>panic 發生時如果 handler 已經寫了一部分的內容，就來不及改成 500 了。recover 是最後的防線，不是錯誤處理的方式。</li>
+      <li>給瀏覽器用的服務（用 cookie 登入的表單），Go 1.25 起標準庫有現成的 <code>http.NewCrossOriginProtection()</code>，它的 Handler 方法就是一個擋跨站請求偽造（CSRF）的 middleware。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="server">
+    <h2 id="server">6. http.Server 與逾時</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 190" role="img" aria-label="一個請求的時間軸：連線建立後讀標頭，ReadHeaderTimeout 管到讀完標頭；ReadTimeout 管到讀完內容；WriteTimeout 從讀完標頭管到寫完回應；回應寫完之後連線閒置，IdleTimeout 管閒置多久關掉">
+        <title>四個逾時管的範圍</title>
+        <path class="wire" d="M16 40 H464"/>
+        <text class="sm" x="16" y="28">連線</text>
+        <text class="sm" x="120" y="28" text-anchor="middle">讀標頭</text>
+        <text class="sm" x="220" y="28" text-anchor="middle">讀內容</text>
+        <text class="sm" x="310" y="28" text-anchor="middle">handler、寫回應</text>
+        <text class="sm" x="420" y="28" text-anchor="middle">閒置</text>
+        <path class="wire" d="M170 34 V46"/>
+        <path class="wire" d="M260 34 V46"/>
+        <path class="wire" d="M370 34 V46"/>
+        <rect class="acc" x="16" y="60" width="154" height="24" rx="4"/>
+        <text class="sm mono" x="93" y="77" text-anchor="middle">ReadHeaderTimeout</text>
+        <rect class="soft" x="16" y="92" width="244" height="24" rx="4"/>
+        <text class="sm mono" x="138" y="109" text-anchor="middle">ReadTimeout</text>
+        <rect class="soft" x="170" y="124" width="200" height="24" rx="4"/>
+        <text class="sm mono" x="270" y="141" text-anchor="middle">WriteTimeout</text>
+        <rect class="soft" x="370" y="156" width="94" height="24" rx="4"/>
+        <text class="sm mono" x="417" y="173" text-anchor="middle">IdleTimeout</text>
+      </svg>
+      <figcaption>零值的意思是「沒有逾時」。攻擊者只要開很多連線、每隔幾秒送一個位元組，就能讓沒有逾時的 server 耗盡資源。</figcaption>
+    </figure>
+    <p><code>http.ListenAndServe(":8080", h)</code> 很方便，但它用的 http.Server 每個逾時都是 0。正式的服務自己建立 http.Server，至少設 ReadHeaderTimeout：</p>
+    <pre class="code" data-src="chapters/26-http/main.go#newServer"><code>func newServer(addr string, h http.Handler, logger *slog.Logger) *http.Server {
+	return &amp;http.Server{
+		Addr:              addr,
+		Handler:           h,
+		ReadHeaderTimeout: 5 * time.Second,  // 讀完請求標頭的期限
+		ReadTimeout:       10 * time.Second, // 讀完整個請求（含 body）的期限
+		WriteTimeout:      15 * time.Second, // 從讀完標頭到寫完回應的期限
+		IdleTimeout:       60 * time.Second, // keep-alive 連線閒置多久就關掉
+		ErrorLog:          slog.NewLogLogger(logger.Handler(), slog.LevelError),
+	}
+}</code></pre>
+    <ul class="notes">
+      <li><strong>ReadHeaderTimeout</strong> 擋住「慢慢送標頭」的連線，是最重要的一個，幾秒就夠了。</li>
+      <li><strong>WriteTimeout</strong> 也限制了 handler 的執行時間。下載大檔案、串流這類需要很久的路由，可以在 handler 裡用 <code>http.NewResponseController(w).SetWriteDeadline</code> 單獨延長。</li>
+      <li>只想限制某些 handler 的執行時間，用 <code>http.TimeoutHandler(h, 時間, 訊息)</code> 包住它，逾時回 503。</li>
+      <li><code>ErrorLog</code> 是 net/http 自己記錄問題（例如 panic、TLS 握手失敗）用的 *log.Logger。<code>slog.NewLogLogger</code> 讓它也寫進同一個 slog Handler（<a href="25-logging.html">25 章</a>）。</li>
+      <li><code>MaxHeaderBytes</code> 限制標頭的大小，預設 1 MB；Go 1.27 起還有 <code>MaxHeaderValueCount</code> 限制標頭值的數量。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="shutdown">
+    <h2 id="shutdown">7. 優雅關機</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 186" role="img" aria-label="收到 Ctrl-C 或 SIGTERM 之後呼叫 Shutdown：先關掉 listener，不再接新的連線；閒置的連線馬上關掉；進行中的請求繼續做，做完才關；全部做完時 Shutdown 回傳 nil，超過期限則回傳錯誤。ListenAndServe 這時回傳 ErrServerClosed">
+        <title>Shutdown 的步驟</title>
+        <rect class="hot" x="16" y="14" width="140" height="40" rx="8"/>
+        <text class="sm" x="86" y="39" text-anchor="middle">Ctrl-C、SIGTERM</text>
+        <path class="wire" d="M156 34 H176"/>
+        <path class="tip" d="M188 34 L176 28 L176 40 Z"/>
+        <rect class="acc" x="188" y="14" width="120" height="40" rx="8"/>
+        <text class="sm mono" x="248" y="39" text-anchor="middle">Shutdown(ctx)</text>
+        <rect class="soft" x="16" y="74" width="448" height="30" rx="6"/>
+        <text class="sm" x="30" y="94">1. 關掉 listener：不再接新的連線</text>
+        <rect class="soft" x="16" y="110" width="448" height="30" rx="6"/>
+        <text class="sm" x="30" y="130">2. 閒置的連線馬上關掉</text>
+        <rect class="soft" x="16" y="146" width="448" height="30" rx="6"/>
+        <text class="sm" x="30" y="166">3. 進行中的請求做完才關；ctx 到期還沒做完就回傳錯誤</text>
+      </svg>
+      <figcaption>直接結束程式的話，正在做的請求會被切斷：客人付了錢卻沒拿到訂單編號。部署新版本、容器被搬家時，都會收到 SIGTERM。</figcaption>
+    </figure>
+    <p>main 用 <a href="21-cli.html#signal">21 章</a>的 signal.NotifyContext 等關機訊號，run 在另一個 goroutine 跑 ListenAndServe，收到訊號後呼叫 Shutdown：</p>
+    <pre class="code" data-src="chapters/26-http/main.go#main,run"><code>func main() {
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	a := &amp;api{shop: newShop(), logger: logger}
+	srv := newServer(":8080", a.handler(), logger)
+	logger.Info("開始營業", "addr", srv.Addr)
+	if err := run(ctx, srv, logger); err != nil {
+		logger.Error("server 停止", "err", err)
+		os.Exit(1)
+	}
+	logger.Info("打烊")
+}
+
+func run(ctx context.Context, srv *http.Server, logger *slog.Logger) error {
+	errc := make(chan error, 1)
+	go func() { errc &lt;- srv.ListenAndServe() }()
+
+	select {
+	case err := &lt;-errc:
+		return err // 還沒收到關機訊號就停了，例如 port 已經被佔用
+	case &lt;-ctx.Done():
+	}
+
+	logger.Info("關機中，等進行中的請求做完")
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		return err // 10 秒內沒做完
+	}
+	if err := &lt;-errc; !errors.Is(err, http.ErrServerClosed) {
+		return err
+	}
+	return nil
+}</code></pre>
+    <ul class="notes">
+      <li>ListenAndServe 在 Shutdown 之後回傳 <code>http.ErrServerClosed</code>，這是正常結束，不是錯誤。</li>
+      <li>Shutdown 的 ctx 決定最多等多久。容器平台通常在 SIGTERM 之後等一段時間（常見是 30 秒）才強制結束，期限要比它短。</li>
+      <li>Shutdown 不會取消 handler 的 r.Context()。handler 裡有很長的工作時，可以用 <code>BaseContext</code> 欄位給所有請求一個共同的父 context，關機時自己取消它。</li>
+      <li>port 被佔用時 ListenAndServe 會立刻回傳錯誤，run 的 select 讓這種情況直接回傳，不會一直等關機訊號。</li>
+    </ul>
+    <p>Shutdown 真的會等進行中的請求嗎？這可以測試。下一節的 NewTestServer 搭配 <a href="22-time.html">22 章</a>的 synctest，「做 3 秒的便當」不用真的等 3 秒：</p>
+    <pre class="code" data-src="chapters/26-http/main_test.go#TestShutdownWaits"><code>func TestShutdownWaits(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		started := make(chan struct{})
+		slow := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			close(started)
+			time.Sleep(3 * time.Second) // 正在做便當
+			io.WriteString(w, "便當好了")
+		})
+		srv := httptest.NewTestServer(t, slow)
+		client := srv.Client()
+
+		got := make(chan string)
+		go func() {
+			res, err := client.Get("http://shop.test/")
+			if err != nil {
+				got &lt;- "錯誤：" + err.Error()
+				return
+			}
+			defer res.Body.Close()
+			b, _ := io.ReadAll(res.Body)
+			got &lt;- string(b)
+		}()
+
+		&lt;-started
+		start := time.Now()
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if err := srv.Config.Shutdown(ctx); err != nil {
+			t.Fatalf("Shutdown：%v", err)
+		}
+		if waited := time.Since(start); waited &lt; 3*time.Second {
+			t.Errorf("Shutdown 只等了 %v，進行中的請求還沒做完", waited)
+		}
+		if body := &lt;-got; body != "便當好了" {
+			t.Errorf("客戶端拿到 %q，want 便當好了", body)
+		}
+	})
+}</code></pre>
+  </section>
+
+  <section aria-labelledby="testing">
+    <h2 id="testing">8. 測試</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 480 200" role="img" aria-label="兩種測試方式。httptest.NewRecorder：測試直接呼叫 handler 的 ServeHTTP，沒有網路，最快。httptest.NewTestServer：真的 http.Client 透過記憶體裡的網路連到真的 http.Server，會經過連線、標頭解析、逾時這些真實的步驟，也不用開 port">
+        <title>兩種 httptest</title>
+        <text class="sm bold" x="120" y="22" text-anchor="middle">NewRecorder</text>
+        <text class="sm bold" x="360" y="22" text-anchor="middle">NewTestServer（Go 1.27）</text>
+        <rect class="soft" x="40" y="36" width="160" height="34" rx="8"/>
+        <text class="sm" x="120" y="58" text-anchor="middle">測試</text>
+        <path class="wire" d="M120 70 V86"/>
+        <path class="tip" d="M120 98 L114 86 L126 86 Z"/>
+        <text class="sm mono" x="180" y="88">ServeHTTP</text>
+        <rect class="acc" x="40" y="98" width="160" height="34" rx="8"/>
+        <text class="sm" x="120" y="120" text-anchor="middle">handler</text>
+        <text class="sm" x="120" y="160" text-anchor="middle">沒有網路、沒有 server</text>
+        <text class="sm" x="120" y="182" text-anchor="middle">最快，測 handler 的邏輯</text>
+        <rect class="soft" x="280" y="36" width="160" height="34" rx="8"/>
+        <text class="sm mono" x="360" y="58" text-anchor="middle">srv.Client()</text>
+        <path class="wire dash" d="M360 70 V86"/>
+        <path class="tip" d="M360 98 L354 86 L366 86 Z"/>
+        <text class="sm" x="372" y="88">記憶體裡的網路</text>
+        <rect class="acc" x="280" y="98" width="160" height="34" rx="8"/>
+        <text class="sm mono" x="360" y="120" text-anchor="middle">http.Server</text>
+        <text class="sm" x="360" y="160" text-anchor="middle">真的 HTTP，不用開 port</text>
+        <text class="sm" x="360" y="182" text-anchor="middle">測整個服務、逾時、關機</text>
+      </svg>
+      <figcaption>大部分的測試用 Recorder；要測到 server 本身的行為（middleware 組合、逾時、關機、client 的行為）時用 NewTestServer。</figcaption>
+    </figure>
+    <p><code>httptest.NewRequest</code> 建一個假的請求，<code>httptest.NewRecorder</code> 是一個把回應存起來的 ResponseWriter。把兩個交給 handler 的 ServeHTTP，就能檢查狀態碼、標頭和內容。本章所有的示範都透過這個小工具：</p>
+    <pre class="code" data-src="chapters/26-http/handler.go#send,sendAs"><code>func send(h http.Handler, method, target, body string, headers ...string) {
+	contentType := ""
+	if body != "" {
+		contentType = "application/json"
+	}
+	sendAs(h, contentType, method, target, body, headers...)
+}
+
+func sendAs(h http.Handler, contentType, method, target, body string, headers ...string) {
+	req := httptest.NewRequest(method, target, strings.NewReader(body))
+	if contentType != "" {
+		req.Header.Set("Content-Type", contentType)
+	}
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	res := rec.Result() // 標頭是第一次寫出內容時的樣子，和真的 server 送出去的一樣
+	fmt.Printf("%s %s → %d", method, target, res.StatusCode)
+	for _, k := range headers {
+		if v := res.Header.Get(k); v != "" {
+			fmt.Printf("，%s: %s", k, v)
+		}
+	}
+	fmt.Println()
+	if b, _ := io.ReadAll(res.Body); len(b) &gt; 0 {
+		fmt.Println(strings.TrimRight(string(b), "\n"))
+	}
+}</code></pre>
+    <ul class="notes">
+      <li>用 <code>rec.Result()</code> 取得回應，不要直接讀 rec.Header()：後者是 handler 一直在改的那個 map，連 Write 之後才設的標頭都看得到，和客戶端實際收到的不一樣（第 1 節的 lateHeader 就會被誤判成對的）。</li>
+      <li>Recorder 不經過 http.Server，所以 server 的逾時、MaxBytesReader 讀超過上限後關掉連線這類行為測不到。</li>
+    </ul>
+    <p>Go 1.27 加入了 <code>httptest.NewTestServer(t, handler)</code>：一個真的 http.Server，但網路在記憶體裡，不用開 port，也不會碰到 port 被佔用這類問題。測試結束時它會自動關掉，handler panic 會讓測試失敗：</p>
+    <pre class="code" data-src="chapters/26-http/main_test.go#TestEndToEnd"><code>func TestEndToEnd(t *testing.T) {
+	a := &amp;api{shop: newShop(), logger: slog.New(slog.DiscardHandler)}
+	srv := httptest.NewTestServer(t, a.handler())
+	client := srv.Client() // 一定要用這個 client，它才會把請求送到記憶體裡的 server
+
+	res, err := client.Post("http://shop.test/orders", "application/json", strings.NewReader(`{"dish":"滷肉飯","qty":3}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	loc := res.Header.Get("Location")
+	if res.StatusCode != http.StatusCreated || loc != "/orders/1" {
+		t.Fatalf("POST /orders = %d，Location %q；want 201、/orders/1", res.StatusCode, loc)
+	}
+
+	res, err = client.Get("http://shop.test" + loc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	var got Order
+	if err := json.UnmarshalRead(res.Body, &amp;got); err != nil {
+		t.Fatal(err)
+	}
+	if want := (Order{ID: 1, Dish: "滷肉飯", Qty: 3, Total: 150}); got != want {
+		t.Errorf("GET %s = %+v，want %+v", loc, got, want)
+	}
+}</code></pre>
+    <ul class="notes">
+      <li>一定要用 <code>srv.Client()</code>。它會把所有的請求送到記憶體裡的 server，不管網址的主機名稱寫什麼。用 http.Get 或 http.DefaultClient 的話，請求會真的送上網路。</li>
+      <li>舊的寫法 <code>httptest.NewServer</code> 會在本機開一個真的 port，測試結束時要自己 Close。</li>
+      <li>handler 會被同時呼叫，所以也要測並發：本章的 TestConcurrentOrders 讓 20 個人同時搶 5 份排骨飯，用 -race 跑，確認剛好 5 個成功。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="pitfalls">
+    <h2 id="pitfalls">常見錯誤</h2>
+    <h3 id="pit-no-return">1. http.Error 之後沒有 return</h3>
+    <p>http.Error 只是寫出回應，不會結束函式。下面的程式照樣執行：資料被改了，錯誤訊息後面還接著成功的內容（練習 6）。</p>
+
+    <h3 id="pit-header-order">2. 寫了內容才設標頭和狀態碼</h3>
+    <p>第一次 Write 時標頭和狀態碼就送出了，之後的設定沒有效果，也不會報錯。順序是標頭、狀態碼、內容（第 1 節）。</p>
+
+    <h3 id="pit-no-timeout">3. 用 http.ListenAndServe 上線</h3>
+    <p>它沒有任何逾時，慢速的連線可以把 server 拖垮。自己建立 http.Server，至少設 ReadHeaderTimeout（第 6 節）。</p>
+
+    <h3 id="pit-shared-state">4. handler 之間共用的資料沒有保護</h3>
+    <p>每個請求在不同的 goroutine 裡，共用的 map、計數器要用 Mutex 或 atomic。用 -race 跑並發的測試（第 1、8 節）。</p>
+
+    <h3 id="pit-body">5. 沒有限制 body 的大小，也沒有拒絕不認得的欄位</h3>
+    <p>一個很大的請求就能吃光記憶體；拼錯的欄位被默默當成零值。用 MaxBytesReader 和 RejectUnknownMembers（第 3 節）。</p>
+
+    <h3 id="pit-leak">6. 把內部錯誤的訊息回給客戶端</h3>
+    <p>資料庫的錯誤可能包含 SQL、資料表、主機名稱。500 只回籠統的訊息，細節記在 log（第 4 節）。</p>
+
+    <h3 id="pit-unwrap">7. 包裝 ResponseWriter 卻沒有 Unwrap</h3>
+    <p>包一層之後，Flush 這類額外的功能就找不到了，串流的回應會卡在緩衝區。加上 Unwrap，並用 http.NewResponseController 呼叫這些功能（第 5 節）。</p>
+
+    <h3 id="pit-test-client">8. 測 NewTestServer 時用 http.Get</h3>
+    <p>預設的 client 不知道記憶體裡的網路，請求會真的送到網路上。一律用 srv.Client()（第 8 節）。</p>
   </section>
 
   <section aria-labelledby="java">
     <h2 id="java">從 Java 來的你</h2>
     <div class="table-wrap">
       <table class="vs">
-        <thead><tr><th scope="col">主題</th><th scope="col">Java</th><th scope="col">Go</th></tr></thead>
+        <thead><tr><th scope="col">主題</th><th scope="col">Java（Spring MVC）</th><th scope="col">Go</th></tr></thead>
         <tbody>
-          <tr><th scope="row">框架</th><td class="java">Spring MVC、Spring Boot</td><td>標準庫 <code>net/http</code> 就能上線</td></tr>
-          <tr><th scope="row">路由</th><td class="java"><code>@GetMapping("/notes/{id}")</code></td><td><code>mux.HandleFunc("GET /notes/{id}", h)</code></td></tr>
-          <tr><th scope="row">路徑變數</th><td class="java"><code>@PathVariable</code></td><td><code>r.PathValue("id")</code></td></tr>
-          <tr><th scope="row">攔截器</th><td class="java"><code>Filter</code>、<code>HandlerInterceptor</code></td><td>middleware：包住 <code>http.Handler</code> 的函式</td></tr>
-          <tr><th scope="row">測試</th><td class="java"><code>MockMvc</code></td><td><code>httptest.NewRecorder</code></td></tr>
+          <tr><th scope="row">框架</th><td class="java">Spring Boot，內嵌 Tomcat</td><td>標準庫的 net/http 就能上線</td></tr>
+          <tr><th scope="row">路由</th><td class="java"><code>@GetMapping("/orders/{id}")</code></td><td><code>mux.HandleFunc("GET /orders/{id}", h)</code></td></tr>
+          <tr><th scope="row">路徑變數</th><td class="java"><code>@PathVariable</code></td><td><code>r.PathValue("id")</code>，自己轉型</td></tr>
+          <tr><th scope="row">請求內容</th><td class="java"><code>@RequestBody</code> 加 Bean Validation</td><td>自己解 JSON、自己檢查（第 3 節）</td></tr>
+          <tr><th scope="row">錯誤轉成回應</th><td class="java"><code>@ControllerAdvice</code>、<code>@ExceptionHandler</code></td><td>handler 回傳 error，集中在一個函式轉換（第 4 節）</td></tr>
+          <tr><th scope="row">攔截器</th><td class="java">Filter、HandlerInterceptor</td><td>middleware：包住 http.Handler 的函式</td></tr>
+          <tr><th scope="row">相依注入</th><td class="java"><code>@Autowired</code></td><td>放在 struct 的欄位，handler 是方法</td></tr>
+          <tr><th scope="row">優雅關機</th><td class="java"><code>server.shutdown=graceful</code></td><td><code>srv.Shutdown(ctx)</code></td></tr>
+          <tr><th scope="row">測試</th><td class="java">MockMvc、<code>@SpringBootTest</code></td><td>httptest.NewRecorder、NewTestServer</td></tr>
         </tbody>
       </table>
     </div>
+    <p>Spring 用 annotation 和容器把這些串起來，Go 把每一步都寫成看得到的程式碼。程式多了幾行，但從請求進來到回應出去的每一步都能直接追，沒有藏在框架裡的行為。</p>
+  </section>
+
+  <section aria-labelledby="exercises">
+    <h2 id="exercises">練習</h2>
+    <p>題目在 <code>exercises/26-http/exercises.go</code>，是一台排隊叫號機的 API。</p>
+    <pre class="shell"><code>go test ./exercises/26-http/                        <span class="c"># 跑全部練習</span>
+go test ./exercises/26-http/ -run TestRequireKey    <span class="c"># 只跑一題</span>
+go test -tags solution ./exercises/26-http/         <span class="c"># 跑參考解答</span></code></pre>
+    <ol class="exercises">
+      <li>
+        <h3><span class="level l1">入門</span>練習 1：查詢字串的整數</h3>
+        <p>分頁的 limit、page 這類參數，都要有預設值和範圍。</p>
+        <pre class="code" data-src="exercises/26-http/exercises.go#QueryInt"><code>func QueryInt(r *http.Request, name string, def, min, max int) (int, error) {
+	// TODO: 實作
+	return 0, nil
+}</code></pre>
+        <p>測試：<code>TestQueryInt</code>。</p>
+        <details><summary>提示</summary><p><code>r.URL.Query().Get(name)</code> 拿到字串，空字串就回傳預設值；<code>strconv.Atoi</code> 失敗和超出範圍用同一個錯誤訊息就好。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l2">進階</span>練習 2：員工金鑰</h3>
+        <p>叫號、改設定這些操作只給店員用。</p>
+        <pre class="code" data-src="exercises/26-http/exercises.go#RequireKey"><code>func RequireKey(key string, next http.Handler) http.Handler {
+	// TODO: 實作
+	return next
+}</code></pre>
+        <p>測試：<code>TestRequireKey</code>。</p>
+        <details><summary>提示</summary><p><code>crypto/subtle.ConstantTimeCompare</code> 比較兩個 []byte，相等回傳 1。用 == 比字串的話，第一個不同的位元組就會提早結束，回應的時間會透露猜對了幾個字。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l2">進階</span>練習 3：request id</h3>
+        <p>每個請求一個 id，寫在回應的標頭裡，也讓 handler 拿得到。</p>
+        <pre class="code" data-src="exercises/26-http/exercises.go#RequestID,FromContext"><code>func RequestID(next http.Handler) http.Handler {
+	// TODO: 實作
+	return next
+}
+
+func FromContext(ctx context.Context) string {
+	// TODO: 實作
+	return ""
+}</code></pre>
+        <p>測試：<code>TestRequestID</code>。</p>
+        <details><summary>提示</summary><p>格式用 <a href="24-text.html#regexp">24 章</a>的正規表示式檢查（記得 ^ 和 $），新的 id 用 <a href="23-json.html#custom">23 章</a>的 <code>uuid.NewV7().String()</code>。放進 context 的方法和 <a href="25-logging.html#handler">25 章</a>一樣，然後用 <code>r.WithContext(ctx)</code> 產生帶著它的請求交給 next。標頭要在呼叫 next 之前設。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l2">進階</span>練習 4：同時處理的上限</h3>
+        <p>尖峰時段，寧可請一部分人稍後再試，也不要所有人一起等到逾時。</p>
+        <pre class="code" data-src="exercises/26-http/exercises.go#MaxInFlight"><code>func MaxInFlight(n int, next http.Handler) http.Handler {
+	// TODO: 實作
+	return next
+}</code></pre>
+        <p>測試：<code>TestMaxInFlight</code>，用 synctest 確認第 3 個請求沒有在等。</p>
+        <details><summary>提示</summary><p><a href="19-concurrency-patterns.html">19 章</a>的 semaphore：容量 n 的 channel，放得進去才能執行，做完再拿出來。channel 要在 MaxInFlight 裡建立一次，不是每個請求建一個。用 select 加 default，放不進去就立刻回 503。</p></details>
+      </li>
+      <li>
+        <h3><span class="level l3">挑戰</span>練習 5：叫號機的 API</h3>
+        <p>Queue 已經寫好在 doc.go，你只要寫 HTTP 這一層。</p>
+        <pre class="code" data-src="exercises/26-http/doc.go#Queue,Queue.Take,Queue.Position,Queue.Call"><code>type Queue struct {
+	mu      sync.Mutex
+	last    int   // 最後發出去的號碼
+	waiting []int // 還在等的號碼，依照順序
+}
+
+func (q *Queue) Take() (number, ahead int) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	q.last++
+	q.waiting = append(q.waiting, q.last)
+	return q.last, len(q.waiting) - 1
+}
+
+func (q *Queue) Position(number int) (ahead int, ok bool) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	i := slices.Index(q.waiting, number)
+	return i, i &gt;= 0
+}
+
+func (q *Queue) Call() (number int, ok bool) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if len(q.waiting) == 0 {
+		return 0, false
+	}
+	number = q.waiting[0]
+	q.waiting = q.waiting[1:]
+	return number, true
+}</code></pre>
+        <pre class="code" data-src="exercises/26-http/exercises.go#NewServer"><code>func NewServer(q *Queue) http.Handler {
+	// TODO: 實作
+	return http.NotFoundHandler()
+}</code></pre>
+        <p>測試：<code>TestNewServer</code>，用 NewTestServer 從頭到尾跑一次。</p>
+        <details><summary>提示</summary><p>寫一個 writeJSON（標頭、狀態碼、內容的順序）和 writeError，三個路由都用它們。204 只呼叫 WriteHeader，不寫內容。號碼用 strconv.Atoi 轉，再檢查是不是大於 0。</p></details>
+      </li>
+      <li>
+        <h3><span class="level fix">找錯</span>練習 6：改店名</h3>
+        <p>送了空的店名，回應是 400，店名卻還是被改掉了。</p>
+        <pre class="code" data-src="exercises/26-http/exercises.go#Settings.Rename"><code>func (s *Settings) Rename(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		Name string `json:"name"`
+	}
+	if err := json.UnmarshalRead(r.Body, &amp;in); err != nil || in.Name == "" {
+		http.Error(w, "需要 name", http.StatusBadRequest)
+	}
+	s.mu.Lock()
+	s.name = in.Name
+	s.mu.Unlock()
+	w.Header().Set("Content-Type", "application/json")
+	json.MarshalWrite(w, map[string]string{"name": in.Name})
+}</code></pre>
+        <p>測試：<code>TestRename</code>。</p>
+        <details><summary>提示</summary><p>常見錯誤 1。</p></details>
+      </li>
+    </ol>
+    <p><a href="https://github.com/xinqilin/GO-Playground/blob/main/exercises/26-http/solution.go">參考解答</a>：先自己寫完再看。測試通過的寫法都是對的。</p>
+  </section>
+
+  <section aria-labelledby="recap">
+    <h2 id="recap">重點回顧</h2>
+    <ul class="recap">
+      <li>Handler 只有 ServeHTTP 一個方法；函式用 HandlerFunc 轉型。每個請求在自己的 goroutine 裡執行。</li>
+      <li>回應的順序是標頭、狀態碼、內容；第一次 Write 之後就改不了。</li>
+      <li>ServeMux 的 pattern 有方法和路徑變數，最具體的贏；方法不對自動回 405。</li>
+      <li>請求的內容要檢查 Content-Type、限制大小、拒絕不認得的欄位，再檢查值。</li>
+      <li>handler 回傳 error，由一個地方轉成狀態碼和一致的 JSON；500 不外洩細節。</li>
+      <li>middleware 是 Handler 包 Handler，順序有意義；包裝 ResponseWriter 要加 Unwrap。</li>
+      <li>正式的服務自己建立 http.Server，設好逾時。</li>
+      <li>收到關機訊號時呼叫 Shutdown，等進行中的請求做完；ErrServerClosed 是正常結束。</li>
+      <li>handler 的邏輯用 NewRecorder 測，整個服務用 NewTestServer 和 srv.Client() 測，並發的部分用 -race。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="further">
+    <h2 id="further">延伸閱讀</h2>
+    <ul class="notes">
+      <li>套件文件：<a href="https://pkg.go.dev/net/http">net/http</a>（ServeMux 一段有完整的 pattern 規則）、<a href="https://pkg.go.dev/net/http/httptest">net/http/httptest</a>。</li>
+      <li>Go 官方部落格：<a href="https://go.dev/blog/routing-enhancements">Routing Enhancements for Go 1.22</a>。</li>
+      <li>版本說明：<a href="https://go.dev/doc/go1.27#nethttphttptestpkgnethttphttptest">Go 1.27 的 httptest.NewTestServer</a>、<a href="https://go.dev/doc/go1.25#nethttppkgnethttp">Go 1.25 的 CrossOriginProtection</a>。</li>
+    </ul>
   </section>
 
   <section aria-labelledby="run">
     <h2 id="run">動手跑</h2>
     <p class="label">在 repo 根目錄啟動，再開另一個終端機</p>
-    <pre class="shell"><code>go run ./chapters/26-http
-
-curl localhost:8080/hello/Gopher
-curl -X POST -d '{"text":"買牛奶"}' localhost:8080/notes
-curl localhost:8080/notes/1
-go test ./chapters/26-http   <span class="c"># 用 httptest，不用開 server</span></code></pre>
-    <p class="label">對應的回應（由測試比對）</p>
-    <pre class="out"><code>200 哈囉，Gopher
-201 {"id":1,"text":"買牛奶"}
-200 {"id":1,"text":"買牛奶"}
-404 404 page not found
-405 Method Not Allowed</code></pre>
-    <p><a href="https://github.com/xinqilin/GO-Playground/tree/main/chapters/26-http">在 GitHub 看完整程式碼</a></p>
+    <pre class="shell"><code>go run ./chapters/26-http                <span class="c"># 在 :8080 開始營業，Ctrl-C 優雅關機</span>
+curl localhost:8080/menu
+curl -i -X POST -H 'Content-Type: application/json' -d '{"dish":"排骨飯","qty":2}' localhost:8080/orders
+curl localhost:8080/orders/1
+go test ./chapters/26-http               <span class="c"># 驗證頁面上的輸出和端對端測試</span>
+go test ./exercises/26-http/             <span class="c"># 做練習</span></code></pre>
+    <p><a href="https://github.com/xinqilin/GO-Playground/tree/main/chapters/26-http">在 GitHub 看本章完整程式碼</a>，或看<a href="https://github.com/xinqilin/GO-Playground/tree/main/exercises/26-http">練習題</a>。專題<a href="project-todoapi.html">待辦事項 API</a> 是另一個完整的例子。</p>
   </section>
 </main>
 

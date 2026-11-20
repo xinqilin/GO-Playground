@@ -695,7 +695,7 @@ func linesDemo() {
     <ul class="notes">
       <li>值和值之間的空白、空行都會被略過。讀到結尾時回傳 <code>io.EOF</code>，用 errors.Is 判斷。</li>
       <li>錯誤加上「第幾筆」：JSON Pointer 只知道是那一筆裡的哪個欄位，不知道是第幾筆。</li>
-      <li>HTTP 的 request body 也是 io.Reader，<code>json.UnmarshalRead(r.Body, &amp;v)</code> 一行就能解一個值（「HTTP 伺服器」那一章會用到）。</li>
+      <li>HTTP 的 request body 也是 io.Reader，<code>json.UnmarshalRead(r.Body, &amp;v)</code> 一行就能解一個值（「<a href="26-http.html">HTTP 服務</a>」那一章會用到）。</li>
     </ul>
     <p>另一種大檔案是一個很大的 JSON 陣列。用 <code>ReadToken</code> 先讀掉開頭的 <code>[</code>，再用 <code>PeekKind</code> 偷看下一個是不是 <code>]</code>，不是的話就解一個元素：</p>
     <pre class="code" data-src="chapters/23-json/stream.go#countExpensive,arrayDemo"><code>func countExpensive(r io.Reader, limit int) (int, error) {
