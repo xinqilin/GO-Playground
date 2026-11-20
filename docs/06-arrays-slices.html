@@ -562,7 +562,7 @@ func passSlice() {
     <ul class="notes">
       <li><strong>判斷是否為空</strong>：用 <code>len(s) == 0</code>，不要用 <code>s == nil</code>，這樣兩種情況都涵蓋得到。</li>
       <li><strong>宣告</strong>：慣用 <code>var s []int</code>，不需要先建立空 slice。</li>
-      <li><strong>函式回傳</strong>：沒有結果時回傳 nil 即可，呼叫端用 len 判斷。少數情況下差別很重要，例如轉成 JSON 時，nil slice 是 <code>null</code>、空 slice 是 <code>[]</code>，之後的「JSON 與資料編碼」那一章會再談。</li>
+      <li><strong>函式回傳</strong>：沒有結果時回傳 nil 即可，呼叫端用 len 判斷。少數情況下差別很重要，例如用 encoding/json（v1）轉成 JSON 時，nil slice 是 <code>null</code>、空 slice 是 <code>[]</code>；新的 encoding/json/v2 兩種都是 <code>[]</code>，見「<a href="23-json.html">JSON 與資料編碼</a>」那一章。</li>
     </ul>
   </section>
 

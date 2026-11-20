@@ -762,7 +762,7 @@ phone,omitempty</code></pre>
       <li><code>json:"phone,omitempty"</code>：逗號後面是選項，<code>omitempty</code> 表示值是空的就整個省略，所以輸出裡沒有 phone。</li>
       <li><code>note</code> 是小寫開頭的未匯出欄位，encoding/json 在另一個 package，看不到它，所以也不會輸出。想輸出一定要大寫開頭，tag 救不了小寫的欄位。</li>
     </ul>
-    <p>tag 的格式是用空白隔開的 <code>key:"value"</code>，例如 <code>json:"name" db:"member_name"</code>。冒號兩邊不能有空白、值一定要雙引號，寫錯不會編譯失敗，只會默默地沒有作用；還好 <code>go vet</code> 會檢查常見的格式錯誤。讀取 tag 用的是 reflect 套件，自己的程式很少需要；JSON 的完整用法留到「JSON 與資料編碼」那一章。</p>
+    <p>tag 的格式是用空白隔開的 <code>key:"value"</code>，例如 <code>json:"name" db:"member_name"</code>。冒號兩邊不能有空白、值一定要雙引號，寫錯不會編譯失敗，只會默默地沒有作用；還好 <code>go vet</code> 會檢查常見的格式錯誤。讀取 tag 用的是 reflect 套件，自己的程式很少需要；JSON 的完整用法留到「<a href="23-json.html">JSON 與資料編碼</a>」那一章。</p>
   </section>
 
   <section aria-labelledby="pitfalls">
