@@ -14,6 +14,7 @@
 package main
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -32,6 +33,9 @@ func run(args []string, out io.Writer) error {
 	n := fs.Int("n", 10, "要算第幾項（0 以上）")
 	list := fs.Int("list", 0, fmt.Sprintf("改成列出前幾項（1 到 %d）", maxN+1))
 	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return nil // -h：用法已經印出來了，不是錯誤
+		}
 		return err
 	}
 	if *list != 0 {

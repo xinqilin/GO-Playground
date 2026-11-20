@@ -99,6 +99,14 @@ func TestRunErrors(t *testing.T) {
 	}
 }
 
+// TestRunHelp：-h 只印用法，不算錯誤（main 不會再印「錯誤：」，exit code 是 0）。
+func TestRunHelp(t *testing.T) {
+	var out strings.Builder
+	if err := run([]string{"-h"}, &out); err != nil || !strings.Contains(out.String(), "-list") {
+		t.Errorf("run(-h) = %v，輸出\n%s想要 nil 和用法", err, out.String())
+	}
+}
+
 func Example_run() {
 	if err := run([]string{"-n", "30"}, os.Stdout); err != nil {
 		fmt.Println(err)
