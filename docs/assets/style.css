@@ -355,6 +355,13 @@ details > :last-child { margin-bottom: 0; }
   border-radius: 3px;
 }
 
+/* 術語表 */
+.glossary { margin: 0; }
+.glossary dt { margin-top: 20px; font-weight: 700; line-height: 1.5; scroll-margin-top: 16px; }
+.glossary dt:first-child { margin-top: 0; }
+.glossary dd { margin: 4px 0 0; line-height: 1.75; }
+.glossary .see { display: block; margin-top: 2px; font-size: 14px; color: var(--muted); }
+
 @media (max-width: 560px) {
   .toc-inline { padding: 14px 16px; }
   .deep { padding-inline: 12px; }
