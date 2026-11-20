@@ -431,7 +431,7 @@ func (c *Cache[K, V]) Keys() []K {
 }</code></pre>
     <ul class="notes">
       <li><strong>剛好 300ms</strong>：synctest 的假時間讓「十個人一起等、總共只花一次的時間」可以精確地驗證；用真的時間只能寫「小於 600ms」這種模糊的條件。</li>
-      <li><strong>還沒解決的兩件事</strong>：load 用的是第一個人的 ctx，他放棄的話，其他人也一起拿到取消的錯誤；載入期間有人呼叫 Delete（例如總店剛改價），載入完成時還是會把舊的價格存進去。<code>golang.org/x/sync/singleflight</code> 是常用的去重套件，但後面這個問題要靠快取自己處理（延伸挑戰 4）。</li>
+      <li><strong>還沒解決的兩件事</strong>：load 用的是第一個人的 ctx，他放棄的話，其他人也一起拿到取消的錯誤；載入期間有人呼叫 Set 或 Delete（例如總店剛改價），載入完成時還是會把載入到的舊價格存進去，蓋掉新的結果。<code>golang.org/x/sync/singleflight</code> 是常用的去重套件，但後面這個問題要靠快取自己處理（延伸挑戰 4）。</li>
     </ul>
   </section>
 
@@ -508,9 +508,9 @@ ok  	github.com/xinqilin/GO-Playground/projects/cache	5.389s</code></pre>
         <details><summary>提示</summary><p>用 time.Ticker 和 select（<a href="16-select.html">16 章</a>）。掃描時要拿鎖，一次掃完整個串列的時間和筆數成正比；筆數很多時可以一次只掃一部分。</p></details>
       </li>
       <li>
-        <h3><span class="level l2">進階</span>挑戰 4：載入期間的刪除</h3>
-        <p>先寫一個會失敗的測試：GetOrLoad 正在載入時呼叫 Delete，載入完成後 Get 應該找不到。再修改程式讓它通過。</p>
-        <details><summary>提示</summary><p>Delete 時如果這個 key 正在載入，在它的 call 上做個記號；載入完成時看到記號就不存。用 synctest.Wait 讓「載入中」這個時間點可以精確地控制。</p></details>
+        <h3><span class="level l2">進階</span>挑戰 4：載入期間的修改</h3>
+        <p>先寫兩個會失敗的測試：GetOrLoad 正在載入時呼叫 Delete，載入完成後 Get 應該找不到；正在載入時呼叫 Set，載入完成後 Get 應該拿到 Set 的值。再修改程式讓它們通過。</p>
+        <details><summary>提示</summary><p>Set 或 Delete 時如果這個 key 正在載入，在它的 call 上做個記號；載入完成時看到記號就不存。用 synctest.Wait 讓「載入中」這個時間點可以精確地控制。</p></details>
       </li>
       <li>
         <h3><span class="level l3">挑戰</span>挑戰 5：分片</h3>
