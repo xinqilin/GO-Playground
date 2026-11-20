@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Go 圖解手冊</title>
-<meta name="description" content="給工程師的 Go 入門手冊（繁體中文）：每一章先用大圖講懂觀念，再附上可以執行、有測試的程式碼，並對照 Java。">
+<meta name="description" content="繁體中文的 Go 手冊：先修 4 章給沒寫過程式的人，正文 34 章從基礎、型別、並行、標準庫到工程實務，再加 7 個專題。每一章都有圖解、可以執行而且有測試的程式、常見錯誤和有自動測試的練習。">
 <link rel="stylesheet" href="assets/style.css">
 </head>
 <body>
@@ -15,48 +15,78 @@
 
 <main class="page">
   <header class="cover">
-    <p class="eyebrow">繁體中文 · Go 1.27 · 25 章 + 4 個專題</p>
+    <p class="eyebrow">繁體中文 · Go 1.27 · 先修 4 章 + 正文 34 章 + 7 個專題</p>
     <h1>Go 圖解手冊</h1>
-    <p class="lede">每一章先用大圖把觀念講懂，再附上可以執行、有測試的程式碼，並對照 Java 的寫法。</p>
-    <a class="start" href="00-hello.html">從第 00 章開始 →</a>
+    <p class="lede">給想學 Go 的人：每一章先用圖講懂觀念，再一步一步看可以執行、有測試的程式，最後用有自動測試的練習確認自己真的會了。會 Java 的話，每章都有對照。</p>
+    <p><a class="start" href="00-hello.html">會其他程式語言：從第 00 章開始 →</a></p>
+    <p><a class="start" href="pre-1-running.html">從來沒寫過程式：從先修開始 →</a></p>
     <figure class="fig route">
-      <svg viewBox="0 0 480 110" role="img" aria-label="學習路線：開始 00，基礎 01 到 08，型別 09 到 13，並行 14 到 19，標準庫 20 到 28，實務 29 到 33，最後是專題">
+      <svg viewBox="0 0 480 180" role="img" aria-label="學習路線：沒寫過程式的人先讀先修 4 章，約 8 小時，再接到第 00 章。主線依序是開始 00、基礎 01 到 08、型別 09 到 13、並行 14 到 19、標準庫 20 到 28、實務 29 到 33，最後是專題 P1 到 P7，每一段下面標著讀完加做練習的粗估時數">
         <title>學習路線</title>
-        <path class="wire faint" d="M30 40 H450"/>
-        <circle class="acc" cx="30" cy="40" r="10"/>
-        <circle class="acc" cx="100" cy="40" r="10"/>
-        <circle class="acc" cx="170" cy="40" r="10"/>
-        <circle class="acc" cx="240" cy="40" r="10"/>
-        <circle class="acc" cx="310" cy="40" r="10"/>
-        <circle class="acc" cx="380" cy="40" r="10"/>
-        <circle class="hot" cx="450" cy="40" r="12"/>
-        <text class="small bold" x="30" y="76" text-anchor="middle">開始</text>
-        <text class="small bold" x="100" y="76" text-anchor="middle">基礎</text>
-        <text class="small bold" x="170" y="76" text-anchor="middle">型別</text>
-        <text class="small bold" x="240" y="76" text-anchor="middle">並行</text>
-        <text class="small bold" x="310" y="76" text-anchor="middle">標準庫</text>
-        <text class="small bold" x="380" y="76" text-anchor="middle">實務</text>
-        <text class="small bold t-hot" x="450" y="76" text-anchor="middle">專題</text>
-        <text class="sm mono" x="30" y="98" text-anchor="middle">00</text>
-        <text class="sm mono" x="100" y="98" text-anchor="middle">01–08</text>
-        <text class="sm mono" x="170" y="98" text-anchor="middle">09–13</text>
-        <text class="sm mono" x="240" y="98" text-anchor="middle">14–19</text>
-        <text class="sm mono" x="310" y="98" text-anchor="middle">20–28</text>
-        <text class="sm mono" x="380" y="98" text-anchor="middle">29–33</text>
-        <text class="sm mono" x="450" y="98" text-anchor="middle">P1–P4</text>
+        <path class="wire acc-ln dash" d="M40 38 V92"/>
+        <circle class="soft" cx="40" cy="28" r="9"/>
+        <text class="small bold" x="60" y="26">先修</text>
+        <text class="sm" x="60" y="44">沒寫過程式的人從這裡開始：pre-1–4，8 小時</text>
+        <path class="wire faint" d="M40 100 H440"/>
+        <circle class="acc" cx="40" cy="100" r="10"/>
+        <circle class="acc" cx="106" cy="100" r="10"/>
+        <circle class="acc" cx="172" cy="100" r="10"/>
+        <circle class="acc" cx="238" cy="100" r="10"/>
+        <circle class="acc" cx="304" cy="100" r="10"/>
+        <circle class="acc" cx="370" cy="100" r="10"/>
+        <circle class="hot" cx="440" cy="100" r="12"/>
+        <text class="small bold" x="40" y="134" text-anchor="middle">開始</text>
+        <text class="small bold" x="106" y="134" text-anchor="middle">基礎</text>
+        <text class="small bold" x="172" y="134" text-anchor="middle">型別</text>
+        <text class="small bold" x="238" y="134" text-anchor="middle">並行</text>
+        <text class="small bold" x="304" y="134" text-anchor="middle">標準庫</text>
+        <text class="small bold" x="370" y="134" text-anchor="middle">實務</text>
+        <text class="small bold t-hot" x="440" y="134" text-anchor="middle">專題</text>
+        <text class="sm mono" x="40" y="152" text-anchor="middle">00</text>
+        <text class="sm mono" x="106" y="152" text-anchor="middle">01–08</text>
+        <text class="sm mono" x="172" y="152" text-anchor="middle">09–13</text>
+        <text class="sm mono" x="238" y="152" text-anchor="middle">14–19</text>
+        <text class="sm mono" x="304" y="152" text-anchor="middle">20–28</text>
+        <text class="sm mono" x="370" y="152" text-anchor="middle">29–33</text>
+        <text class="sm mono" x="440" y="152" text-anchor="middle">P1–P7</text>
+        <text class="sm mute" x="40" y="172" text-anchor="middle">1 小時</text>
+        <text class="sm mute" x="106" y="172" text-anchor="middle">16 小時</text>
+        <text class="sm mute" x="172" y="172" text-anchor="middle">10 小時</text>
+        <text class="sm mute" x="238" y="172" text-anchor="middle">14 小時</text>
+        <text class="sm mute" x="304" y="172" text-anchor="middle">18 小時</text>
+        <text class="sm mute" x="370" y="172" text-anchor="middle">10 小時</text>
+        <text class="sm mute" x="440" y="172" text-anchor="middle">14 小時</text>
       </svg>
-      <figcaption>照順序讀最順；每一章也都能單獨讀。</figcaption>
+      <figcaption>照順序讀最順，每一章也都能單獨讀。時數是讀完加上做練習的粗估，每個人差很多，只當參考。</figcaption>
     </figure>
   </header>
 
   <section aria-labelledby="how">
     <h2 id="how">每一章怎麼讀</h2>
+    <p>每一章都是一篇長文，照同樣的順序排列。第一次讀可以先看圖、說明和輸出，程式碼的細節和「深入」留到第二次。</p>
     <ul class="notes">
-      <li><strong>看圖</strong>：大圖少字，先把觀念看懂。</li>
-      <li><strong>最小範例</strong>：可以直接執行的短程式，輸出是實際跑出來的結果。</li>
-      <li><strong>工程師筆記</strong>：實務上會踩的坑和慣例。</li>
-      <li><strong>從 Java 來的你</strong>：同一件事在 Java 和 Go 的寫法對照。</li>
-      <li><strong>動手跑</strong>：在 repo 裡執行的指令，以及完整程式碼的連結。</li>
+      <li><strong>本章內容、本章你會學到</strong>：先知道這一章要解決什麼問題；需要先讀哪幾章，這裡有連結。</li>
+      <li><strong>編號的小節</strong>：一節一個主題，先看圖，再看說明、程式碼和實際的輸出。頁面上的程式碼和輸出都由工具從 repo 裡有測試的程式產生，CI 會檢查兩邊一致，書上的程式一定跑得出書上的結果。</li>
+      <li><strong>深入</strong>：標著「深入：第一次讀可以先跳過」的虛線框，講原理和少見的情況。</li>
+      <li><strong>常見錯誤</strong>：錯誤和正確的寫法並排，說明為什麼錯。編譯不過的例子附上真的編譯錯誤訊息，在自己的電腦上看到時就認得出來。</li>
+      <li><strong>從 Java 來的你</strong>：同一件事在 Java 和 Go 的寫法對照。先修和沒有好對照的章節沒有這一段。</li>
+      <li><strong>練習、重點回顧、延伸閱讀</strong>：練習有自動測試（見下一段）；重點回顧是一份檢查清單；延伸閱讀只連到官方的語言規格、套件文件和 Go 部落格。</li>
+    </ul>
+    <p>專題的頁面則是走讀一個完整的程式：從需求、設計到測試，最後是沒有附測試的延伸挑戰，讓你自己動手改。</p>
+  </section>
+
+  <section aria-labelledby="practice">
+    <h2 id="practice">練習怎麼做</h2>
+    <p>每一章都有 5 到 7 題練習，全書共 243 題，題目在 <code>exercises/章節目錄/exercises.go</code>（28 章是獨立的 module，在 <code>chapters/28-database/exercises/</code>）。函式的名字和參數已經寫好；每一題都有測試，一開始全部失敗，寫對一題就通過一題。</p>
+    <pre class="shell"><code>go test ./exercises/03-control-flow/                       <span class="c"># 跑這一章的全部練習</span>
+go test ./exercises/03-control-flow/ -run TestTicketPrice  <span class="c"># 只跑一題</span>
+go test -tags solution ./exercises/03-control-flow/        <span class="c"># 跑參考解答</span></code></pre>
+    <ul class="notes">
+      <li><strong>難度</strong>：分成入門、進階、挑戰；另外還有「找錯」，程式已經寫好但有 bug，要找出來修好。</li>
+      <li><strong>卡住的時候</strong>：頁面上每一題都有可以點開的提示。還是寫不出來，再看同一個目錄的 solution.go；自己先寫過一次，對照解答時才看得出差在哪裡。</li>
+      <li><strong>測試就是規格</strong>：exercises_test.go 裡的每一個測試案例都是題目的一部分，題目看不懂時，讀測試最準。</li>
+      <li><strong>在根目錄跑 go test ./... 會失敗</strong>：因為練習還沒寫完，這是預期的。只想確認範例程式，用 <code>go test ./chapters/... ./projects/...</code>。</li>
+      <li><strong>專題</strong>：沒有附測試的練習，而是延伸挑戰：先寫測試描述你要的行為，再改程式。</li>
     </ul>
   </section>
 
@@ -65,10 +95,10 @@
     <h2 id="pre">從零開始</h2>
     <p>從來沒寫過程式的話，先讀這四章：從終端機和第一行程式開始，練到能用函式和清單解決小問題。已經會其他程式語言的話，可以直接從 00 開始。</p>
     <ul class="toc">
-      <li><a href="pre-1-running.html"><span class="n">P1</span><span class="t">程式怎麼跑起來</span><span class="d">終端機、編譯與執行、讀懂錯誤訊息</span></a></li>
-      <li><a href="pre-2-values.html"><span class="n">P2</span><span class="t">值、變數與運算</span><span class="d">型別、指定、整數除法、追蹤表</span></a></li>
-      <li><a href="pre-3-decisions.html"><span class="n">P3</span><span class="t">判斷與重複</span><span class="d">if、決策樹、for、計數器與累加器</span></a></li>
-      <li><a href="pre-4-problems.html"><span class="n">P4</span><span class="t">拆解問題：函式與清單</span><span class="d">函式、slice、四個基本演算法、除錯</span></a></li>
+      <li><a href="pre-1-running.html"><span class="n">先1</span><span class="t">程式怎麼跑起來</span><span class="d">終端機、編譯與執行、讀懂錯誤訊息</span></a></li>
+      <li><a href="pre-2-values.html"><span class="n">先2</span><span class="t">值、變數與運算</span><span class="d">型別、指定、整數除法、追蹤表</span></a></li>
+      <li><a href="pre-3-decisions.html"><span class="n">先3</span><span class="t">判斷與重複</span><span class="d">if、決策樹、for、計數器與累加器</span></a></li>
+      <li><a href="pre-4-problems.html"><span class="n">先4</span><span class="t">拆解問題：函式與清單</span><span class="d">函式、slice、四個基本演算法、除錯</span></a></li>
     </ul>
   </section>
 
