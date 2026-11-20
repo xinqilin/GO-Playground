@@ -41,6 +41,7 @@ const pageHTML = `<h2 id="top">示範</h2>
 <pre class="code" data-src="chapters/demo/demo.go#pair,pair.sum,large"><code></code></pre>
 <pre class="code"><code>沒有標記的區塊不會被動到</code></pre>
 <pre class="code" data-src="chapters/demo/demo_test.go"><code></code></pre>
+<pre class="code" data-src="chapters/demo/note.tmpl"><code></code></pre>
 <a href="#top">本頁</a> <a href="other.html#sec">別頁</a> <a href="https://go.dev/">外部</a>
 `
 
@@ -64,6 +65,7 @@ func setup(t *testing.T, page string) string {
 	files := map[string]string{
 		"chapters/demo/demo.go":      demoGo,
 		"chapters/demo/demo_test.go": demoTestGo,
+		"chapters/demo/note.tmpl":    "{{define \"x\"}}<b>{{.}}</b>{{end}}\n",
 		"docs/page.html":             page,
 		"docs/other.html":            `<h2 id="sec">別頁</h2>`,
 	}
@@ -104,6 +106,7 @@ func TestSyncFillsMarkedBlocks(t *testing.T) {
 		`data-src="chapters/demo/demo.go#pair,pair.sum,large"><code>` + wantPair + `</code></pre>`,
 		`<pre class="code"><code>沒有標記的區塊不會被動到</code></pre>`,
 		`data-src="chapters/demo/demo_test.go"><code>` + escapeHTML(strings.TrimRight(demoTestGo, "\n")) + `</code></pre>`,
+		`data-src="chapters/demo/note.tmpl"><code>{{define "x"}}&lt;b&gt;{{.}}&lt;/b&gt;{{end}}</code></pre>`,
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("page is missing:\n%s\n\npage:\n%s", want, got)
@@ -145,6 +148,7 @@ func TestReportsMissingSourcesAndBrokenLinks(t *testing.T) {
 <pre class="code" data-src="chapters/demo/demo.go#nope"><code></code></pre>
 <pre class="out" data-example="chapters/demo#Example_nope"><code></code></pre>
 <a href="#here">ok</a> <a href="#gone">壞</a> <a href="missing.html">壞</a> <a href="other.html#nope">壞</a>
+<pre class="out"><code>&lt;a href="{{.URL}}"&gt; &lt;a href="#ZgotmplZ"&gt; 是輸出，不是連結</code></pre>
 `
 	root := setup(t, page)
 	problems, err := run(root, true)

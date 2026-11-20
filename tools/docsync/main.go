@@ -151,18 +151,23 @@ func newSources(root string) *sources {
 	}
 }
 
-// code 依 data-src 取出原始碼：「檔案#名稱1,名稱2」取出這些宣告，之間空一行；只寫「檔案」就是整個檔案。
+// code 依 data-src 取出原始碼：「檔案#名稱1,名稱2」取出這些宣告，之間空一行；
+// 只寫「檔案」就是整個檔案，這時不解析，所以範本這類不是 Go 的檔案也可以。
 func (s *sources) code(ref string) (string, error) {
 	path, names, ok := strings.Cut(ref, "#")
 	if ok && names == "" {
 		return "", fmt.Errorf("data-src %q 的 # 後面要寫名稱", ref)
 	}
+	if !ok {
+		data, err := os.ReadFile(filepath.Join(s.root, filepath.FromSlash(path)))
+		if err != nil {
+			return "", err
+		}
+		return strings.TrimRight(string(data), "\n"), nil
+	}
 	pf, err := s.parse(path)
 	if err != nil {
 		return "", err
-	}
-	if !ok {
-		return strings.TrimRight(string(pf.src), "\n"), nil
 	}
 	var parts []string
 	for _, name := range strings.Split(names, ",") {
@@ -302,6 +307,7 @@ var (
 )
 
 // checkLinks 檢查每個相對連結：檔案要存在，指到 HTML 的 #anchor 也要存在。
+// pre 區塊裡的 href 是程式碼或輸出的一部分，不是連結，不檢查。
 func checkLinks(docs string, pages []string) ([]string, error) {
 	ids := map[string]map[string]bool{}
 	idsOf := func(name string) (map[string]bool, error) {
@@ -327,7 +333,7 @@ func checkLinks(docs string, pages []string) ([]string, error) {
 			return nil, err
 		}
 		base := filepath.Base(page)
-		for _, m := range hrefRE.FindAllStringSubmatch(string(data), -1) {
+		for _, m := range hrefRE.FindAllStringSubmatch(blockRE.ReplaceAllString(string(data), ""), -1) {
 			href := m[1]
 			if strings.Contains(href, ":") {
 				continue // https:、mailto: 之類的外部連結不檢查
